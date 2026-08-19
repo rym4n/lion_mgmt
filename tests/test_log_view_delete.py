@@ -228,3 +228,32 @@ def test_delete_status_endpoint_checks_ownership_and_returns_completion(monkeypa
         "code": 0,
         "data": {"task_id": "12345", "active": False, "status": "completed"},
     }
+
+
+def test_delete_vlog_forwards_custom_time_filter(monkeypatch):
+    calls = []
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://victoria-logs/delete/run_task"),
+        json={"task_id": "77"},
+    )
+    monkeypatch.setattr(
+        utils.httpx,
+        "AsyncClient",
+        lambda **_kwargs: _FakeHttpClient(response, calls),
+    )
+
+    result = asyncio.run(
+        utils.delete_vlog(project_id=13, log_filter="_time:<2026-08-12T00:00:00Z")
+    )
+
+    assert result == {"task_id": "77"}
+    assert calls == [
+        (
+            f"{utils.VL_HOST}/delete/run_task",
+            {
+                "headers": {"AccountID": "0", "ProjectID": "13"},
+                "params": {"filter": "_time:<2026-08-12T00:00:00Z"},
+            },
+        )
+    ]

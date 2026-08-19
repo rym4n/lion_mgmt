@@ -484,8 +484,13 @@ async def query_vlog(query, project_id, start=None, end=None, account_id=0, limi
             return None
 
 
-async def delete_vlog(project_id, account_id=0):
-    """Start an asynchronous VictoriaLogs task deleting one log project."""
+async def delete_vlog(project_id, account_id=0, log_filter="*"):
+    """Start an asynchronous VictoriaLogs task deleting logs of one project.
+
+    log_filter: LogsQL 过滤表达式。默认 "*" 删该 project 全量；按留存期清理时
+                传形如 "_time:<2026-08-12T00:00:00Z" 的表达式（VictoriaLogs
+                v1.51.0 实测支持）。
+    """
     header = {
         "AccountID": str(account_id),
         "ProjectID": str(project_id),
@@ -496,7 +501,7 @@ async def delete_vlog(project_id, account_id=0):
             resp = await client.post(
                 f"{VL_HOST}/delete/run_task",
                 headers=header,
-                params={"filter": "*"},
+                params={"filter": log_filter},
             )
             resp.raise_for_status()
             result = orjson.loads(resp.content)
