@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from libs.error_code.exception import CustomError
+from core.error_code import ErrorCode
 from services.user import views as user_views
 
 
@@ -141,3 +142,36 @@ async def test_mfa_reset_checks_admin_protection_before_write(monkeypatch):
         await inspect.unwrap(user_views.refresh_mfa_key)(request)
 
     assert target.saved == 0
+
+
+def test_tenant_creator_cannot_drop_admin_role():
+    with pytest.raises(CustomError) as exc_info:
+        user_views._validate_tenant_admin_role_removal(
+            creator_id="creator",
+            account_id="creator",
+            target_is_admin=True,
+            admin_count=2,
+        )
+
+    assert exc_info.value.enum == ErrorCode.TENANT_CREATOR_MUST_REMAIN_ADMIN
+
+
+def test_last_tenant_admin_cannot_drop_admin_role():
+    with pytest.raises(CustomError) as exc_info:
+        user_views._validate_tenant_admin_role_removal(
+            creator_id="creator",
+            account_id="other-admin",
+            target_is_admin=True,
+            admin_count=1,
+        )
+
+    assert exc_info.value.enum == ErrorCode.TENANT_MUST_HAVE_ADMIN
+
+
+def test_non_admin_role_removal_does_not_trigger_admin_guard():
+    user_views._validate_tenant_admin_role_removal(
+        creator_id="creator",
+        account_id="member",
+        target_is_admin=False,
+        admin_count=0,
+    )

@@ -241,6 +241,19 @@ class ErrorCode(BaseErrorCode):
         "监听地址、协议和端口与其他已启用的事件接入冲突，请先禁用冲突配置",
     )
     ROLE_CANNOT_UPDATE = ErrorData(4186, "系统管理员角色为内置角色，禁止修改")
+    TENANT_CREATOR_MUST_REMAIN_ADMIN = ErrorData(
+        4187, "租户创建者必须保留租户管理员角色和成员身份"
+    )
+    TENANT_MUST_HAVE_ADMIN = ErrorData(4188, "租户至少需要保留一名租户管理员")
+    TENANT_ADMIN_RECOVERY_FORBIDDEN = ErrorData(
+        4189, "仅默认租户的内置平台管理员可恢复非默认租户的管理员"
+    )
+    TENANT_ADMIN_RECOVERY_NO_MEMBER = ErrorData(
+        4190, "租户创建者账号无效，且内置平台管理员不是该租户成员，无法恢复"
+    )
+    TENANT_ADMIN_ROLE_PROTECTED = ErrorData(
+        4191, "租户管理员角色为内置角色，禁止修改或删除"
+    )
 
     # ---- 工单管理 4200-4239（4204-4209/4215-4219/4225-4229/4234-4239 留扩展）----
     # 权限类 4200-4203

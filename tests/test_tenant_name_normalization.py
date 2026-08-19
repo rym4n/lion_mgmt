@@ -19,7 +19,9 @@ def test_tenant_name_endpoints_use_normalized_uniqueness_contract():
     assert "raise CustomError(ErrorCode.TENANT_NAME_INVALID)" in add_source
     assert "raise CustomError(ErrorCode.TENANT_ALREADY_EXISTS)" in add_source
     assert 'if "name" in req:' in edit_source
-    assert ".exclude(id=tenant_id).exists()" in edit_source
+    assert ".exclude(id=tenant_id)" in edit_source
+    assert ".using_db(connection)" in edit_source
+    assert ".exists()" in edit_source
     assert "if tenant.name != name:" in edit_source
 
 

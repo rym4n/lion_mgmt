@@ -1,4 +1,5 @@
 # coding=utf-8
+import logging
 
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -7,11 +8,19 @@ from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
-from core.maintenance import can_switch_tenant, should_clear_maintenance_mode
+from core.maintenance import (
+    DEFAULT_TENANT_ID,
+    can_switch_tenant,
+    should_clear_maintenance_mode,
+)
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import refresh_token
-from libs.security.authorization import TENANT_ADMIN_ROLE_NAME, requires_permission
+from libs.security.authorization import (
+    TENANT_ADMIN_ROLE_NAME,
+    is_superadmin,
+    requires_permission,
+)
 from libs.utils import get_expiration_date
 from models import Account, Role, Scene, Tenant
 from services.openviking import (
@@ -29,10 +38,48 @@ from settings import (
 
 tenant_bp = Blueprint("tenant", url_prefix="/tenant")
 __all__ = ["tenant_bp"]
+logger = logging.getLogger(__name__)
 
 
 def _normalize_tenant_name(value):
     return value.strip() if isinstance(value, str) else ""
+
+
+def _validate_tenant_member_removal(
+    *, creator_id, ids_to_remove, admin_member_ids
+):
+    if creator_id in ids_to_remove:
+        raise CustomError(ErrorCode.TENANT_CREATOR_MUST_REMAIN_ADMIN)
+    if admin_member_ids and not (admin_member_ids - ids_to_remove):
+        raise CustomError(ErrorCode.TENANT_MUST_HAVE_ADMIN)
+
+
+def _tenant_admin_recovery_target_ids(*, creator_id, operator_id, member_ids):
+    target_ids = {creator_id} if creator_id else set()
+    if operator_id in member_ids:
+        target_ids.add(operator_id)
+    return target_ids
+
+
+def _can_restore_tenant_admin(operator, current_tenant_id, target_tenant_id):
+    return bool(
+        operator
+        and operator.username == "admin"
+        and current_tenant_id == DEFAULT_TENANT_ID
+        and target_tenant_id != DEFAULT_TENANT_ID
+        and is_superadmin(operator)
+    )
+
+
+async def _provision_tenant_knowledge_best_effort(tenant_id):
+    try:
+        await provision_tenant_knowledge(tenant_id)
+    except Exception:
+        logger.warning(
+            "Failed to provision knowledge for tenant %s",
+            tenant_id,
+            exc_info=True,
+        )
 
 
 async def _clear_maintenance_mode_for_non_default_tenant(request, tenant_id):
@@ -154,12 +201,8 @@ async def add_tenant(request):
         # 创建默认场景"日常运营"
         await Scene.create(name="日常运营", remark="默认场景", status=1, creator=creator, updator=creator, tenant_id=tenant.id)
 
-    # 租户创建后，为其创建 OpenViking 知识库凭证（阶段三）
-    try:
-        await provision_tenant_knowledge(tenant.id)
-    except Exception as e:
-        # 知识库创建失败不阻塞租户创建，记录日志即可
-        request.app.ctx.logger.warning(f"Failed to provision knowledge for tenant {tenant.id}: {e}")
+    # 外部知识库配置是提交后的附加能力，失败不改变已成功创建的租户。
+    await _provision_tenant_knowledge_best_effort(tenant.id)
 
     return response_ok(tenant.json)
 
@@ -258,48 +301,203 @@ async def edit_tenant(request):
     add_member_ids -= del_member_ids
     unsafe_usernames = []
 
-    async with in_transaction():
-        tenant = await Tenant.get_or_none(id=tenant_id, deleted=False)
+    async with in_transaction() as connection:
+        tenant = await (
+            Tenant.filter(id=tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
         if tenant is None:
             raise CustomError(ErrorCode.TENANT_NOT_FOUND)
 
         if name is not None:
-            if await Tenant.filter(name=name, deleted=False).exclude(id=tenant_id).exists():
+            if (
+                await Tenant.filter(name=name, deleted=False)
+                .using_db(connection)
+                .exclude(id=tenant_id)
+                .exists()
+            ):
                 raise CustomError(ErrorCode.TENANT_ALREADY_EXISTS)
             if tenant.name != name:
                 tenant.name = name
-                await tenant.save(update_fields=["name"])
+                await tenant.save(update_fields=["name"], using_db=connection)
 
         if add_member_ids:
-            existing_ids = set(await tenant.member.filter(id__in=add_member_ids).values_list("id", flat=True))
+            existing_ids = set(
+                await tenant.member.filter(id__in=add_member_ids)
+                .using_db(connection)
+                .values_list("id", flat=True)
+            )
             ids_to_add = add_member_ids - existing_ids
             if ids_to_add:
-                add_users = await Account.filter(id__in=ids_to_add)
-                await tenant.member.add(*add_users)
+                add_users = await Account.filter(id__in=ids_to_add).using_db(
+                    connection
+                )
+                await tenant.member.add(*add_users, using_db=connection)
 
         if del_member_ids:
-            current_ids = set(await tenant.member.filter(id__in=del_member_ids).values_list("id", flat=True))
+            current_ids = set(
+                await tenant.member.filter(id__in=del_member_ids)
+                .using_db(connection)
+                .values_list("id", flat=True)
+            )
             # 筛选存在这个租户下的用户id
             ids_to_remove = current_ids
             if ids_to_remove:
-                unsafe_users = await Account.filter(id__in=ids_to_remove).annotate(tenant_count=Count("member")).filter(tenant_count__lte=1)
+                tenant_admin = await (
+                    Role.filter(
+                        name=TENANT_ADMIN_ROLE_NAME,
+                        tenant_id=tenant.id,
+                        deleted=False,
+                    )
+                    .using_db(connection)
+                    .select_for_update()
+                    .first()
+                )
+                admin_member_ids = set()
+                if tenant_admin:
+                    admin_member_ids = set(
+                        await Account.filter(
+                            deleted=False,
+                            member__id=tenant.id,
+                            roles__id=tenant_admin.id,
+                        )
+                        .using_db(connection)
+                        .distinct()
+                        .values_list("id", flat=True)
+                    )
+                _validate_tenant_member_removal(
+                    creator_id=tenant.creator_id,
+                    ids_to_remove=ids_to_remove,
+                    admin_member_ids=admin_member_ids,
+                )
+
+                unsafe_users = (
+                    await Account.filter(id__in=ids_to_remove)
+                    .using_db(connection)
+                    .annotate(tenant_count=Count("member"))
+                    .filter(tenant_count__lte=1)
+                )
                 unsafe_ids = {u.id for u in unsafe_users}
-                unsafe_usernames = [{"display_name": u.display_name, "username": u.username} for u in unsafe_users]
+                unsafe_usernames = [
+                    {"display_name": u.display_name, "username": u.username}
+                    for u in unsafe_users
+                ]
                 # 剔除只有一个租户的用户
                 ids_to_remove -= unsafe_ids
             if ids_to_remove:
-                remove_users = await Account.filter(id__in=ids_to_remove)
-                await tenant.member.remove(*remove_users)
+                remove_users = await Account.filter(id__in=ids_to_remove).using_db(
+                    connection
+                )
+                await tenant.member.remove(*remove_users, using_db=connection)
                 for user in remove_users:
                     if user.tenant_id == tenant.id:
-                        new_tenant_id = await Tenant.filter(member=user).exclude(id=tenant.id).values_list("id", flat=True)
+                        new_tenant_id = (
+                            await Tenant.filter(member=user)
+                            .using_db(connection)
+                            .exclude(id=tenant.id)
+                            .values_list("id", flat=True)
+                        )
                         user.tenant_id = new_tenant_id[0] if new_tenant_id else None
-                        await user.save(update_fields=["tenant_id"])
+                        await user.save(
+                            update_fields=["tenant_id"], using_db=connection
+                        )
 
     if unsafe_usernames:
         raise CustomError(ErrorCode.DELETE_SONG_USERS_FAILED)
 
     return response_ok({"message": "更新成功"})
+
+
+@tenant_bp.post("/restore-admin")
+@openapi.definition(
+    summary="恢复租户管理员",
+    description="由默认租户的内置平台管理员恢复目标租户的管理员角色",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tenant_id"],
+                "properties": {
+                    "tenant_id": {"type": "string", "description": "目标租户id"},
+                },
+            }
+        }
+    },
+    response={"200": {"description": "恢复成功"}},
+)
+@requires_permission("tenant:u")
+async def restore_tenant_admin(request):
+    """恢复创建者，并在内置 admin 已是成员时为其补齐管理员角色。"""
+    operator: Account = request.ctx.session["account_info"]
+    current_tenant_id = request.ctx.session.get("tenant_id")
+    tenant_id = (request.json or {}).get("tenant_id")
+    if not tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if not _can_restore_tenant_admin(operator, current_tenant_id, tenant_id):
+        raise CustomError(ErrorCode.TENANT_ADMIN_RECOVERY_FORBIDDEN)
+
+    async with in_transaction() as connection:
+        tenant = await (
+            Tenant.filter(id=tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if tenant is None:
+            raise CustomError(ErrorCode.TENANT_NOT_FOUND)
+
+        role = await (
+            Role.filter(
+                name=TENANT_ADMIN_ROLE_NAME,
+                tenant_id=tenant.id,
+                deleted=False,
+            )
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if role is None:
+            role = await Role.create(
+                name=TENANT_ADMIN_ROLE_NAME,
+                description=TENANT_ADMIN_ROLE_NAME,
+                permissions=["*:*"],
+                tenant_id=tenant.id,
+                using_db=connection,
+            )
+
+        member_ids = set(
+            await tenant.member.filter()
+            .using_db(connection)
+            .values_list("id", flat=True)
+        )
+        target_ids = _tenant_admin_recovery_target_ids(
+            creator_id=tenant.creator_id,
+            operator_id=operator.id,
+            member_ids=member_ids,
+        )
+        targets = (
+            await Account.filter(id__in=target_ids, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .all()
+        )
+        restored = []
+        for target in targets:
+            is_creator = target.id == tenant.creator_id
+            if is_creator and target.id not in member_ids:
+                await tenant.member.add(target, using_db=connection)
+                member_ids.add(target.id)
+            if not is_creator and target.id not in member_ids:
+                continue
+            await target.roles.add(role, using_db=connection)
+            restored.append(target.username)
+
+        if not restored:
+            raise CustomError(ErrorCode.TENANT_ADMIN_RECOVERY_NO_MEMBER)
+
+    return response_ok({"restored_users": sorted(restored)})
 
 
 @tenant_bp.post("/switch")

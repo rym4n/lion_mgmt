@@ -222,7 +222,7 @@ def test_get_license_does_not_use_another_tenants_superuser_role(monkeypatch):
     monkeypatch.setattr(
         license_views,
         "PermissionsMenu",
-        SimpleNamespace(all=lambda: PermissionQuery()),
+        SimpleNamespace(filter=lambda **_filters: PermissionQuery()),
     )
     monkeypatch.setattr(
         license_views,
@@ -241,6 +241,61 @@ def test_get_license_does_not_use_another_tenants_superuser_role(monkeypatch):
     menus = asyncio.run(inspect.unwrap(get_license)(request))
 
     assert menus == [{"tenant": False}]
+
+
+def test_get_license_keeps_tenant_switching_for_a_roleless_member(monkeypatch):
+    class FakeAccount:
+        _roles_for_tenant = Account._roles_for_tenant
+
+        def __init__(self):
+            self.roles = []
+
+    class AwaitableAccount:
+        def prefetch_related(self, *_relations):
+            return self
+
+        def __await__(self):
+            async def resolve():
+                return FakeAccount()
+
+            return resolve().__await__()
+
+    class PermissionQuery:
+        async def values(self):
+            return []
+
+    license_data = {
+        "moduleList": [
+            {
+                "name": "租户管理",
+                "module": "tenant_bp",
+                "auth": True,
+                "expireTime": int(time.time() * 1000) + 60_000,
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        license_views,
+        "PermissionsMenu",
+        SimpleNamespace(filter=lambda **_filters: PermissionQuery()),
+    )
+    monkeypatch.setattr(
+        license_views,
+        "Account",
+        SimpleNamespace(get=lambda **_filters: AwaitableAccount()),
+    )
+    monkeypatch.setattr(license_views, "load_license", lambda: license_data)
+    monkeypatch.setattr(license_views, "response_ok", lambda data: data)
+    request = SimpleNamespace(
+        json={"language": "CN"},
+        ctx=SimpleNamespace(
+            session={"sub": "account-1", "tenant_id": "tenant-current"}
+        ),
+    )
+
+    menus = asyncio.run(inspect.unwrap(get_license)(request))
+
+    assert menus == [{"tenant": True}]
 
 
 def test_role_permission_menu_keeps_full_permission_values_for_split_modules():

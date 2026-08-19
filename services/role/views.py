@@ -10,6 +10,7 @@ from libs.security.authorization import (
     PLAYBOOK_MODULE_TO_FINE_PERMISSIONS,
     PLAYBOOK_UNCONTROLLED_PERMISSION,
     SUPERADMIN_PERMISSION,
+    TENANT_ADMIN_ROLE_NAME,
     TOOL_RESOURCE_UNCONTROLLED_PERMISSION,
     check_wildcard,
     is_superadmin_role,
@@ -584,6 +585,8 @@ async def add_role(request):
     permissions = _with_implicit_tool_view_permission(request.json.get("permissions", []))
 
     tenant_id = request.ctx.session.get("tenant_id")
+    if name == TENANT_ADMIN_ROLE_NAME:
+        raise CustomError(ErrorCode.TENANT_ADMIN_ROLE_PROTECTED)
 
     async with in_transaction():
         role = await Role.create(name=name, description=description, permissions=permissions, tenant_id=tenant_id)
@@ -801,10 +804,6 @@ async def find_role(request):
 @requires_permission("role:d")
 async def delete_role(request):
     role_id = request.json.get("role_id")
-    exists = await Account.filter(roles__id=role_id).exists()
-    if exists:
-        raise CustomError(ErrorCode.ROLE_ALREADY_USED)
-
     tenant_id = request.ctx.session.get("tenant_id")
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
@@ -817,6 +816,11 @@ async def delete_role(request):
     # 全平台超管角色不允许被删除。
     if is_superadmin_role(role):
         raise CustomError(ErrorCode.ROLE_CANNOT_DELETE)
+    if role.name == TENANT_ADMIN_ROLE_NAME:
+        raise CustomError(ErrorCode.TENANT_ADMIN_ROLE_PROTECTED)
+    exists = await Account.filter(roles__id=role_id).exists()
+    if exists:
+        raise CustomError(ErrorCode.ROLE_ALREADY_USED)
     role.deleted = True
     await role.save()
     return response_ok("角色删除成功")
@@ -888,6 +892,8 @@ async def update_role(request):
         raise CustomError(ErrorCode.ROLE_NOT_FOUND)
     if is_superadmin_role(role):
         raise CustomError(ErrorCode.ROLE_CANNOT_UPDATE)
+    if role.name == TENANT_ADMIN_ROLE_NAME or name == TENANT_ADMIN_ROLE_NAME:
+        raise CustomError(ErrorCode.TENANT_ADMIN_ROLE_PROTECTED)
     if name:
         role.name = name
     if description:

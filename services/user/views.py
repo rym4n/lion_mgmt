@@ -13,6 +13,7 @@ from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.exceptions import DoesNotExist, IntegrityError
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -26,6 +27,7 @@ from libs.security.authentication import (
     validate_username,
 )
 from libs.security.authorization import (
+    TENANT_ADMIN_ROLE_NAME,
     check_permissions,
     is_superadmin,
     is_superadmin_role,
@@ -53,6 +55,17 @@ from settings import (
 
 user_bp = Blueprint("user", url_prefix="/user")
 __all__ = ["user_bp"]
+
+
+def _validate_tenant_admin_role_removal(
+    *, creator_id, account_id, target_is_admin, admin_count
+):
+    if not target_is_admin:
+        return
+    if creator_id == account_id:
+        raise CustomError(ErrorCode.TENANT_CREATOR_MUST_REMAIN_ADMIN)
+    if admin_count <= 1:
+        raise CustomError(ErrorCode.TENANT_MUST_HAVE_ADMIN)
 
 
 @user_bp.post("/new")
@@ -1493,17 +1506,75 @@ async def assign_role_to_user(request):
         final_roles = [r.name for r in account._roles_for_tenant(tenant_id)]
         return response_ok({"username": username, "roles": final_roles})
 
-    if remove_names:
-        remove_roles = await Role.filter(name__in=remove_names, deleted=False, tenant_id=tenant_id).all()
-        if len(remove_roles) != len(remove_names):
-            raise CustomError(ErrorCode.ROLE_NOT_FOUND)
-        await account.roles.remove(*remove_roles)
+    async with in_transaction() as connection:
+        tenant = None
+        if TENANT_ADMIN_ROLE_NAME in remove_names:
+            tenant = await (
+                Tenant.filter(id=tenant_id, deleted=False)
+                .using_db(connection)
+                .select_for_update()
+                .first()
+            )
 
-    if add_names:
-        add_roles = await Role.filter(name__in=add_names, deleted=False, tenant_id=tenant_id).all()
-        if len(add_roles) != len(add_names):
-            raise CustomError(ErrorCode.ROLE_NOT_FOUND)
-        await account.roles.add(*add_roles)
+        if remove_names:
+            remove_roles = await (
+                Role.filter(
+                    name__in=remove_names,
+                    deleted=False,
+                    tenant_id=tenant_id,
+                )
+                .using_db(connection)
+                .select_for_update()
+                .all()
+            )
+            if len(remove_roles) != len(remove_names):
+                raise CustomError(ErrorCode.ROLE_NOT_FOUND)
+
+            tenant_admin = next(
+                (role for role in remove_roles if role.name == TENANT_ADMIN_ROLE_NAME),
+                None,
+            )
+            if tenant_admin:
+                target_is_admin = await (
+                    Account.filter(
+                        id=account.id,
+                        deleted=False,
+                        member__id=tenant_id,
+                        roles__id=tenant_admin.id,
+                    )
+                    .using_db(connection)
+                    .exists()
+                )
+                admin_count = 0
+                if target_is_admin:
+                    admin_count = await (
+                        Account.filter(
+                            deleted=False,
+                            member__id=tenant_id,
+                            roles__id=tenant_admin.id,
+                        )
+                        .using_db(connection)
+                        .distinct()
+                        .count()
+                    )
+                _validate_tenant_admin_role_removal(
+                    creator_id=tenant.creator_id if tenant else None,
+                    account_id=account.id,
+                    target_is_admin=target_is_admin,
+                    admin_count=admin_count,
+                )
+
+            await account.roles.remove(*remove_roles, using_db=connection)
+
+        if add_names:
+            add_roles = await Role.filter(
+                name__in=add_names,
+                deleted=False,
+                tenant_id=tenant_id,
+            ).using_db(connection).all()
+            if len(add_roles) != len(add_names):
+                raise CustomError(ErrorCode.ROLE_NOT_FOUND)
+            await account.roles.add(*add_roles, using_db=connection)
 
     await account.fetch_related("roles")
     final_roles = [r.name for r in account._roles_for_tenant(tenant_id)]

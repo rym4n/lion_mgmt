@@ -1,9 +1,12 @@
 # coding=utf-8
 import asyncio
 import importlib
+import inspect
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -187,6 +190,121 @@ def test_update_role_rejects_the_system_admin_before_mutation(monkeypatch):
 
     assert role.description == "超管账号,请勿轻易分配"
     assert role.permissions == ["*:*"]
+
+
+def test_tenant_admin_role_has_a_specific_business_error():
+    error = ErrorCode.TENANT_ADMIN_ROLE_PROTECTED.value
+
+    assert error.code == 4191
+    assert "租户管理员角色" in error.message
+
+
+def test_add_role_rejects_reserved_tenant_admin_name():
+    request = SimpleNamespace(
+        json={
+            "name": "租户管理员",
+            "description": "duplicate",
+            "permissions": ["dashboard:r"],
+        },
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(inspect.unwrap(role_views.add_role)(request))
+
+    assert exc_info.value.enum is ErrorCode.TENANT_ADMIN_ROLE_PROTECTED
+
+
+def test_update_role_rejects_tenant_admin_before_mutation(monkeypatch):
+    role = SimpleNamespace(
+        id="tenant-admin-role",
+        name="租户管理员",
+        description="租户管理员",
+        permissions=["*:*"],
+    )
+
+    class _Role:
+        @staticmethod
+        async def get_or_none(**_filters):
+            return role
+
+    monkeypatch.setattr(role_views, "Role", _Role)
+    request = SimpleNamespace(
+        json={
+            "role_id": role.id,
+            "name": "renamed",
+            "description": "changed",
+            "permissions": ["dashboard:r"],
+        },
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+    handler = inspect.unwrap(role_views.update_role)
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(handler(request))
+
+    assert exc_info.value.enum is ErrorCode.TENANT_ADMIN_ROLE_PROTECTED
+    assert role.name == "租户管理员"
+    assert role.permissions == ["*:*"]
+
+
+def test_update_role_rejects_renaming_custom_role_to_tenant_admin(monkeypatch):
+    role = SimpleNamespace(
+        id="custom-role",
+        name="custom",
+        description="custom",
+        permissions=["dashboard:r"],
+    )
+
+    class _Role:
+        @staticmethod
+        async def get_or_none(**_filters):
+            return role
+
+    monkeypatch.setattr(role_views, "Role", _Role)
+    request = SimpleNamespace(
+        json={"role_id": role.id, "name": "租户管理员"},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(inspect.unwrap(role_views.update_role)(request))
+
+    assert exc_info.value.enum is ErrorCode.TENANT_ADMIN_ROLE_PROTECTED
+    assert role.name == "custom"
+
+
+def test_delete_role_rejects_tenant_admin_even_when_unused(monkeypatch):
+    role = SimpleNamespace(
+        id="tenant-admin-role",
+        name="租户管理员",
+        deleted=False,
+        saved=False,
+    )
+
+    async def save():
+        role.saved = True
+
+    role.save = save
+
+    class _Role:
+        @staticmethod
+        async def get_or_none(**_filters):
+            return role
+
+    monkeypatch.setattr(role_views, "Role", _Role)
+    request = SimpleNamespace(
+        json={"role_id": role.id},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+    handler = inspect.unwrap(role_views.delete_role)
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(handler(request))
+
+    assert exc_info.value.enum is ErrorCode.TENANT_ADMIN_ROLE_PROTECTED
+    assert role.deleted is False
+    assert role.saved is False
 
 
 def test_role_details_exposes_playbook_permission_control_mode():

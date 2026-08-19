@@ -2,6 +2,13 @@ import ast
 import asyncio
 import importlib
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from core.error_code import ErrorCode
+from libs.error_code.exception import CustomError
+from services.tenant import views as tenant_views
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,3 +88,94 @@ def test_existing_tenant_admin_roles_are_promoted_to_wildcard_permissions():
     assert '"permissions" = \'["*:*\"]\'::jsonb' in upgrade_sql
     assert '"deleted" = False' in upgrade_sql
     assert "? '*:*'" in upgrade_sql
+
+
+def test_tenant_creator_cannot_be_removed_from_members():
+    with pytest.raises(CustomError) as exc_info:
+        tenant_views._validate_tenant_member_removal(
+            creator_id="creator",
+            ids_to_remove={"creator"},
+            admin_member_ids={"creator", "other-admin"},
+        )
+
+    assert exc_info.value.enum == ErrorCode.TENANT_CREATOR_MUST_REMAIN_ADMIN
+
+
+def test_tenant_member_removal_must_leave_an_admin():
+    with pytest.raises(CustomError) as exc_info:
+        tenant_views._validate_tenant_member_removal(
+            creator_id="creator",
+            ids_to_remove={"only-admin"},
+            admin_member_ids={"only-admin"},
+        )
+
+    assert exc_info.value.enum == ErrorCode.TENANT_MUST_HAVE_ADMIN
+
+
+def test_tenant_member_removal_allows_a_non_creator_when_admin_remains():
+    tenant_views._validate_tenant_member_removal(
+        creator_id="creator",
+        ids_to_remove={"admin-1"},
+        admin_member_ids={"admin-1", "admin-2"},
+    )
+
+
+def test_admin_recovery_restores_creator_and_only_an_existing_admin_member():
+    assert tenant_views._tenant_admin_recovery_target_ids(
+        creator_id="creator",
+        operator_id="admin",
+        member_ids={"admin"},
+    ) == {"creator", "admin"}
+    assert tenant_views._tenant_admin_recovery_target_ids(
+        creator_id="creator",
+        operator_id="admin",
+        member_ids=set(),
+    ) == {"creator"}
+    assert tenant_views._tenant_admin_recovery_target_ids(
+        creator_id=None,
+        operator_id="admin",
+        member_ids=set(),
+    ) == set()
+
+
+def test_admin_recovery_requires_builtin_admin_in_default_tenant(monkeypatch):
+    operator = SimpleNamespace(username="admin")
+    monkeypatch.setattr(tenant_views, "is_superadmin", lambda account: account is operator)
+
+    assert tenant_views._can_restore_tenant_admin(
+        operator, tenant_views.DEFAULT_TENANT_ID, "other-tenant"
+    )
+    assert not tenant_views._can_restore_tenant_admin(
+        operator, "other-tenant", "target-tenant"
+    )
+    assert not tenant_views._can_restore_tenant_admin(
+        operator, tenant_views.DEFAULT_TENANT_ID, tenant_views.DEFAULT_TENANT_ID
+    )
+    assert not tenant_views._can_restore_tenant_admin(
+        SimpleNamespace(username="other"),
+        tenant_views.DEFAULT_TENANT_ID,
+        "target-tenant",
+    )
+
+
+@pytest.mark.asyncio
+async def test_knowledge_provision_failure_is_logged_without_failing_create(
+    monkeypatch,
+):
+    warnings = []
+
+    async def fail(_tenant_id):
+        raise RuntimeError("OpenViking unavailable")
+
+    monkeypatch.setattr(tenant_views, "provision_tenant_knowledge", fail)
+    monkeypatch.setattr(
+        tenant_views,
+        "logger",
+        SimpleNamespace(warning=lambda *args, **kwargs: warnings.append((args, kwargs))),
+    )
+
+    await tenant_views._provision_tenant_knowledge_best_effort("tenant-a")
+
+    assert warnings
+    assert warnings[0][0][-1] == "tenant-a"
+    assert warnings[0][1]["exc_info"] is True

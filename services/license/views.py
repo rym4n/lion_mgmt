@@ -223,18 +223,17 @@ async def get_license(request: Request):
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
     menu_dict = {}
-    ai_type = 0
-    tenant_type = False
+    valid_modules = _licensed_module_keys(lic)
+    active_modules = {
+        item.get("module")
+        for item in lic.get("moduleList", [])
+        if is_licensed_module_active(lic, item)
+    }
+    ai_type = int("ai_bp" in active_modules)
+    tenant_type = "tenant_bp" in active_modules
     for role in user._roles_for_tenant(current_tenant_id):
         perm_models = set()
         if role.permissions:
-            valid_modules = _licensed_module_keys(lic)
-            for item in lic["moduleList"]:
-                if is_licensed_module_active(lic, item):
-                    if item["module"] == "ai_bp":
-                        ai_type += 1
-                    if item["module"] == "tenant_bp":
-                        tenant_type = True
             # 超级权限处理
             if "*:*" not in role.permissions:
                 role_permissions = [
