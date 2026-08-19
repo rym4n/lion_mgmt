@@ -825,3 +825,87 @@ def test_run_only_downgrades_custom_error_from_embedding_resolution():
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         asyncio.run(execute_coordinator.run(task, employee))
+
+
+def test_memory_embedding_is_resolved_from_tenant_config():
+    """SPEC §5.6：embedding 走 resolve_llm(tenant_id, purpose='embedding')。"""
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+
+    class _Embedding:
+        def to_payload(self):
+            return {
+                "base_url": "http://embed",
+                "api_key": "sk-embed",
+                "model": "text-embedding-v4",
+                "dimensions": 1024,
+            }
+
+    class _Chat:
+        config_id = "llm-config-1"
+        model_name = "test-model"
+
+    async def resolve_llm(tenant_id, **kwargs):
+        if kwargs.get("purpose") == "embedding":
+            return _Embedding()
+        return _Chat()
+
+    sys.modules["services.llm_config.resolver"].resolve_llm = resolve_llm
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    task = FakeTask(
+        id="task-embed", tenant_id="tenant-1", run_id=None, room_id=None,
+        creator_id="c", source="manual", progress=0, status="pending",
+        title="t", description="d", payload={}, result=None, saved_update_fields=[],
+    )
+    employee = SimpleNamespace(
+        id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工"
+    )
+
+    asyncio.run(execute_coordinator.run(task, employee))
+
+    assert len(RECORDED_STREAM_PAYLOADS) == 1
+    memory = RECORDED_STREAM_PAYLOADS[0]["memory"]
+    assert memory["embedding"] == {
+        "base_url": "http://embed",
+        "api_key": "sk-embed",
+        "model": "text-embedding-v4",
+        "dimensions": 1024,
+    }
+
+
+def test_memory_embedding_is_none_when_not_configured():
+    """未配置 embedding 时 payload.memory.embedding 为 None（降级路径）。"""
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+
+    from libs.error_code.exception import CustomError
+
+    async def resolve_llm(tenant_id, **kwargs):
+        if kwargs.get("purpose") == "embedding":
+            raise CustomError(4000, "未配置 embedding 模型")
+        return SimpleNamespace(config_id=None, model_name="test-model")
+
+    sys.modules["services.llm_config.resolver"].resolve_llm = resolve_llm
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    task = FakeTask(
+        id="task-no-embed", tenant_id="tenant-1", run_id=None, room_id=None,
+        creator_id="c", source="manual", progress=0, status="pending",
+        title="t", description="d", payload={}, result=None, saved_update_fields=[],
+    )
+    employee = SimpleNamespace(
+        id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工"
+    )
+
+    asyncio.run(execute_coordinator.run(task, employee))
+
+    assert len(RECORDED_STREAM_PAYLOADS) == 1
+    memory = RECORDED_STREAM_PAYLOADS[0]["memory"]
+    assert memory["embedding"] is None
