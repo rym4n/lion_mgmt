@@ -364,6 +364,7 @@ async def edit_tenant(request):
                             roles__id=tenant_admin.id,
                         )
                         .using_db(connection)
+                        .order_by("id")
                         .distinct()
                         .values_list("id", flat=True)
                     )
@@ -515,7 +516,6 @@ async def restore_tenant_admin(request):
     },
     response={"200": {"description": "切换成功"}},
 )
-@requires_permission("tenant:r")
 async def switch_tenant(request):
     tenant_id = request.json.get("id")
     if not tenant_id:
@@ -527,10 +527,13 @@ async def switch_tenant(request):
     if not can_switch_tenant(maintenance_mode):
         raise CustomError(ErrorCode.MAINTENANCE_MODE_ERROR)
 
-    tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
+    tenant = await Tenant.get_or_none(id=tenant_id, deleted=False)
 
     if tenant is None:
         raise CustomError(ErrorCode.TENANT_NOT_FOUND)
+    account: Account = request.ctx.session["account_info"]
+    if not await tenant.member.filter(id=account.id, deleted=False).exists():
+        raise CustomError(ErrorCode.NOT_EXIST_IN_TENANT)
 
     await _clear_maintenance_mode_for_non_default_tenant(request, tenant.id)
     request.ctx.session["tenant_id"] = tenant.id
