@@ -6,8 +6,11 @@ DELETE（SPEC §5.6）。本测试验证补偿迁移的完整性。
 """
 from pathlib import Path
 
+from models.command_center import CommandAgent
+
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_112 = ROOT / "migrations" / "models" / "112_20260819_llm_config_convergence_correction.py"
+COMMAND_AGENT_TABLE = CommandAgent._meta.db_table
 
 
 def test_migration_112_exists():
@@ -38,12 +41,12 @@ def test_backs_up_configs_before_delete():
 
 
 def test_backs_up_employee_bindings():
-    """必须备份员工绑定关系（含配置详情）。"""
+    """必须从 CommandAgent 模型对应的表备份员工绑定关系。"""
     sql = MIGRATION_112.read_text(encoding="utf-8")
     upgrade = sql.split("async def upgrade")[1].split("async def downgrade")[0]
 
     assert "employee_llm_binding_backup_" in upgrade
-    assert "command_agent" in upgrade
+    assert f'FROM "{COMMAND_AGENT_TABLE}" ca' in upgrade
     assert "llm_config_id" in upgrade
 
 
@@ -89,11 +92,11 @@ def test_downgrade_restores_configs():
 
 
 def test_downgrade_restores_employee_bindings():
-    """回滚必须恢复员工的 llm_config_id 绑定。"""
+    """回滚必须通过 CommandAgent 模型对应的表恢复员工绑定。"""
     sql = MIGRATION_112.read_text(encoding="utf-8")
     downgrade = sql.split("async def downgrade")[1]
 
-    assert "UPDATE command_agent" in downgrade
+    assert f'UPDATE "{COMMAND_AGENT_TABLE}" ca' in downgrade
     assert "llm_config_id" in downgrade
     assert "employee_llm_binding_backup_" in downgrade
 

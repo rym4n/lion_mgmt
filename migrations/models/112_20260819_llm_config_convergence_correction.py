@@ -44,14 +44,14 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
             lmc.tenant_id as config_tenant_id,
             lmc.model_name,
             lmc.purpose
-        FROM command_agent ca
+        FROM "command_center_agent" ca
         INNER JOIN llm_model_config lmc ON ca.llm_config_id = lmc.id
         WHERE lmc.tenant_id != '{DEFAULT_TENANT_ID}'
           AND ca.deleted = FALSE
           AND lmc.deleted = FALSE;
 
         -- §4. DELETE 非 default 租户的配置
-        -- 这会触发 command_agent.llm_config_id 的 on_delete=SET_NULL
+        -- 这会触发 command_center_agent.llm_config_id 的 on_delete=SET_NULL
         DELETE FROM llm_model_config
         WHERE tenant_id != '{DEFAULT_TENANT_ID}';
 
@@ -99,7 +99,7 @@ async def downgrade(db: BaseDBAsyncClient) -> str:
 
         -- §3. 恢复员工绑定
         -- 使用备份表中的 employee_id 和 llm_config_id 恢复关系
-        UPDATE command_agent ca
+        UPDATE "command_center_agent" ca
         SET llm_config_id = eb.llm_config_id
         FROM migration_backup.employee_llm_binding_backup_{backup_suffix} eb
         WHERE ca.id = eb.employee_id
