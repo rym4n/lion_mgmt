@@ -6,6 +6,7 @@
 Dockerfile*
 .dockerignore
 *.md
+docs/
 
 # 排除 Node.js 或其他语言的依赖缓存
 node_modules/
