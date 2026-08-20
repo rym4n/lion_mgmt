@@ -63,11 +63,12 @@ def test_purpose_description_mentions_embedding():
         assert existing in description, f"purpose 注释丢失既有取值 {existing}"
 
 
-def test_purpose_description_includes_knowledge_layer_values():
-    """知识层启用独立的对话与向量模型用途。"""
+def test_purpose_description_does_not_promise_stage_three_values():
+    """knowledge_chat / knowledge_embedding 属阶段三（契约 §0），
+    提前写进注释会让实施者以为本次要支持。"""
     description = _src()
-    assert "knowledge_chat" in description
-    assert "knowledge_embedding" in description
+    assert "knowledge_chat" not in description
+    assert "knowledge_embedding" not in description
 
 
 def test_json_payload_exposes_dimensions():

@@ -24,7 +24,7 @@ class LlmModelConfig(BaseModel):
     purpose: str = fields.CharField(
         max_length=32,
         null=True,
-        description="用途：chat 主力 | lite 轻量 | embedding 向量 | knowledge_chat 知识层对话 | knowledge_embedding 知识层向量 | null 仅员工指定",
+        description="用途：chat 主力 | lite 轻量 | embedding 向量 | null 仅员工指定",
     )
     enabled: bool = fields.BooleanField(default=True, description="是否启用")
     remark: str = fields.CharField(max_length=512, null=True, description="备注")

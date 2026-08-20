@@ -337,6 +337,8 @@ async def get_license(request: Request):
         "安全设置",
         "安全設置",
         "Security Settings",
+        "模型配置",
+        "Model Config",
     }
 
     menus = list(menu_dict.values())

@@ -2,9 +2,15 @@
 import asyncio
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+# 确保项目根目录在 sys.path 中
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
 class _FakeRow(SimpleNamespace):

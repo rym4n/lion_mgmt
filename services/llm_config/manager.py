@@ -12,14 +12,9 @@
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 
-# embedding 由 ReMe 迁移引入；知识层使用独立的对话与向量模型配置。
-VALID_PURPOSES = (
-    "chat",
-    "lite",
-    "embedding",
-    "knowledge_chat",
-    "knowledge_embedding",
-)
+# embedding 由本次 ReMe 迁移引入（SPEC §5.6）。
+# knowledge_chat / knowledge_embedding 属阶段三，此处不加。
+VALID_PURPOSES = ("chat", "lite", "embedding")
 
 
 async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]:
@@ -80,6 +75,35 @@ async def list_catalog() -> list[dict]:
     ]
 
 
+async def assert_bindable_config(config_id: str | None) -> None:
+    """校验员工可绑定该模型配置（SPEC §5.6）。
+
+    catalog 只列 default 租户下 enabled 的配置，但任何人都能绕过前端
+    直接构造 employee/create 请求塞一个任意 id——「不能只信前端传什么」。
+
+    空值表示解绑，是合法操作。非空则三个条件缺一不可：
+    属 default 租户、未软删、已启用。
+
+    注意与 resolve_llm 的分工：这里是**写入时**拒绝非法值；
+    resolve_llm 是**运行时**对事后失效的绑定回落到全局默认
+    （resolver.py 的既有契约）。两者都必须保留。
+    """
+    if not config_id:
+        return
+
+    from core.maintenance import DEFAULT_TENANT_ID
+    from models import LlmModelConfig
+
+    record = await LlmModelConfig.filter(
+        id=config_id,
+        tenant_id=DEFAULT_TENANT_ID,
+        deleted=False,
+        enabled=True,
+    ).first()
+    if record is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+
 async def _assert_name_available(
     tenant_id: str, name: str, exclude_id: str | None = None
 ) -> None:
@@ -103,6 +127,9 @@ async def create_config(
     dimensions: int | None = None,
 ) -> dict:
     from models import LlmModelConfig
+
+    if dimensions is not None and not (1 <= dimensions <= 65536):
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     await _assert_name_available(tenant_id, name)
     if purpose:
@@ -128,6 +155,11 @@ async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
     )
     if row is None:
         raise CustomError(ErrorCode.LLM_CONFIG_NOT_CONFIGURED)
+
+    # dimensions 范围验证
+    dimensions = changes.get("dimensions")
+    if dimensions is not None and not (1 <= dimensions <= 65536):
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     new_name = changes.get("name")
     if new_name and new_name != row.name:

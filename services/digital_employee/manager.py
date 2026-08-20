@@ -129,10 +129,12 @@ async def create_employee(
     rbac_role_id: str | None = None,
     llm_config_id: str | None = None,
 ) -> CommandAgent:
+    from services.llm_config.manager import assert_bindable_config
+
     role = await get_visible_role(tenant_id, role_key)
     selected_rbac_role_id = rbac_role_id
     await require_existing_platform_role(selected_rbac_role_id, tenant_id)
-    await _require_default_tenant_config(llm_config_id)
+    await assert_bindable_config(llm_config_id)
     keys = skill_keys if skill_keys is not None else list(role.default_skill_keys or [])
     skills = await get_visible_skills(tenant_id, keys)
     key = agent_key or f"{role_key}-{uuid.uuid4().hex[:8]}"
@@ -176,7 +178,8 @@ async def update_employee(
     if max_concurrent is not _UNSET:
         employee.max_concurrent = max(1, int(max_concurrent or 1))
     if llm_config_id is not _UNSET:
-        await _require_default_tenant_config(llm_config_id)
+        from services.llm_config.manager import assert_bindable_config
+        await assert_bindable_config(llm_config_id)
         employee.llm_config_id = llm_config_id or None
     employee.workspace_etag = None
     await employee.save()

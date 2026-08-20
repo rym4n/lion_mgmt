@@ -58,3 +58,11 @@ def test_tenant_visibility_is_enforced_by_license_menu_filter():
     src = LICENSE_VIEWS.read_text(encoding="utf-8")
     assert "hidden_menus" in src, "菜单下发过滤机制缺失"
     assert "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18" in src, "缺少 default 租户判定"
+
+
+def test_model_config_menu_is_hidden_from_non_default_tenants():
+    """「模型配置」菜单必须在 hidden_menus 中，对非 default 租户不可见（契约 D8）。"""
+    src = LICENSE_VIEWS.read_text(encoding="utf-8")
+    hidden_block = src.split("hidden_menus = {")[1].split("}")[0]
+    assert '"模型配置"' in hidden_block or "'模型配置'" in hidden_block
+    assert '"Model Config"' in hidden_block or "'Model Config'" in hidden_block
