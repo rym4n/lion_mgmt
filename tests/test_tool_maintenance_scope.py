@@ -287,6 +287,71 @@ def test_resource_model_migration_backfills_latest_application_scope():
     assert 'DELETE FROM "tool_resources_model" WHERE "id" LIKE \'m94-%\'' in downgrade_sql
 
 
+def test_init_data_resolves_builtin_resource_placeholder_recursively():
+    from services.system_config import views as system_views
+
+    payload = {
+        "nodes": [
+            {
+                "properties": {
+                    "resource": "{{LION_MGMT_RESOURCE_ID}}",
+                    "label": "{{LION_MGMT_RESOURCE_ID}}-literal",
+                }
+            }
+        ]
+    }
+
+    resolved = system_views._replace_builtin_resource_placeholder(
+        payload,
+        "resource-1",
+    )
+
+    assert resolved["nodes"][0]["properties"] == {
+        "resource": "resource-1",
+        "label": "{{LION_MGMT_RESOURCE_ID}}-literal",
+    }
+
+
+@pytest.mark.asyncio
+async def test_init_data_resource_cache_keeps_runtime_values(monkeypatch):
+    from services.system_config import views as system_views
+
+    calls = []
+
+    class FakeRedis:
+        async def set(self, key, value):
+            calls.append((key, value))
+
+    class FakeCaches:
+        @staticmethod
+        def get(name):
+            assert name == "redis_chat"
+            return FakeRedis()
+
+    monkeypatch.setattr(system_views, "caches", FakeCaches)
+
+    resource = SimpleNamespace(
+        id="resource-1",
+        name="AIOE管理服务",
+        resources_json={
+            "host": {"value": "http://lion-mgmt:8000"},
+            "api_token": {"value": "token"},
+        },
+    )
+    await system_views._cache_imported_resource(resource, {})
+
+    assert calls == [
+        (
+            "resource_resource-1",
+            {
+                "host": "http://lion-mgmt:8000",
+                "api_token": "token",
+                "resource-1_name": "AIOE管理服务",
+            },
+        )
+    ]
+
+
 def test_all_compatibility_surfaces_use_server_owned_mode_scope():
     from services.ai import views as ai_views
     from services.dashboard import views as dashboard_views

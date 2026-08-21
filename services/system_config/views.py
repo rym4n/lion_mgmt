@@ -16,6 +16,7 @@ import jwt
 import orjson
 import pytz
 import yaml
+from aiocache import caches
 from sanic import Blueprint, Request, json, response
 from sanic.log import logger
 from sanic_ext import openapi
@@ -42,6 +43,33 @@ from settings import AUTHENTICATION_SESSION_EXPIRATION, SECRET, SESSION_ENCODING
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
+
+_BUILTIN_RESOURCE_PLACEHOLDER = "{{LION_MGMT_RESOURCE_ID}}"
+
+
+def _replace_builtin_resource_placeholder(value, resource_id):
+    """Resolve the install-time resource placeholder after resources are imported."""
+    if isinstance(value, dict):
+        return {
+            key: _replace_builtin_resource_placeholder(item, resource_id)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_replace_builtin_resource_placeholder(item, resource_id) for item in value]
+    if value == _BUILTIN_RESOURCE_PLACEHOLDER:
+        return resource_id
+    return value
+
+
+async def _cache_imported_resource(resource, fallback_resources):
+    resources = resource.resources_json or fallback_resources or {}
+    cached = {
+        key: value.get("value") or value.get("default_value", "")
+        for key, value in resources.items()
+        if isinstance(value, dict)
+    }
+    cached[f"{resource.id}_name"] = resource.name
+    await caches.get("redis_chat").set(f"resource_{resource.id}", cached)
 
 _PICTURE_TYPES = ("background", "webico", "logo")
 _OUTGOING_AUDIT_CONFIG_KEY = "outgoing_audit_log"
@@ -2032,6 +2060,7 @@ async def init_data(request):
     admin = await get_superadmin_role()
 
     imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
+    builtin_resource_id = None
 
     buf = io.BytesIO(file_obj.body)
     with zipfile.ZipFile(buf, "r", metadata_encoding="utf-8") as zf:
@@ -2055,19 +2084,27 @@ async def init_data(request):
                 )
                 if exist:
                     imported["skipped_resources"] += 1
+                    await _cache_imported_resource(exist, resources)
+                    if tool_name == "lion_mgmt" and name == "AIOE管理服务":
+                        builtin_resource_id = str(exist.id)
                     continue
-                await ToolResources.create(
-                    id=id_,
-                    tool_name=tool_name,
-                    name=name,
-                    engine=engine,
-                    resources=orjson.dumps(resources).decode(),
-                    internal=maintenance_mode,
-                    creator=creator.username,
-                    updater=creator.username,
-                    tenant_id=tenant_id,
-                )
+                create_kwargs = {
+                    "tool_name": tool_name,
+                    "name": name,
+                    "engine": engine,
+                    "resources": orjson.dumps(resources).decode(),
+                    "internal": maintenance_mode,
+                    "creator": creator.username,
+                    "updater": creator.username,
+                    "tenant_id": tenant_id,
+                }
+                if id_:
+                    create_kwargs["id"] = id_
+                resource = await ToolResources.create(**create_kwargs)
                 imported["resources"] += 1
+                await _cache_imported_resource(resource, resources)
+                if tool_name == "lion_mgmt" and name == "AIOE管理服务":
+                    builtin_resource_id = str(resource.id)
 
         # 导入工具（安装时无需 License 验证，版本号自动生成）
         mock_lic = {"moduleList": [], "grouplist": {}}
@@ -2114,6 +2151,8 @@ async def init_data(request):
                 remark = item.get("remark", "")
                 change_desc = item.get("change_desc", "")
                 flow_json = item.get("flow_json") or {}
+                if builtin_resource_id:
+                    flow_json = _replace_builtin_resource_placeholder(flow_json, builtin_resource_id)
                 async with in_transaction():
                     pb = await Playbook.get_or_none(
                         name=name,
