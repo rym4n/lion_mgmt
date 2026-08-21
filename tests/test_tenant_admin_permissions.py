@@ -121,6 +121,61 @@ def test_tenant_member_removal_allows_a_non_creator_when_admin_remains():
     )
 
 
+def test_tenant_deletion_allows_the_creator_as_final_member():
+    assert (
+        tenant_views._final_tenant_member_for_deletion(
+            creator_id="creator",
+            member_ids={"creator"},
+        )
+        == "creator"
+    )
+
+
+def test_tenant_deletion_keeps_legacy_builtin_admin_compatibility():
+    assert (
+        tenant_views._final_tenant_member_for_deletion(
+            creator_id="creator",
+            member_ids={tenant_views.BUILTIN_PLATFORM_ADMIN_ID},
+        )
+        == tenant_views.BUILTIN_PLATFORM_ADMIN_ID
+    )
+
+
+def test_tenant_deletion_rejects_remaining_non_creator_members():
+    with pytest.raises(CustomError) as exc_info:
+        tenant_views._final_tenant_member_for_deletion(
+            creator_id="creator",
+            member_ids={"creator", "other"},
+        )
+
+    assert exc_info.value.enum == ErrorCode.TENANT_HAS_MEMBERS
+
+
+def test_tenant_deletion_prefers_default_tenant_as_account_fallback():
+    assert (
+        tenant_views._fallback_tenant_id(
+            {"other", tenant_views.DEFAULT_TENANT_ID}
+        )
+        == tenant_views.DEFAULT_TENANT_ID
+    )
+
+
+def test_tenant_deletion_requires_an_account_fallback():
+    assert tenant_views._fallback_tenant_id(set()) is None
+
+
+def test_tenant_deletion_is_transactional_and_invalidates_final_member_session():
+    function = _function(ROOT / "services/tenant/views.py", "del_tenant")
+    source = ast.unparse(function)
+
+    assert "async with in_transaction() as connection" in source
+    assert "Tenant.filter(id=tenant_id, deleted=False)" in source
+    assert ".select_for_update()" in source
+    assert "await tenant.member.remove(final_member, using_db=connection)" in source
+    assert "await tenant.save(update_fields=['deleted'], using_db=connection)" in source
+    assert "await request.app.ctx.cache_client.delete" in source
+
+
 def test_admin_member_query_orders_by_projected_id_before_distinct():
     source = (ROOT / "services/tenant/views.py").read_text()
     query = source.split("admin_member_ids = set(", 1)[1].split(

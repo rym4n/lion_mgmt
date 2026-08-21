@@ -39,6 +39,7 @@ from settings import (
 tenant_bp = Blueprint("tenant", url_prefix="/tenant")
 __all__ = ["tenant_bp"]
 logger = logging.getLogger(__name__)
+BUILTIN_PLATFORM_ADMIN_ID = "43782755-6382-4f42-82a2-5e557370d858"
 
 
 def _normalize_tenant_name(value):
@@ -59,6 +60,24 @@ def _tenant_admin_recovery_target_ids(*, creator_id, operator_id, member_ids):
     if operator_id in member_ids:
         target_ids.add(operator_id)
     return target_ids
+
+
+def _final_tenant_member_for_deletion(*, creator_id, member_ids):
+    member_ids = set(member_ids)
+    if not member_ids:
+        return None
+    if len(member_ids) == 1:
+        member_id = next(iter(member_ids))
+        if member_id in {creator_id, BUILTIN_PLATFORM_ADMIN_ID}:
+            return member_id
+    raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
+
+
+def _fallback_tenant_id(tenant_ids):
+    tenant_ids = sorted(set(tenant_ids))
+    if DEFAULT_TENANT_ID in tenant_ids:
+        return DEFAULT_TENANT_ID
+    return tenant_ids[0] if tenant_ids else None
 
 
 def _can_restore_tenant_admin(operator, current_tenant_id, target_tenant_id):
@@ -224,26 +243,70 @@ async def add_tenant(request):
 )
 @requires_permission("tenant:d")
 async def del_tenant(request):
-    tenant_id = request.json.get("id")
+    tenant_id = (request.json or {}).get("id")
     if not tenant_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    if tenant_id == "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18":
+    if tenant_id == DEFAULT_TENANT_ID:
         raise CustomError(ErrorCode.CANNOT_DELETE_TENANT)
 
-    tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
-    if tenant is None:
-        raise CustomError(ErrorCode.TENANT_NOT_FOUND)
+    final_member_id = None
+    async with in_transaction() as connection:
+        tenant = await (
+            Tenant.filter(id=tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if tenant is None:
+            raise CustomError(ErrorCode.TENANT_NOT_FOUND)
 
-    if tenant.member:
-        if len(tenant.member) > 1:
-            raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
-        if str(tenant.member[0].id) != "43782755-6382-4f42-82a2-5e557370d858":
-            raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
-    account = await Account.get_or_none(id="43782755-6382-4f42-82a2-5e557370d858")
-    await tenant.member.remove(account)
-    tenant.deleted = True
-    await tenant.save()
+        member_ids = await tenant.member.filter().using_db(connection).values_list(
+            "id", flat=True
+        )
+        final_member_id = _final_tenant_member_for_deletion(
+            creator_id=tenant.creator_id,
+            member_ids=member_ids,
+        )
+        if final_member_id:
+            final_member = await (
+                Account.filter(id=final_member_id)
+                .using_db(connection)
+                .select_for_update()
+                .first()
+            )
+            if final_member is None:
+                raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+
+            if final_member.tenant_id == tenant.id:
+                fallback_ids = await (
+                    Tenant.filter(member__id=final_member.id, deleted=False)
+                    .using_db(connection)
+                    .exclude(id=tenant.id)
+                    .values_list("id", flat=True)
+                )
+                fallback_tenant_id = _fallback_tenant_id(fallback_ids)
+                if fallback_tenant_id is None:
+                    raise CustomError(ErrorCode.DELETE_SONG_USERS_FAILED)
+                final_member.tenant_id = fallback_tenant_id
+                await final_member.save(
+                    update_fields=["tenant_id"], using_db=connection
+                )
+
+            await tenant.member.remove(final_member, using_db=connection)
+
+        tenant.deleted = True
+        await tenant.save(update_fields=["deleted"], using_db=connection)
+
+    if final_member_id:
+        try:
+            await request.app.ctx.cache_client.delete(f"account_{final_member_id}")
+        except Exception:
+            request.app.ctx.logger.warning(
+                "Failed to invalidate account cache after deleting tenant %s",
+                tenant.id,
+                exc_info=True,
+            )
 
     # 租户软删除时处理知识库凭证（阶段三）
     try:
