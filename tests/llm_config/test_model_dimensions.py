@@ -82,10 +82,10 @@ def test_json_payload_exposes_dimensions():
         model_name="text-embedding-v4",
         purpose="embedding",
         enabled=True,
-        remark=None,
         dimensions=1024,
     )
     assert row.json["dimensions"] == 1024
+    assert "remark" not in row.json
 
 
 def test_json_payload_still_masks_api_key():
@@ -99,7 +99,13 @@ def test_json_payload_still_masks_api_key():
         model_name="text-embedding-v4",
         purpose="embedding",
         enabled=True,
-        remark=None,
         dimensions=1024,
     )
     assert "sk-super-secret-value" not in str(row.json)
+
+
+def test_model_has_no_remark_field():
+    """模型配置备注已从当前数据库结构删除，不应留在 ORM 元数据中。"""
+    LlmModelConfig = _import_model()
+
+    assert "remark" not in LlmModelConfig._meta.fields_map

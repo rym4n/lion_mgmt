@@ -78,7 +78,7 @@ class _FakeTable:
         return await self.filter(**conditions).first()
 
     async def create(self, **fields):
-        row = _FakeRow(deleted=False, enabled=True, purpose=None, remark=None, **fields)
+        row = _FakeRow(deleted=False, enabled=True, purpose=None, **fields)
         if not hasattr(row, "id"):
             row.id = f"generated-{len(self.rows)}"
         self.rows.append(row)
@@ -94,7 +94,7 @@ class _FakeDb:
         base = {
             "id": "cfg-x", "name": "配置", "base_url": "https://x/v1",
             "api_key": "sk-key", "model_name": "aioe", "purpose": None,
-            "enabled": True, "deleted": False, "tenant_id": "t1", "remark": None,
+            "enabled": True, "deleted": False, "tenant_id": "t1",
             "ctime": "2026-08-05 00:00:00", "utime": "2026-08-05 00:00:00",
         }
         base.update(kwargs)
@@ -209,6 +209,7 @@ def test_list_masks_api_key(fake_db):
 
     assert rows[0]["api_key"] == "sk-***klmn"
     assert "sk-abcdefghijklmn" not in str(rows)
+    assert "remark" not in rows[0]
 
 
 def test_delete_clears_employee_bindings_and_reports_count(fake_db):

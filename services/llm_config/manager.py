@@ -35,7 +35,6 @@ async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]
             "model_name": row.model_name,
             "purpose": row.purpose,
             "enabled": row.enabled,
-            "remark": row.remark,
             "ctime": row.ctime,
             "utime": row.utime,
         }
@@ -47,7 +46,7 @@ async def list_catalog() -> list[dict]:
     """只读目录：任意租户可调，固定查 default 租户，只列启用的配置。
 
     字段白名单是**闭集**（SPEC §5.6 / 契约 §3）：id / name / model_name /
-    purpose / enabled。绝不返回 base_url / api_key / remark——即使 api_key
+    purpose / enabled。绝不返回 base_url / api_key——即使 api_key
     经 mask_api_key 脱敏，它仍暴露前 3 后 4 位，对普通租户没有必要。
 
     无参：目录只有一个作用域。留一个 tenant_id 参数位会诱使调用方
@@ -123,7 +122,6 @@ async def create_config(
     api_key: str,
     model_name: str,
     purpose: str | None = None,
-    remark: str | None = None,
     dimensions: int | None = None,
 ) -> dict:
     from models import LlmModelConfig
@@ -141,7 +139,6 @@ async def create_config(
         api_key=api_key,
         model_name=model_name,
         purpose=purpose,
-        remark=remark,
         dimensions=dimensions,
     )
     return {"id": row.id}
@@ -174,7 +171,6 @@ async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
         "base_url",
         "api_key",
         "model_name",
-        "remark",
         "enabled",
         "dimensions",
     ):

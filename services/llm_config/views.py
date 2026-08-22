@@ -10,6 +10,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from services.llm_config.manager import (
+    VALID_PURPOSES,
     create_config,
     delete_config,
     list_catalog,
@@ -27,7 +28,7 @@ def _tenant(request: Request) -> str:
     """管理接口恒用 default 租户（SPEC §5.6）。
 
     非 default 租户的会话一律拒绝：这些接口返回 base_url / api_key（脱敏后仍
-    暴露前后缀）/ remark 等管理信息，普通租户不该看到。租户用户要选模型走
+    暴露前后缀）等管理信息，普通租户不该看到。租户用户要选模型走
     只读的 /llm-config/catalog。
 
     只读 session，绝不接受请求体传入的 tenant_id——那会开出一个新的越权面
@@ -65,7 +66,7 @@ async def catalog_view(request: Request):
 
     不调 _tenant()，不检查权限：模型目录是平台基础设施，
     任意会话都要能读（对照 check_ai_permission() 的注释）。
-    返回白名单字段，不泄露 base_url / api_key / remark。
+    返回白名单字段，不泄露 base_url / api_key。
     """
     return response_ok(await list_catalog())
 
@@ -85,7 +86,6 @@ async def create_view(request: Request):
             api_key=params["api_key"],
             model_name=params["model_name"],
             purpose=params.get("purpose"),
-            remark=params.get("remark"),
             dimensions=params.get("dimensions"),
         )
     )
@@ -106,7 +106,6 @@ async def update_view(request: Request):
             base_url=params.get("base_url"),
             api_key=params.get("api_key"),
             model_name=params.get("model_name"),
-            remark=params.get("remark"),
             enabled=params.get("enabled"),
             dimensions=params.get("dimensions"),
         )
@@ -135,7 +134,7 @@ async def set_purpose_view(request: Request):
 
 
 @llm_config_bp.post("/test")
-@openapi.definition(summary="测试模型连通性", description="需要 ai_config:c 权限；用表单当前值发一个最小 chat 请求")
+@openapi.definition(summary="测试模型连通性", description="需要 ai_config:c 权限；按模型用途测试对应接口")
 @requires_permission("ai_config:c")
 async def test_view(request: Request):
     check_ai_permission()
@@ -151,4 +150,11 @@ async def test_view(request: Request):
         )
         api_key = record.api_key if record else None
     _require({"api_key": api_key}, "api_key")
-    return response_ok(await test_connectivity(params["base_url"], api_key, params["model_name"]))
+    purpose = params.get("purpose")
+    if purpose is not None and purpose not in VALID_PURPOSES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return response_ok(
+        await test_connectivity(
+            params["base_url"], api_key, params["model_name"], purpose=purpose
+        )
+    )

@@ -60,6 +60,16 @@ def test_catalog_exemption_is_paid_for_by_a_field_whitelist():
         assert leaked not in body, f"catalog 不得返回 {leaked}，否则免鉴权不成立"
 
 
+def test_create_and_update_payloads_have_no_remark_argument():
+    """当前 API 不再接受或转交已删除的模型备注字段。"""
+    src = _src()
+    create = src.split("async def create_view")[1].split("async def update_view")[0]
+    update = src.split("async def update_view")[1].split("async def delete_view")[0]
+
+    assert 'params.get("remark")' not in create
+    assert 'params.get("remark")' not in update
+
+
 def test_every_handler_calls_license_gate():
     """check_ai_permission() 是 License 第二道防线：蓝图在启动时注册，
     License 到期不会自动注销路由，所以 handler 内必须再校验一次。"""
@@ -98,8 +108,9 @@ def test_views_never_return_raw_api_key(monkeypatch):
         async def get_or_none(**_conditions):
             return SimpleNamespace(api_key=secret)
 
-    async def fake_test_connectivity(_base_url, api_key, _model_name):
+    async def fake_test_connectivity(_base_url, api_key, _model_name, *, purpose):
         assert api_key == secret
+        assert purpose == "embedding"
         return {"ok": True, "message": "连接成功"}
 
     monkeypatch.setattr(models, "LlmModelConfig", FakeLlmModelConfig)
@@ -107,7 +118,12 @@ def test_views_never_return_raw_api_key(monkeypatch):
     monkeypatch.setattr(views, "test_connectivity", fake_test_connectivity)
     monkeypatch.setattr(views, "response_ok", lambda data: captured.setdefault("data", data))
     request = SimpleNamespace(
-        json={"id": "cfg-1", "base_url": "https://x/v1", "model_name": "aioe"},
+        json={
+            "id": "cfg-1",
+            "base_url": "https://x/v1",
+            "model_name": "aioe",
+            "purpose": "embedding",
+        },
         # 管理接口只对 default 租户会话开放（P6 Task 5）；这条测的是脱敏，
         # 不是租户守卫，所以用合法会话进来。守卫本身由
         # test_management_views_reject_non_default_tenant_session 锁死。
@@ -122,7 +138,7 @@ def test_views_never_return_raw_api_key(monkeypatch):
 def test_management_views_reject_non_default_tenant_session():
     """管理接口对非 default 租户会话一律 403。
 
-    这些接口返回 base_url / 脱敏后仍露前后缀的 api_key / remark，
+    这些接口返回 base_url / 脱敏后仍露前后缀的 api_key，
     普通租户只能走只读的 /catalog。守卫读 session，不读请求体——
     请求体传 tenant_id 会开出越权面（白盒审计 Vuln 3）。
     """
@@ -151,6 +167,79 @@ def test_tester_reports_success(monkeypatch):
 
     monkeypatch.setattr(tester, "_post_chat", lambda *a, **k: _async(FakeResponse()))
     result = asyncio.run(tester.test_connectivity("https://x/v1", "sk-1", "aioe"))
+    assert result["ok"] is True
+
+
+def test_embedding_probe_uses_openai_embeddings_contract(monkeypatch):
+    from services.llm_config import tester
+
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        async def read(self):
+            return b"{}"
+
+    class FakeRequestContext:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def post(self, url, **kwargs):
+            captured.update(url=url, **kwargs)
+            return FakeRequestContext()
+
+    def fake_client_session(*, timeout):
+        captured["timeout"] = timeout
+        return FakeSession()
+
+    monkeypatch.setattr(
+        tester.aiohttp,
+        "ClientSession",
+        fake_client_session,
+    )
+
+    response = asyncio.run(
+        tester._post_embedding("https://embedding.example/v1/", "sk-1", "bge-m3")
+    )
+
+    assert response.status == 200
+    assert captured["url"] == "https://embedding.example/v1/embeddings"
+    assert captured["json"] == {"model": "bge-m3", "input": "ping"}
+    assert captured["allow_redirects"] is False
+
+
+def test_embedding_purpose_never_calls_chat_probe(monkeypatch):
+    from services.llm_config import tester
+
+    class FakeResponse:
+        status = 200
+
+    async def fail_chat(*_args):
+        raise AssertionError("embedding test must not call chat/completions")
+
+    async def fake_embedding(*_args):
+        return FakeResponse()
+
+    monkeypatch.setattr(tester, "_post_chat", fail_chat)
+    monkeypatch.setattr(tester, "_post_embedding", fake_embedding)
+
+    result = asyncio.run(
+        tester.test_connectivity(
+            "https://embedding.example/v1", "sk-1", "bge-m3", purpose="embedding"
+        )
+    )
+
     assert result["ok"] is True
 
 

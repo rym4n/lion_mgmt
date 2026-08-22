@@ -89,6 +89,23 @@ def test_downgrade_restores_configs():
 
     assert "INSERT INTO llm_model_config" in downgrade
     assert "FROM migration_backup.llm_model_config_backup_" in downgrade
+    assert "SELECT *" not in downgrade
+    for column in (
+        "id",
+        "ctime",
+        "utime",
+        "deleted",
+        "tenant_id",
+        "name",
+        "base_url",
+        "api_key",
+        "model_name",
+        "purpose",
+        "enabled",
+        "remark",
+        "dimensions",
+    ):
+        assert column in downgrade
 
 
 def test_downgrade_restores_employee_bindings():

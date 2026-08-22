@@ -28,10 +28,31 @@ async def _post_chat(base_url: str, api_key: str, model_name: str):
             return response
 
 
-async def test_connectivity(base_url: str, api_key: str, model_name: str) -> dict:
+async def _post_embedding(base_url: str, api_key: str, model_name: str):
+    """发一个最小 embedding 请求。禁止跟随重定向，短超时。"""
+    url = f"{base_url.rstrip('/')}/embeddings"
+    timeout = aiohttp.ClientTimeout(total=TEST_TIMEOUT_SECONDS)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            url,
+            json={"model": model_name, "input": "ping"},
+            headers={"Authorization": f"Bearer {api_key}"},
+            allow_redirects=False,
+        ) as response:
+            await response.read()
+            return response
+
+
+async def test_connectivity(
+    base_url: str,
+    api_key: str,
+    model_name: str,
+    purpose: str | None = None,
+) -> dict:
     """返回 {"ok": bool, "message": str}。message 中绝不含 api_key。"""
     try:
-        response = await _post_chat(base_url, api_key, model_name)
+        post_probe = _post_embedding if purpose == "embedding" else _post_chat
+        response = await post_probe(base_url, api_key, model_name)
     except aiohttp.ClientError as exc:
         return {"ok": False, "message": f"连接失败：{type(exc).__name__}"}
     except TimeoutError:

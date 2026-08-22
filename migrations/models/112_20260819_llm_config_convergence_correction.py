@@ -92,9 +92,15 @@ async def downgrade(db: BaseDBAsyncClient) -> str:
         END $$;
 
         -- §2. 恢复非 default 租户的配置
-        -- 直接从备份表插入（id 会保留，UUID 不会冲突）
-        INSERT INTO llm_model_config
-        SELECT * FROM migration_backup.llm_model_config_backup_{backup_suffix}
+        -- 显式映射列，避免后续迁移删列再回滚加列后物理列顺序变化。
+        INSERT INTO llm_model_config (
+            id, ctime, utime, deleted, tenant_id, name, base_url, api_key,
+            model_name, purpose, enabled, remark, dimensions
+        )
+        SELECT
+            id, ctime, utime, deleted, tenant_id, name, base_url, api_key,
+            model_name, purpose, enabled, remark, dimensions
+        FROM migration_backup.llm_model_config_backup_{backup_suffix}
         ON CONFLICT (id) DO NOTHING;
 
         -- §3. 恢复员工绑定
