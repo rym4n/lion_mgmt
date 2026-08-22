@@ -372,7 +372,12 @@ def batch_status(row: dict) -> int:
     return -1
 
 
-async def root_playbook_names(model, condition, run_ids: list[str]) -> dict[str, str]:
+async def root_playbook_names(
+    model,
+    condition,
+    run_ids: list[str],
+    root_playbook_versions: dict[str, str] | None = None,
+) -> dict[str, str]:
     if not run_ids:
         return {}
     rows = (
@@ -382,17 +387,55 @@ async def root_playbook_names(model, condition, run_ids: list[str]) -> dict[str,
             node_type="start-node",
         )
         .order_by("run_id", "ctime", "id")
-        .values("run_id", "playbook_name")
+        .values("run_id", "playbook_name", "playbook_version_id")
     )
+    requested_roots = root_playbook_versions or {}
     names = {}
     for row in rows:
-        if row.get("playbook_name"):
+        requested_version = requested_roots.get(row["run_id"])
+        if (
+            row.get("playbook_name")
+            and requested_version
+            and str(row.get("playbook_version_id")) == str(requested_version)
+        ):
+            names[row["run_id"]] = row["playbook_name"]
+
+    unresolved = [run_id for run_id in run_ids if run_id not in names]
+    child_names = {}
+    if unresolved:
+        subscript_rows = (
+            await model.filter(
+                condition,
+                run_id__in=unresolved,
+                node_type="subscript-node",
+            )
+            .values("run_id", "tool_display_name")
+        )
+        for row in subscript_rows:
+            child_name = row.get("tool_display_name")
+            if child_name:
+                child_names.setdefault(row["run_id"], set()).add(child_name)
+
+    # Legacy rows do not carry linked_run_roots. A subscript wrapper snapshots
+    # its child playbook name in tool_display_name, so exclude those starts.
+    for row in rows:
+        if (
+            row.get("playbook_name")
+            and row["run_id"] not in names
+            and row["playbook_name"] not in child_names.get(row["run_id"], set())
+        ):
+            names[row["run_id"]] = row["playbook_name"]
+    for row in rows:
+        if row.get("playbook_name") and row["run_id"] not in names:
             names.setdefault(row["run_id"], row["playbook_name"])
     return names
 
 
 async def runlog_batch_summaries(
-    model, condition, run_ids: list[str]
+    model,
+    condition,
+    run_ids: list[str],
+    root_playbook_versions: dict[str, str] | None = None,
 ) -> dict[str, dict]:
     if not run_ids:
         return {}
@@ -431,7 +474,12 @@ async def runlog_batch_summaries(
             "tool_display_name",
         )
     )
-    primary_playbooks = await root_playbook_names(model, condition, run_ids)
+    primary_playbooks = await root_playbook_names(
+        model,
+        condition,
+        run_ids,
+        root_playbook_versions,
+    )
     summaries = {}
     for row in rows:
         summaries[row["run_id"]] = {

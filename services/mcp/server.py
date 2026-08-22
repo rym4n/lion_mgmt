@@ -1,7 +1,6 @@
 # coding=utf-8
 
 from functools import partial
-import re
 
 from mcp.server import Server
 from mcp.types import EmbeddedResource, ImageContent, TextContent, Tool
@@ -12,6 +11,7 @@ from libs.kafka import aproduce
 from libs.utils import gen_run_id
 from models import Playbook, PlaybookVersion, Room
 from models.user import Account
+from services.workflow.input_resolution import playbook_input_schema
 from settings import TASK_TOPIC
 
 # Initialize MCP Server
@@ -152,27 +152,7 @@ async def get_playbook_input_logic(playbook_version_id, tenant_id):
     if not playbook:
         raise ValueError(f"Playbook version {playbook_version_id} not found")
 
-    input_list = []
-
-    if playbook.flow_json:
-        nodes = playbook.flow_json.get("nodes", [])
-        if not nodes or "properties" not in nodes[0] or "start_params" not in nodes[0]["properties"]:
-            return input_list
-
-        input_id = nodes[0]["id"]
-        start_params = nodes[0]["properties"]["start_params"]
-
-        param_map = {param["name"]: {"type": param["type"], "description": param["desc"]} for param in start_params}
-
-        pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_\u4e00-\u9fff]+)(?=[\)}}])"
-
-        matches = re.findall(pattern, str(playbook.flow_json))
-        unique_matches = list(set(matches))  # De-duplicate
-        for param_key in unique_matches:
-            if param_key in param_map:
-                input_list.append({param_key: param_map[param_key]})
-
-    return input_list
+    return playbook_input_schema(playbook.flow_json)
 
 
 # @mcp_server.call_tool()

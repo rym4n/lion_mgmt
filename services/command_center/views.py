@@ -381,7 +381,12 @@ async def _linked_task_run_page(
                 task_run.ctime AS task_run_ctime,
                 task_run.id AS task_run_id,
                 linked_run.run_id,
-                linked_run.ordinality AS ordinal
+                linked_run.ordinality AS ordinal,
+                CASE
+                    WHEN jsonb_typeof(task_run.metadata->'linked_run_roots') = 'object'
+                    THEN (task_run.metadata->'linked_run_roots')->>linked_run.run_id
+                    ELSE NULL
+                END AS root_playbook_version_id
             FROM command_center_task_run AS task_run
             CROSS JOIN LATERAL jsonb_array_elements_text(
                 CASE
@@ -399,11 +404,12 @@ async def _linked_task_run_page(
                 task_run_ctime,
                 task_run_id,
                 run_id,
-                ordinal
+                ordinal,
+                root_playbook_version_id
             FROM linked
             ORDER BY run_id, task_run_ctime DESC, task_run_id DESC, ordinal DESC
         )
-        SELECT task_run_ctime, task_run_id, run_id, ordinal
+        SELECT task_run_ctime, task_run_id, run_id, ordinal, root_playbook_version_id
         FROM deduplicated
         {cursor_clause}
         ORDER BY task_run_ctime DESC, task_run_id DESC, ordinal DESC, run_id DESC
@@ -428,7 +434,11 @@ async def _require_task_run(task_id: str, run_id: str, tenant_id: str) -> Comman
     return task
 
 
-async def _runlog_batch_summaries(run_ids: list[str], tenant_id: str) -> dict[str, dict]:
+async def _runlog_batch_summaries(
+    run_ids: list[str],
+    tenant_id: str,
+    root_playbook_versions: dict[str, str] | None = None,
+) -> dict[str, dict]:
     if not run_ids:
         return {}
     from tortoise.expressions import Q
@@ -439,6 +449,7 @@ async def _runlog_batch_summaries(run_ids: list[str], tenant_id: str) -> dict[st
         Runlog,
         Q(tenant_id=tenant_id, deleted=False),
         run_ids,
+        root_playbook_versions=root_playbook_versions,
     )
 
 
@@ -1018,7 +1029,16 @@ async def task_runlogs(request: Request):
     cursor = _decode_runlog_cursor(data.get("cursor"), "batch", task_id=task.id)
     linked_rows, has_more = await _linked_task_run_page(task.id, tenant_id, limit, cursor)
     page_ids = [row["run_id"] for row in linked_rows]
-    summaries = await _runlog_batch_summaries(page_ids, tenant_id)
+    root_playbook_versions = {
+        row["run_id"]: row["root_playbook_version_id"]
+        for row in linked_rows
+        if row.get("root_playbook_version_id")
+    }
+    summaries = await _runlog_batch_summaries(
+        page_ids,
+        tenant_id,
+        root_playbook_versions,
+    )
     runlogs = [summaries[run_id] for run_id in page_ids if run_id in summaries]
     next_cursor = None
     if has_more and linked_rows:

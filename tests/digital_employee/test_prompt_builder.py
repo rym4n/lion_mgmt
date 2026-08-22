@@ -65,6 +65,8 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
     assert "分诊告警" in files["system_prompt.md"]
     assert "只用授权工具" not in files["system_prompt.md"]
     assert "以当前任务和平台强制访问控制为准。" in files["system_prompt.md"]
+    assert "执行剧本必须先调用 playbook-input" in files["system_prompt.md"]
+    assert "不得用 '{}' 执行有入参的剧本" in files["system_prompt.md"]
     assert "AgentScope Toolkit" not in files["system_prompt.md"]
     assert "内置 `aioe-cli` skill" not in files["system_prompt.md"]
     assert files["skills"] == {}

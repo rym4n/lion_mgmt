@@ -399,7 +399,7 @@ async def test_callback_playbook_approval_status_guard(monkeypatch):
         fake_settings = SimpleNamespace(TASK_TOPIC="task_topic")
         monkeypatch.setitem(sys.modules, 'settings', fake_settings)
 
-    monkeypatch.setattr("libs.kafka.aproduce", mock_aproduce)
+    monkeypatch.setattr("services.ticket.playbook_bridge.aproduce", mock_aproduce)
 
     # approval_status 必须是 1 或 2
     await _callback_playbook(ticket, 1, "user1", {"decision": "approve"})

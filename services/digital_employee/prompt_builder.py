@@ -256,6 +256,10 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         "- `action --app <应用英文标识> --action <动作英文标识> [--input '<JSON对象>'] [--resource <id或name>]`：执行动作。",
         "不要凭空猜测应用/动作/参数名，先用 apps/actions/resources 查询确认，再执行 action。",
         "例：查询深信服托管云主机清单 → command=\"action --app sangfor_managed_cloud --action GetCloudHostList --input '{}' --resource <资源名>\"。",
+        "- `playbooks`：列出有权执行的已发布剧本；",
+        "- `playbook-input --flow <剧本版本id>`：查询剧本入参 schema/default；",
+        "- `playbook --flow <剧本版本id> --input '<JSON对象>'`：执行剧本。",
+        "执行剧本必须先调用 playbook-input，严格按返回的 schema/default 组装 --input；不得用 '{}' 执行有入参的剧本，无入参时也必须显式传 --input '{}'。",
     ]
     system_prompt.extend(["## Runtime", "\n".join(runtime_lines), ""])
 

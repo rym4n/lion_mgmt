@@ -62,6 +62,7 @@ from models import (
 )
 from services.tools.views import TOOL_UPLOAD_PERMISSION, upload_tool
 from services.tools.views import tool_action_playbook_delete, tool_action_update
+from services.workflow.input_resolution import playbook_input_schema
 from settings import TASK_TOPIC, TZ
 
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")
@@ -117,7 +118,12 @@ def _is_completed_flow_end_log(log, flow_id):
     return _is_terminal_runlog(log)
 
 
-async def _link_runlog_to_command_run(agent_run_id: str, debug_run_id: str, tenant_id: str) -> None:
+async def _link_runlog_to_command_run(
+    agent_run_id: str,
+    debug_run_id: str,
+    tenant_id: str,
+    root_playbook_version_id: str | None = None,
+) -> None:
     """把数字员工经 aioe-cli 执行动作/剧本产生的 debug run_id 关联到其 CommandTaskRun。
 
     数字员工的 ReAct 循环串行调用工具，故对同一 CommandTaskRun 的 metadata 追加无并发竞态。
@@ -131,10 +137,21 @@ async def _link_runlog_to_command_run(agent_run_id: str, debug_run_id: str, tena
     metadata = command_run.metadata if isinstance(command_run.metadata, dict) else {}
     linked = metadata.get("linked_run_ids")
     linked = list(linked) if isinstance(linked, list) else []
-    if debug_run_id in linked:
+    changed = False
+    if debug_run_id not in linked:
+        linked.append(debug_run_id)
+        metadata["linked_run_ids"] = linked
+        changed = True
+    if root_playbook_version_id:
+        roots = metadata.get("linked_run_roots")
+        roots = dict(roots) if isinstance(roots, dict) else {}
+        root_version = str(root_playbook_version_id)
+        if roots.get(debug_run_id) != root_version:
+            roots[debug_run_id] = root_version
+            metadata["linked_run_roots"] = roots
+            changed = True
+    if not changed:
         return
-    linked.append(debug_run_id)
-    metadata["linked_run_ids"] = linked
     command_run.metadata = metadata
     await command_run.save(update_fields=["metadata", "utime"])
 
@@ -1337,7 +1354,14 @@ async def execute_action(request):
         # 使指挥中心任务详情能展示完整执行过程（人工调试时无此标识，跳过关联）。
         agent_run_id = message.get("agent_run_id")
         if agent_run_id:
-            await _link_runlog_to_command_run(str(agent_run_id), run_id, tenant_id)
+            await _link_runlog_to_command_run(
+                str(agent_run_id),
+                run_id,
+                tenant_id,
+                str(message.get("flow_id"))
+                if message.get("type") == "flow" and message.get("flow_id")
+                else None,
+            )
         sent_versions = {}
         for _ in range(60):
             logs = await Runlog.filter(run_id=run_id, deleted=False, tenant_id=tenant_id).order_by("utime", "ctime", "id").all()
@@ -1412,34 +1436,7 @@ async def get_playbook_input(playbook_id, tenant_id):
     if not playbook:
         raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
-    input_list = []
-
-    if playbook.flow_json:
-        nodes = playbook.flow_json.get("nodes", [])
-        if not nodes or "properties" not in nodes[0] or "start_params" not in nodes[0]["properties"]:
-            return input_list
-
-        input_id = nodes[0]["id"]
-        start_params = nodes[0]["properties"]["start_params"]
-
-        param_map = {
-            param["name"]: {
-                "type": param["type"],
-                "description": param["desc"],
-                "default": param.get("default"),
-            }
-            for param in start_params
-        }
-
-        pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_\u4e00-\u9fff]+)(?=[\)}}])"
-
-        matches = re.findall(pattern, str(playbook.flow_json))
-        unique_matches = list(set(matches))  # 去重
-        for param_key in unique_matches:
-            if param_key in param_map:
-                input_list.append({param_key: param_map[param_key]})
-
-    return input_list
+    return playbook_input_schema(playbook.flow_json)
 
 
 async def statistics_data(flow_json, tenant_id):

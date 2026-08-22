@@ -150,7 +150,7 @@ def test_command_center_runlog_limits_are_bounded():
 
 
 @pytest.mark.asyncio
-async def test_root_playbook_name_uses_earliest_start_node():
+async def test_root_playbook_name_prefers_recorded_invocation_root():
     captured = {}
 
     class Query:
@@ -165,9 +165,21 @@ async def test_root_playbook_name_uses_earliest_start_node():
         def __await__(self):
             async def result():
                 return [
-                    {"run_id": "run-1", "playbook_name": "巡检总任务"},
-                    {"run_id": "run-1", "playbook_name": "深信服托管云"},
-                    {"run_id": "run-2", "playbook_name": "资产巡检"},
+                    {
+                        "run_id": "run-1",
+                        "playbook_name": "深信服托管云",
+                        "playbook_version_id": "child-v1",
+                    },
+                    {
+                        "run_id": "run-1",
+                        "playbook_name": "巡检总任务",
+                        "playbook_version_id": "root-v1",
+                    },
+                    {
+                        "run_id": "run-2",
+                        "playbook_name": "资产巡检",
+                        "playbook_version_id": "root-v2",
+                    },
                 ]
 
             return result().__await__()
@@ -179,7 +191,12 @@ async def test_root_playbook_name_uses_earliest_start_node():
             captured["filters"] = kwargs
             return Query()
 
-    names = await root_playbook_names(Model, object(), ["run-1", "run-2"])
+    names = await root_playbook_names(
+        Model,
+        object(),
+        ["run-1", "run-2"],
+        {"run-1": "root-v1", "run-2": "root-v2"},
+    )
 
     assert names == {"run-1": "巡检总任务", "run-2": "资产巡检"}
     assert captured["filters"] == {
@@ -187,7 +204,47 @@ async def test_root_playbook_name_uses_earliest_start_node():
         "node_type": "start-node",
     }
     assert captured["order_by"] == ("run_id", "ctime", "id")
-    assert captured["values"] == ("run_id", "playbook_name")
+    assert captured["values"] == ("run_id", "playbook_name", "playbook_version_id")
+
+
+@pytest.mark.asyncio
+async def test_root_playbook_name_excludes_child_for_legacy_linkage():
+    class Query:
+        def __init__(self, node_type):
+            self.node_type = node_type
+
+        def order_by(self, *_fields):
+            return self
+
+        async def values(self, *_fields):
+            if self.node_type == "subscript-node":
+                return [
+                    {
+                        "run_id": "run-1",
+                        "tool_display_name": "深信服托管云",
+                    }
+                ]
+            return [
+                {
+                    "run_id": "run-1",
+                    "playbook_name": "深信服托管云",
+                    "playbook_version_id": "child-v1",
+                },
+                {
+                    "run_id": "run-1",
+                    "playbook_name": "巡检总任务",
+                    "playbook_version_id": "root-v1",
+                },
+            ]
+
+    class Model:
+        @classmethod
+        def filter(cls, *_args, **kwargs):
+            return Query(kwargs.get("node_type"))
+
+    names = await root_playbook_names(Model, object(), ["run-1"])
+
+    assert names == {"run-1": "巡检总任务"}
 
 
 @pytest.mark.asyncio
@@ -212,8 +269,16 @@ async def test_batch_summary_prefers_root_playbook_over_aggregate_name():
             async def result():
                 if self.root_query:
                     return [
-                        {"run_id": "run-1", "playbook_name": "巡检总任务"},
-                        {"run_id": "run-1", "playbook_name": "深信服托管云"},
+                        {
+                            "run_id": "run-1",
+                            "playbook_name": "深信服托管云",
+                            "playbook_version_id": "child-v1",
+                        },
+                        {
+                            "run_id": "run-1",
+                            "playbook_name": "巡检总任务",
+                            "playbook_version_id": "root-v1",
+                        },
                     ]
                 return [
                     {
@@ -240,7 +305,12 @@ async def test_batch_summary_prefers_root_playbook_over_aggregate_name():
         def filter(cls, *_args, **kwargs):
             return Query(kwargs.get("node_type") == "start-node")
 
-    summaries = await runlog_batch_summaries(Model, object(), ["run-1"])
+    summaries = await runlog_batch_summaries(
+        Model,
+        object(),
+        ["run-1"],
+        root_playbook_versions={"run-1": "root-v1"},
+    )
 
     assert summaries["run-1"]["playbook_name"] == "巡检总任务"
     assert summaries["run-1"]["status"] == 0
@@ -392,6 +462,8 @@ def test_batch_linkage_query_is_database_bounded_and_cursor_stable():
     assert "LIMIT $3" in source
     assert "limit + 1" in source
     assert "task_run_ctime DESC, task_run_id DESC, ordinal DESC, run_id DESC" in source
+    assert "linked_run_roots" in source
+    assert "root_playbook_version_id" in source
     assert ".all()" not in source
 
 

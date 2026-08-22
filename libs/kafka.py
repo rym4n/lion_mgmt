@@ -7,12 +7,32 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaConnectionError
 from sanic.log import logger
 
-from settings import KAFKA_CONFIG
+from settings import KAFKA_CONFIG, TASK_TOPIC
+
+
+async def _normalize_flow_task_message(value):
+    from services.workflow.input_resolution import normalize_flow_task_message
+
+    return await normalize_flow_task_message(value)
 
 
 async def aproduce(topic, value, key=None, partition=None):
+    if (
+        topic == TASK_TOPIC
+        and isinstance(value, dict)
+        and value.get("run_type") == "flow"
+        and value.get("timer") != "remove"
+    ):
+        value = await _normalize_flow_task_message(value)
+
     try:
-        async with AIOKafkaProducer(**KAFKA_CONFIG) as producer:
+        producer_config = dict(KAFKA_CONFIG)
+        # The application sends each task once. Kafka may retry internally when
+        # an acknowledgement is lost; idempotence prevents that transport retry
+        # from creating a second broker record.
+        if topic == TASK_TOPIC:
+            producer_config["enable_idempotence"] = True
+        async with AIOKafkaProducer(**producer_config) as producer:
             _ = await producer.send_and_wait(topic, orjson.dumps(value), key, partition)
     except Exception as err:
         logger.error(f"{err} | {traceback.format_exc()}")

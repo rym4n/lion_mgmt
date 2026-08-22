@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import asyncio
+import inspect
 import sys
 from types import ModuleType
 
@@ -53,6 +54,14 @@ def test_completed_flow_end_log_requires_terminal_state():
     assert _is_completed_flow_end_log(finished_end_log, "flow-2") is False
 
 
+def test_debug_request_publishes_one_task_message():
+    from services.workflow import views
+
+    source = inspect.getsource(views.execute_action)
+
+    assert source.count("await aproduce(TASK_TOPIC, msg)") == 1
+
+
 def _patch_command_task_run(monkeypatch, run_model):
     fake_module = ModuleType("models.command_center")
     fake_module.CommandTaskRun = run_model
@@ -86,6 +95,38 @@ def test_link_runlog_to_command_run_appends_dedup(monkeypatch):
     # 再次关联同一 debug run_id 不重复追加
     asyncio.run(_link_runlog_to_command_run("agent-run", "debug-1", "t1"))
     assert run.metadata["linked_run_ids"] == ["existing", "debug-1"]
+
+
+def test_link_runlog_to_command_run_records_root_playbook(monkeypatch):
+    class FakeRun:
+        def __init__(self):
+            self.metadata = {}
+
+        async def save(self, update_fields=None):
+            self.saved_fields = update_fields
+
+    run = FakeRun()
+
+    class RunModel:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            return run
+
+    _patch_command_task_run(monkeypatch, RunModel)
+
+    asyncio.run(
+        _link_runlog_to_command_run(
+            "agent-run",
+            "debug-1",
+            "t1",
+            "root-flow-v1",
+        )
+    )
+
+    assert run.metadata == {
+        "linked_run_ids": ["debug-1"],
+        "linked_run_roots": {"debug-1": "root-flow-v1"},
+    }
 
 
 def test_link_runlog_noop_when_run_missing(monkeypatch):
