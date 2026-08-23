@@ -62,6 +62,7 @@ PERMISSION_RESOURCE_LABELS = {
     "network_topology": "网络拓扑",
     "asset_management": "资产管理",
     "network_access_control": "网络访问控制",
+    "knowledge": "知识库",
 }
 
 TOOL_VIEW_PERMISSION = "tool:r"
@@ -158,6 +159,7 @@ MODEL_MENU_FALLBACK_ORDER = {
     "digital_employee_skill": (15, 2),
     "agent": (15, 3),
     "agent_report_schedule": (15, 4),
+    "knowledge": (15, 5),
 }
 
 PERMISSION_MENU_LICENSE_ALIASES = {
