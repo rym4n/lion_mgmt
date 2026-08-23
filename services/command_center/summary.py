@@ -20,6 +20,8 @@ EVENT_PHRASES = {
     "runtime_progress": "数字员工正在推进",
     "runtime_completed": "数字员工运行完成",
     "runtime_error": "数字员工运行异常",
+    "runtime_degraded": "数字员工运行已降级继续",
+    "runtime_memory": "记忆写回状态已记录",
     "approval_required": "等待人工审批",
     "policy_denied": "策略已阻止风险操作",
     "continuation_started": "审批通过后继续执行",
@@ -98,6 +100,14 @@ def _latest_error(runs: list[Any]) -> dict:
     return {}
 
 
+def _failure_layers(runs: list[Any]) -> dict:
+    for run in runs:
+        metadata = getattr(run, "metadata", None)
+        if isinstance(metadata, dict) and isinstance(metadata.get("failure_layers"), dict):
+            return metadata["failure_layers"]
+    return {}
+
+
 def build_task_summary(
     task: Any,
     runs: list[Any],
@@ -108,6 +118,8 @@ def build_task_summary(
     latest_run = runs[0] if runs else None
     pending_approvals = [item for item in approvals if getattr(item, "status", None) == "pending"]
     latest_error = _latest_error(runs)
+    failure_layers = _failure_layers(runs)
+    primary_failure = failure_layers.get("business") or failure_layers.get("runtime") or latest_error
     started_at = _dt(getattr(task, "started_at", None)) or _dt(getattr(latest_run, "started_at", None))
     finished_at = _dt(getattr(task, "finished_at", None)) or _dt(getattr(latest_run, "finished_at", None))
     status = getattr(task, "status", None)
@@ -127,6 +139,8 @@ def build_task_summary(
         "needs_clarification": needs_clarification,
         "has_error": bool(latest_error),
         "latest_error": latest_error,
+        "failure_layers": failure_layers,
+        "primary_failure": primary_failure,
         "latest_run_status": getattr(latest_run, "status", None) if latest_run else None,
         "latest_run_id": getattr(latest_run, "run_id", None) if latest_run else None,
         "issues_count": len(pending_approvals) + (1 if latest_error else 0) + (1 if needs_clarification else 0),

@@ -6,6 +6,7 @@ from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime, timedelta
 import hashlib
+import json
 import logging
 from typing import Any
 from tortoise.transactions import in_transaction
@@ -102,6 +103,130 @@ def _runtime_tool_name(data: dict) -> str | None:
     return data.get("name") or data.get("tool_name") or data.get("tool") or data.get("tool_call_name")
 
 
+def _merge_runtime_diagnostics(metadata: Any, diagnostic: Any) -> dict:
+    current = metadata if isinstance(metadata, dict) else {}
+    items = list(current.get("runtime_diagnostics") or [])
+    if isinstance(diagnostic, dict):
+        items.append(diagnostic)
+    return {**current, "runtime_diagnostics": items}
+
+
+def _safe_runtime_error(exc: BaseException) -> dict:
+    payload = getattr(exc, "payload", None)
+    if isinstance(payload, dict):
+        return {
+            "layer": "runtime",
+            "code": str(payload.get("code") or "runtime_internal_error"),
+            "message": str(payload.get("message") or "数字员工运行异常"),
+            "blocking": bool(payload.get("blocking", True)),
+        }
+    return {
+        "layer": "runtime",
+        "code": "runtime_internal_error",
+        "message": "数字员工运行异常，请查看运行详情",
+        "blocking": True,
+    }
+
+
+def _safe_business_message(runlog: Any) -> str:
+    node = str(getattr(runlog, "node_name", None) or getattr(runlog, "action_display_name", None) or "剧本节点")
+    result = str(getattr(runlog, "result", None) or "").strip()
+    if not result or result == "执行中":
+        return f"剧本节点“{node}”执行失败"
+    # Keep the operator-facing cause useful while avoiding model/schema dumps.
+    lowered = result.lower()
+    if "jsonschema" in lowered or "validationerror" in lowered or "context_to_preserve" in lowered:
+        return f"剧本节点“{node}”执行失败（业务动作返回失败，运行时校验异常已隔离）"
+    return f"剧本节点“{node}”执行失败：{result[:500]}"
+
+
+def _runlog_business_failed(runlog: Any) -> bool:
+    status = getattr(runlog, "status", None)
+    if status in {-1, 3}:
+        return True
+    raw = getattr(runlog, "result", None)
+    if not isinstance(raw, str) or not raw.strip() or raw.strip() == "执行中":
+        return False
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    code = payload.get("code")
+    try:
+        code = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    return (
+        code is not None and code >= 400
+    ) or str(payload.get("status") or "").lower() in {"failed", "failure", "error"} \
+        or payload.get("success") is False
+
+
+async def _collect_failure_layers(run: CommandTaskRun, exc: BaseException) -> dict[str, Any]:
+    runtime = _safe_runtime_error(exc)
+    layers: dict[str, Any] = {"runtime": runtime}
+    metadata = run.metadata if isinstance(run.metadata, dict) else {}
+    memory = metadata.get("memory_status")
+    if isinstance(memory, dict):
+        layers["memory"] = memory
+    linked_ids = metadata.get("linked_run_ids")
+    linked_ids = [str(item) for item in linked_ids if item] if isinstance(linked_ids, list) else []
+    if linked_ids:
+        try:
+            from models.runlog import Runlog
+
+            logs = await Runlog.filter(
+                tenant_id=getattr(run, "tenant_id", None),
+                run_id__in=linked_ids,
+                deleted=False,
+                status__in=[-1, 0, 3],
+            ).order_by("ctime", "id").all()
+            logs = [log for log in logs if _runlog_business_failed(log)]
+            if logs:
+                primary = logs[0]
+                layers["business"] = {
+                    "layer": "business",
+                    "code": "playbook_execution_failed",
+                    "message": _safe_business_message(primary),
+                    "run_id": str(getattr(primary, "run_id", "")),
+                    "node_id": str(getattr(primary, "node_id", "")),
+                    "node_name": str(getattr(primary, "node_name", "") or ""),
+                    "status": getattr(primary, "status", None),
+                }
+        except Exception as query_exc:
+            logger.warning("command-center failure aggregation skipped error_code=%s", type(query_exc).__name__)
+    return layers
+
+
+async def _persist_failure_layers(run: CommandTaskRun, layers: dict[str, Any]) -> None:
+    """Merge layered failure evidence even when a prior runtime event closed the run."""
+    async with in_transaction() as connection:
+        locked = (
+            await CommandTaskRun.filter(id=run.id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not locked:
+            return
+        metadata = locked.metadata if isinstance(locked.metadata, dict) else {}
+        metadata = {**metadata, "failure_layers": layers}
+        primary = layers.get("business") or layers.get("runtime") or {}
+        error = {
+            "layer": primary.get("layer") or "runtime",
+            "code": primary.get("code") or "runtime_internal_error",
+            "message": primary.get("message") or "数字员工运行异常，请查看运行详情",
+            "primary": primary,
+            "secondary": [value for key, value in layers.items() if key != primary.get("layer")],
+        }
+        locked.error = error
+        locked.metadata = metadata
+        await locked.save(using_db=connection, update_fields=["error", "metadata", "utime"])
+    _sync_run(run, locked)
+
+
 def normalize_runtime_event(event_type: str, payload: Any) -> dict:
     data = _event_payload(payload)
     if event_type == "delta":
@@ -148,13 +273,41 @@ def normalize_runtime_event(event_type: str, payload: Any) -> dict:
             "metadata": {"runtime_event": event_type, "payload": data, "requested_action": denied_action},
         }
     if event_type == "error":
+        code = data.get("code") or "runtime_internal_error"
+        blocking = data.get("blocking", True)
         return {
-            "event_type": "runtime_error",
-            "message": data.get("message") or str(data),
-            "run_status": COMMAND_RUN_STATUS_FAILED,
-            "task_status": COMMAND_TASK_STATUS_FAILED,
-            "error": {"message": data.get("message") or str(data), "payload": data},
+            "event_type": "runtime_error" if blocking else "runtime_degraded",
+            "code": code,
+            "message": data.get("message") or "数字员工运行异常",
+            "blocking": blocking,
+            "run_status": COMMAND_RUN_STATUS_FAILED if blocking else None,
+            "task_status": COMMAND_TASK_STATUS_FAILED if blocking else None,
+            "error": {
+                "code": code,
+                "message": data.get("message") or "数字员工运行异常",
+                "blocking": blocking,
+                "payload": data,
+            } if blocking else None,
             "metadata": {"runtime_event": event_type, "payload": data},
+        }
+    if event_type == "runtime_degraded":
+        return {
+            "event_type": "runtime_degraded",
+            "code": data.get("code") or "runtime_degraded",
+            "message": data.get("message") or "数字员工运行已降级继续",
+            "blocking": False,
+            "metadata": {"runtime_event": event_type, "payload": data},
+        }
+    if event_type == "runtime_memory":
+        return {
+            "event_type": "runtime_memory",
+            "message": "记忆写回状态已记录",
+            "blocking": False,
+            "metadata": {
+                "runtime_event": event_type,
+                "payload": data,
+                "memory_status": data,
+            },
         }
     if event_type == "end":
         return {
@@ -424,6 +577,19 @@ async def record_runtime_event(
         if normalized.get("error"):
             locked_run.error = normalized["error"]
             update_fields.append("error")
+        if normalized["event_type"] == "runtime_degraded":
+            locked_run.metadata = _merge_runtime_diagnostics(
+                locked_run.metadata,
+                normalized.get("metadata", {}).get("payload"),
+            )
+            update_fields.append("metadata")
+        elif normalized["event_type"] == "runtime_memory":
+            metadata = locked_run.metadata if isinstance(locked_run.metadata, dict) else {}
+            locked_run.metadata = {
+                **metadata,
+                "memory_status": normalized.get("metadata", {}).get("memory_status"),
+            }
+            update_fields.append("metadata")
         await locked_run.save(using_db=connection, update_fields=sorted(set(update_fields)))
 
         task_status = normalized.get("task_status")
@@ -709,17 +875,41 @@ async def execute_task_run(
         )
         return result
     except Exception as exc:
+        failure_layers = await _collect_failure_layers(run, exc)
+        try:
+            await _persist_failure_layers(run, failure_layers)
+        except Exception as persist_exc:
+            logger.warning("failure layer persistence skipped error_code=%s", type(persist_exc).__name__)
+        primary = failure_layers.get("business") or failure_layers.get("runtime") or {}
+        primary_message = primary.get("message") or "数字员工执行失败，请查看运行详情"
+        try:
+            from services.command_center.manager import record_task_event
+
+            await record_task_event(
+                task,
+                "failure_aggregated",
+                primary_message,
+                operator_id,
+                {"run_id": run.run_id, "failure_layers": failure_layers},
+            )
+        except Exception as event_exc:
+            logger.warning("failure aggregation event skipped error_code=%s", type(event_exc).__name__)
         await finalize_run_and_task(
             run,
             task,
             COMMAND_RUN_STATUS_FAILED,
             {
                 "status": COMMAND_TASK_STATUS_FAILED,
-                "message": f"数字员工执行失败: {exc}",
-                "metadata": {"run_id": run.run_id, "error": str(exc)},
+                "message": primary_message,
+                "metadata": {"run_id": run.run_id, "failure_layers": failure_layers},
             },
             operator_id=operator_id,
-            error={"message": str(exc)},
+            error={
+                "layer": primary.get("layer") or "runtime",
+                "code": primary.get("code") or "runtime_internal_error",
+                "message": primary_message,
+                "failure_layers": failure_layers,
+            },
         )
         raise
     finally:

@@ -14,6 +14,14 @@ from .lion_agent_adapter import stream_prompt_events
 from .prompt_builder import build_runtime_prompt
 
 
+class RuntimeEventError(RuntimeError):
+    """A blocking runtime event, retaining its stable public error payload."""
+
+    def __init__(self, payload: dict):
+        self.payload = dict(payload)
+        super().__init__(str(self.payload.get("message") or "数字员工运行异常"))
+
+
 def _stream_id(task: CommandTask) -> str:
     return f"digital-employee:{task.id}"
 
@@ -254,7 +262,17 @@ async def run(
                     await _publish_room_event(task, "delta", {"content": value}, operator_id)
                 await _publish_room_end(task, operator_id)
         elif event_type == "error":
-            raise RuntimeError(event.get("message") or event)
+            # The callback has already persisted the structured runtime error.
+            # Non-blocking errors are diagnostics and must not abort the task;
+            # only an explicitly blocking event ends the business execution.
+            if event.get("blocking", True) is False:
+                await _publish_room_event(task, "runtime_degraded", event, operator_id)
+                continue
+            raise RuntimeEventError(event)
+        elif event_type == "runtime_degraded":
+            # Compression/memory degradation is recorded by the callback and
+            # remains visible to the operator, but does not change task status.
+            await _publish_room_event(task, event_type, event, operator_id)
         else:
             await _publish_room_event(task, event_type, event, operator_id)
     result_content = "".join(content)
