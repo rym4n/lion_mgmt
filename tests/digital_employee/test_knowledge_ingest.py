@@ -70,24 +70,12 @@ async def test_collect_package_docs_size_limits():
         assert "huge.md" not in collected_names
 
 
-@pytest.mark.asyncio
-async def test_make_target_uri_deterministic():
-    """测试目标 URI 的确定性。"""
-    from services.digital_employee.knowledge_ingest import _make_target_uri
+def test_target_uri_uses_space_relative_path():
+    """包内 URI 只保留空间内相对路径，不含租户或版本前缀。"""
+    from services.digital_employee.knowledge_ingest import _make_target_rel_path
 
-    uri1 = _make_target_uri("tenant123", "role", "monitor", "1", "README.md")
-    uri2 = _make_target_uri("tenant123", "role", "monitor", "1", "README.md")
-
-    # 同样输入必须产生同样 URI
-    assert uri1 == uri2
-
-    # 格式验证
-    assert uri1.startswith("viking://resources/")
-    assert "tenant123" in uri1
-    assert "role" in uri1
-    assert "monitor" in uri1
-    assert "/1/" in uri1
-    assert "README.md" in uri1
+    assert _make_target_rel_path("guide.md") == "guide.md"
+    assert _make_target_rel_path("docs\\guide.md") == "docs/guide.md"
 
 
 @pytest.mark.asyncio
@@ -114,29 +102,11 @@ async def test_compute_content_hash():
     assert all(c in "0123456789abcdef" for c in hash1)
 
 
-@pytest.mark.asyncio
-async def test_parse_upload_url():
-    """测试从 MCP 响应解析 upload URL。"""
-    from services.digital_employee.knowledge_ingest import (
-        _parse_upload_url_from_mcp_response,
-    )
+def test_mcp_upload_url_parser_removed():
+    """旧 MCP 自然语言上传路径必须彻底移除。"""
+    import services.digital_employee.knowledge_ingest as mod
 
-    # 成功解析
-    response1 = "Please upload your file to: http://lion-viking:8000/api/v1/resources/temp_upload?token=abc123xyz"
-    url1 = _parse_upload_url_from_mcp_response(response1)
-    assert (
-        url1 == "http://lion-viking:8000/api/v1/resources/temp_upload?token=abc123xyz"
-    )
-
-    # HTTPS
-    response2 = "Upload here: https://example.com/temp_upload?token=xyz789"
-    url2 = _parse_upload_url_from_mcp_response(response2)
-    assert url2 == "https://example.com/temp_upload?token=xyz789"
-
-    # 无 URL
-    response3 = "Something went wrong"
-    url3 = _parse_upload_url_from_mcp_response(response3)
-    assert url3 is None
+    assert not hasattr(mod, "_parse_upload_url_from_mcp_response")
 
 
 @pytest.mark.asyncio
@@ -144,7 +114,6 @@ async def test_knowledge_layer_disabled_skip():
     """测试知识层未启用时跳过 ingest。"""
     from services.digital_employee.knowledge_ingest import ingest_package_docs
 
-    # 知识层未启用时，knowledge_client=None 应该跳过
     result = await ingest_package_docs(
         tenant_id="test-tenant",
         package_identity="role:test:1",
@@ -152,7 +121,6 @@ async def test_knowledge_layer_disabled_skip():
         package_key="test",
         version="1",
         doc_files=[],
-        knowledge_client=None,
     )
 
     assert result["succeeded"] == 0
@@ -170,3 +138,72 @@ def test_imports():
     assert hasattr(knowledge_ingest, "ingest_package_docs")
     assert hasattr(knowledge_ingest, "forget_package_docs")
     assert PackageIngestOutbox is not None
+
+
+def test_skill_space_key_prefix():
+    from services.digital_employee.knowledge_ingest import skill_space_key
+
+    assert skill_space_key("vuln-scan") == "skill-vuln-scan"
+
+
+@pytest.mark.asyncio
+async def test_ingest_creates_skill_space_and_upserts(monkeypatch):
+    import services.digital_employee.knowledge_ingest as mod
+
+    class FakeQuery:
+        async def first(self):
+            return None
+
+    class FakeOutbox:
+        status = "pending"
+        attempt_count = 0
+        error = None
+        task_id = None
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return FakeQuery()
+
+        @classmethod
+        async def get_or_create(cls, **kwargs):
+            return cls(), True
+
+        async def save(self):
+            return None
+
+    ensured = {}
+    upserted = []
+
+    async def fake_ensure_space(tenant_id, space_key, name, source_type=None, source_ref=None):
+        ensured.update({"space_key": space_key, "source_type": source_type, "source_ref": source_ref})
+
+    async def fake_upsert(tenant_id, **kwargs):
+        upserted.append(kwargs)
+        return {"id": "doc-1", "status": "processing", "skipped": False}
+
+    monkeypatch.setattr(mod, "PackageIngestOutbox", FakeOutbox)
+    monkeypatch.setattr(mod, "ensure_space", fake_ensure_space)
+    monkeypatch.setattr(mod, "upsert_document", fake_upsert)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "guide.md").write_text("# guide")
+        docs = await mod.collect_package_docs(root)
+        result = await mod.ingest_package_docs(
+            tenant_id="t1",
+            package_identity="skill:vuln-scan:1",
+            package_type="skill",
+            package_key="vuln-scan",
+            version="1",
+            doc_files=docs,
+        )
+
+    assert ensured == {
+        "space_key": "skill-vuln-scan",
+        "source_type": "skill_package",
+        "source_ref": "vuln-scan",
+    }
+    assert len(upserted) == 1
+    assert upserted[0]["space_key"] == "skill-vuln-scan"
+    assert upserted[0]["source"] == "skill_package"
+    assert result["succeeded"] == 1

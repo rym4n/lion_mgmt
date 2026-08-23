@@ -565,7 +565,6 @@ async def _ingest_package_docs_if_enabled(
             )
             return
 
-        # 阶段三前 knowledge_client 为 None，会在 ingest_package_docs 内跳过
         result = await ingest_package_docs(
             tenant_id=tenant_id,
             package_identity=package_identity,
@@ -573,7 +572,6 @@ async def _ingest_package_docs_if_enabled(
             package_key=package_key,
             version=version,
             doc_files=doc_files,
-            knowledge_client=None,  # 阶段三实施后从 settings 获取
         )
         logger.info(
             "package_ingest: completed tenant=%s package=%s succeeded=%d failed=%d skipped=%d",
