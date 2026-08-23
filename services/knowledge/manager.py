@@ -330,6 +330,10 @@ async def list_documents(
 
     total = await query.count()
     documents = await query.offset((page - 1) * size).limit(size).all()
+    if documents:
+        from services.knowledge.status import refresh_pending
+
+        await refresh_pending(tenant_id, documents)
     return {
         "total": total,
         "page": page,
