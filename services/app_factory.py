@@ -25,6 +25,7 @@ from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.inspection.views import inspection_bp
 from services.knowledge.views import knowledge_bp
+from services.knowledge.agent_views import knowledge_agent_bp
 from services.license.views import license_bp
 from services.llm_config.views import llm_config_bp
 from services.log_view.views import logs_bp
@@ -136,6 +137,7 @@ def register_blueprints(app: Sanic):
         tenant_bp,
         inspection_bp,
         knowledge_bp,
+        knowledge_agent_bp,
     ):
         app.blueprint(blueprint)
     registered_modules = set()
