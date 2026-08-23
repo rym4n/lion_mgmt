@@ -10,6 +10,7 @@ from settings import (
 )
 
 from .aioe_credential_manager import get_employee_api_token
+from .knowledge_payload import build_knowledge_payload
 from .lion_agent_adapter import stream_prompt_events
 from .prompt_builder import build_runtime_prompt
 
@@ -214,6 +215,7 @@ async def run(
         embedding = None
     memory_section = _build_memory_payload(task, employee, embedding=embedding)
     aioe_token = await get_employee_api_token(employee)
+    knowledge_section = await build_knowledge_payload(employee)
     llm = await resolve_llm(
         task.tenant_id, config_id=getattr(employee, "llm_config_id", None)
     )
@@ -233,6 +235,8 @@ async def run(
         },
         "llm": llm,
     }
+    if knowledge_section:
+        payload["knowledge"] = knowledge_section
     content = []
     saw_delta = False
     usage = _zero_usage()

@@ -23,6 +23,7 @@ STUB_MODULES = [
     "services.digital_employee",
     "services.digital_employee.manager",
     "services.digital_employee.aioe_credential_manager",
+    "services.digital_employee.knowledge_payload",
     "services.digital_employee.prompt_builder",
     "services.digital_employee.lion_agent_adapter",
     "services.digital_employee.lion_agent_client",
@@ -122,6 +123,10 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     aioe_credential_manager = types.ModuleType("services.digital_employee.aioe_credential_manager")
     aioe_credential_manager.get_employee_api_token = lambda employee: _async_value(f"api-token-{employee.id}")
     sys.modules["services.digital_employee.aioe_credential_manager"] = aioe_credential_manager
+
+    knowledge_payload = types.ModuleType("services.digital_employee.knowledge_payload")
+    knowledge_payload.build_knowledge_payload = lambda employee: _async_value(None)
+    sys.modules["services.digital_employee.knowledge_payload"] = knowledge_payload
 
     prompt_builder = types.ModuleType("services.digital_employee.prompt_builder")
     prompt_builder.build_runtime_prompt = lambda task, employee: f"prompt:{task.id}:{employee.id}"
