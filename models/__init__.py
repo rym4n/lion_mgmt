@@ -8,6 +8,7 @@ from .digital_employee import *
 from .employee_report import *
 from .event import *
 from .inspection import *
+from .knowledge import *
 from .large_screen import *
 from .llm_model_config import *
 from .openviking import *
