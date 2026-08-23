@@ -281,3 +281,15 @@ class ErrorCode(BaseErrorCode):
     # 冲突类 4240-4241
     TICKET_QUORUM_REACHED = ErrorData(4240, "会签已达成，无法加签")
     TICKET_CALLBACK_TOKEN_INVALID = ErrorData(4241, "回调凭证无效或已使用")
+
+    # 知识库 4250-4259
+    KNOWLEDGE_NOT_PROVISIONED = ErrorData(4250, "该租户尚未开通知识库")
+    KNOWLEDGE_SERVICE_UNAVAILABLE = ErrorData(4251, "知识库服务不可用")
+    KNOWLEDGE_SPACE_NOT_FOUND = ErrorData(4252, "知识空间不存在")
+    KNOWLEDGE_SPACE_KEY_CONFLICT = ErrorData(4253, "空间标识已存在")
+    KNOWLEDGE_SPACE_QUOTA_EXCEEDED = ErrorData(4254, "空间容量已达上限")
+    KNOWLEDGE_DOCUMENT_NOT_FOUND = ErrorData(4255, "文档不存在")
+    KNOWLEDGE_WRITE_NOT_ALLOWED = ErrorData(4256, "没有可写入的知识空间")
+    KNOWLEDGE_PATH_INVALID = ErrorData(4257, "文档路径非法")
+    KNOWLEDGE_FILE_TYPE_REJECTED = ErrorData(4258, "不支持的文件类型")
+    KNOWLEDGE_FILE_TOO_LARGE = ErrorData(4259, "文件超过大小限制")
