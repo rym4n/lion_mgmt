@@ -30,6 +30,7 @@ from .manager import (
     update_employee,
     update_employee_skills,
     upgrade_role_for_existing_employees,
+    validate_knowledge_binding,
 )
 from .package_api import import_package_from_request
 from .package_importer import export_package_for_tenant, normalize_role_prompt_fields, require_role_identity
@@ -145,6 +146,8 @@ async def _visible_roles_by_key(tenant_id: str, role_keys: list[str]) -> dict[st
 async def _employee_payload(employee: CommandAgent, role=_ROLE_UNSET) -> dict:
     payload = employee.json
     payload.pop("description", None)
+    payload["knowledge_space_keys"] = list(getattr(employee, "knowledge_space_keys", None) or [])
+    payload["knowledge_write_space"] = getattr(employee, "knowledge_write_space", None)
     resolved_role = None
     if role is _ROLE_UNSET:
         if employee.role_key:
@@ -209,6 +212,9 @@ async def employee_create(request: Request):
     data = _json(request)
     if not data.get("role_key") or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    space_keys, write_space = validate_knowledge_binding(
+        data.get("knowledge_space_keys"), data.get("knowledge_write_space")
+    )
     employee = await create_employee(
         tenant_id=_tenant_id(request),
         role_key=data.get("role_key"),
@@ -218,6 +224,8 @@ async def employee_create(request: Request):
         agent_key=data.get("agent_key"),
         rbac_role_id=data.get("rbac_role_id"),
         llm_config_id=data.get("llm_config_id") or None,
+        knowledge_space_keys=space_keys,
+        knowledge_write_space=write_space,
     )
     await publish_command_center_update(employee.tenant_id, "employee_created", employee.id)
     return response_ok(await _employee_payload(employee))
@@ -294,6 +302,13 @@ async def employee_update(request: Request):
     }
     if "llm_config_id" in data:
         update_fields["llm_config_id"] = data.get("llm_config_id") or None
+    if "knowledge_space_keys" in data or "knowledge_write_space" in data:
+        space_keys, write_space = validate_knowledge_binding(
+            data.get("knowledge_space_keys", getattr(employee, "knowledge_space_keys", None)),
+            data.get("knowledge_write_space", getattr(employee, "knowledge_write_space", None)),
+        )
+        update_fields["knowledge_space_keys"] = space_keys
+        update_fields["knowledge_write_space"] = write_space
     employee = await update_employee(employee, **update_fields)
     await publish_command_center_update(employee.tenant_id, "employee_updated", employee.id)
     return response_ok(await _employee_payload(employee))
@@ -858,4 +873,3 @@ async def runtime_memory_maintenance_execute(request: Request):
 
     result = await execute_memory_maintenance(tenant_id)
     return response_ok(result)
-

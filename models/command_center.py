@@ -89,6 +89,12 @@ class CommandAgent(BaseModel):
     )
     role_key = fields.CharField(max_length=64, null=True, description="数字员工岗位逻辑标识")
     skill_keys = fields.JSONField(default=list, description="启用的数字员工技能 key 列表")
+    knowledge_space_keys = fields.JSONField(
+        default=list, description="可见知识空间 key 列表"
+    )
+    knowledge_write_space = fields.CharField(
+        max_length=64, null=True, description="员工写入的目标空间 key，为空则不给写入工具"
+    )
     rbac_role_id = fields.CharField(max_length=36, null=True, description="员工绑定的 RBAC 角色")
     resource_scope = fields.JSONField(default=dict, description="员工资源访问范围")
     llm_config = fields.ForeignKeyField(
@@ -127,6 +133,8 @@ class CommandAgent(BaseModel):
             "role_id": self.role_id,
             "role_key": self.role_key,
             "skill_keys": self.skill_keys,
+            "knowledge_space_keys": self.knowledge_space_keys,
+            "knowledge_write_space": self.knowledge_write_space,
             "rbac_role_id": self.rbac_role_id,
             "resource_scope": self.resource_scope,
             "llm_config_id": self.llm_config_id,

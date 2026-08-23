@@ -119,6 +119,29 @@ def persisted_employee_skill_keys(skill_keys: list[str] | None) -> list[str]:
     return [key for key in dict.fromkeys(str(item) for item in (skill_keys or []) if item) if key]
 
 
+def validate_knowledge_binding(
+    space_keys, write_space: str | None
+) -> tuple[list[str], str | None]:
+    """校验知识空间绑定，返回归一化结果。
+
+    可写空间必须在可见空间内：否则员工会有一个写得进去
+    但自己读不到的空间，行为诡异且难排查。
+    """
+    if space_keys is None:
+        space_keys = []
+    if not isinstance(space_keys, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    normalized = [str(key) for key in space_keys if str(key).strip()]
+
+    if write_space:
+        if str(write_space) not in normalized:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        return normalized, str(write_space)
+
+    return normalized, None
+
+
 async def create_employee(
     tenant_id: str,
     role_key: str,
@@ -128,6 +151,8 @@ async def create_employee(
     agent_key: str | None = None,
     rbac_role_id: str | None = None,
     llm_config_id: str | None = None,
+    knowledge_space_keys: list[str] | None = None,
+    knowledge_write_space: str | None = None,
 ) -> CommandAgent:
     from services.llm_config.manager import assert_bindable_config
 
@@ -135,6 +160,9 @@ async def create_employee(
     selected_rbac_role_id = rbac_role_id
     await require_existing_platform_role(selected_rbac_role_id, tenant_id)
     await assert_bindable_config(llm_config_id)
+    normalized_space_keys, normalized_write_space = validate_knowledge_binding(
+        knowledge_space_keys, knowledge_write_space
+    )
     keys = skill_keys if skill_keys is not None else list(role.default_skill_keys or [])
     skills = await get_visible_skills(tenant_id, keys)
     key = agent_key or f"{role_key}-{uuid.uuid4().hex[:8]}"
@@ -152,6 +180,8 @@ async def create_employee(
         role=role,
         role_key=role.role_key,
         skill_keys=persisted_employee_skill_keys([skill.skill_key for skill in skills]),
+        knowledge_space_keys=normalized_space_keys,
+        knowledge_write_space=normalized_write_space,
         rbac_role_id=selected_rbac_role_id,
         llm_config_id=llm_config_id or None,
         resource_scope={},
@@ -168,6 +198,8 @@ async def update_employee(
     rbac_role_id=_UNSET,
     max_concurrent=_UNSET,
     llm_config_id=_UNSET,
+    knowledge_space_keys=_UNSET,
+    knowledge_write_space=_UNSET,
 ) -> CommandAgent:
     if rbac_role_id is not _UNSET:
         await require_existing_platform_role(rbac_role_id, employee.tenant_id)
@@ -181,6 +213,17 @@ async def update_employee(
         from services.llm_config.manager import assert_bindable_config
         await assert_bindable_config(llm_config_id)
         employee.llm_config_id = llm_config_id or None
+    if knowledge_space_keys is not _UNSET or knowledge_write_space is not _UNSET:
+        normalized_space_keys, normalized_write_space = validate_knowledge_binding(
+            getattr(employee, "knowledge_space_keys", None)
+            if knowledge_space_keys is _UNSET
+            else knowledge_space_keys,
+            getattr(employee, "knowledge_write_space", None)
+            if knowledge_write_space is _UNSET
+            else knowledge_write_space,
+        )
+        employee.knowledge_space_keys = normalized_space_keys
+        employee.knowledge_write_space = normalized_write_space
     employee.workspace_etag = None
     await employee.save()
     return await sync_employee_workspace(employee)
