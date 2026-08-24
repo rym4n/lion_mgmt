@@ -304,6 +304,24 @@ async def get_license(request: Request):
         "Event List": 0,
         "Event Ingestion": 1,
     }
+    # 专家团队的 children 由多条 permissions_menu 记录合并而来，而合并顺序取决于
+    # perm_models 这个 set 的遍历顺序，本身不稳定。显式排序保证菜单次序固定。
+    expert_team_dict = {
+        "指挥中心": 0,
+        "指揮中心": 0,
+        "Command Center": 0,
+        "数字员工": 1,
+        "數字員工": 1,
+        "Digital Employees": 1,
+        "技能管理": 2,
+        "Skill Management": 2,
+        "汇报助手": 3,
+        "匯報助手": 3,
+        "Report Assistant": 3,
+        "知识空间": 4,
+        "知識空間": 4,
+        "Knowledge Space": 4,
+    }
     top_menu_order = {
         "作战室": 10,
         "作戰室": 10,
@@ -351,6 +369,10 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
+        elif menu["meta"]["title"] in ["专家团队", "專家團隊", "Expert Team"]:
+            menu["children"] = sorted(
+                children, key=lambda x: expert_team_dict.get(x["meta"]["title"], 99)
+            )
         title = menu.get("meta", {}).get("title")
         if title in top_menu_order:
             menu["meta"]["rank"] = top_menu_order[title]

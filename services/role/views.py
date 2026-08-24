@@ -62,7 +62,7 @@ PERMISSION_RESOURCE_LABELS = {
     "network_topology": "网络拓扑",
     "asset_management": "资产管理",
     "network_access_control": "网络访问控制",
-    "knowledge": "知识库",
+    "knowledge": "知识空间",
 }
 
 TOOL_VIEW_PERMISSION = "tool:r"
@@ -140,6 +140,7 @@ FIXED_CHILD_ROUTE_ORDER = {
         "/command-center/employees",
         "/command-center/skills",
         "/command-center/report-assistant",
+        "/command-center/knowledge",
     ],
     "/asset-management": [
         "/asset-management/models",
