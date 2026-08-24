@@ -30,6 +30,64 @@ __all__ = ["warroom_bp"]
 TYPE_DICT = {"PLAYBOOK": "flow", "ACTION": "action"}
 
 
+async def _legacy_runlog_messages(room, tenant_id, offset, limit):
+    """Rebuild missing runlog message indexes from room-linked executions.
+
+    Older executions can have a Runlog row and a room.run_id link without a
+    corresponding room_msg row. Keep this fallback tenant-scoped and only
+    use it when the normal message query has no rows.
+    """
+    run_ids = [str(run_id) for run_id in (room.run_id or []) if run_id]
+    if not run_ids:
+        return None
+
+    runlogs = await Runlog.filter(
+        run_id__in=run_ids,
+        tenant_id=tenant_id,
+        deleted=False,
+    ).order_by("ctime", "id").all()
+    if not runlogs:
+        return None
+
+    runlog_by_run_id = {}
+    for runlog in runlogs:
+        runlog_by_run_id.setdefault(str(runlog.run_id), []).append(runlog)
+    available_run_ids = [run_id for run_id in run_ids if run_id in runlog_by_run_id]
+    summaries = await runlog_batch_summaries(
+        Runlog,
+        Q(tenant_id=tenant_id, deleted=False),
+        available_run_ids,
+    )
+    system = await Account.get_or_none(username="system")
+    messages = []
+    for run_id in available_run_ids:
+        first_log = runlog_by_run_id[run_id][0]
+        messages.append(
+            {
+                "type": "runlog",
+                "message_id": f"legacy-runlog:{run_id}",
+                "sender_id": str(system.id) if system else "system",
+                "sender_name": system.username if system else "system",
+                "sender_display_name": system.display_name if system else "system",
+                "content": {
+                    "run_id": run_id,
+                    "runlog_summary": summaries.get(run_id),
+                },
+                "image_content": "",
+                "timestamp": str(first_log.ctime),
+                "room_id": str(room.id),
+                "is_recalled": False,
+            }
+        )
+
+    messages.sort(key=lambda message: message["timestamp"])
+    total_count = len(messages)
+    return {
+        "messages": messages[offset : offset + limit],
+        "pagination": {"total": total_count, "offset": offset, "limit": limit},
+    }
+
+
 @warroom_bp.websocket("/ws")
 @openapi.exclude()
 async def warroom_ws(request: Request, ws: Websocket):
@@ -931,6 +989,12 @@ async def query_messages(request: Request):
 
     total_count = await Message.filter(condition).count()
     messages = await Message.filter(condition).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender")
+    if total_count == 0:
+        room = await Room.get_or_none(id=room_id, tenant_id=tenant_id, deleted=False)
+        if room:
+            legacy_data = await _legacy_runlog_messages(room, tenant_id, offset, limit)
+            if legacy_data:
+                return response_ok(legacy_data)
     message_list = []
     run_id_list = []
     for msg in messages:

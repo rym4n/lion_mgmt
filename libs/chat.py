@@ -228,7 +228,7 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-async def creat_message(room_id, log, user, redis):
+async def creat_message(room_id, log, user, redis, tenant_id=None):
     sender = await Account.get(username="system")
     user = await Account.get(id=user)
 
@@ -243,7 +243,10 @@ async def creat_message(room_id, log, user, redis):
         got_lock = False  # key 已存在，没拿到锁
 
     content = log.get("run_id") + ":" + log.get("node_id")
-    tenant_id = log.get("tenant_id")
+    # The room run metadata is created from the authenticated session and is
+    # authoritative for this room. Worker payloads from older executors may
+    # omit tenant_id, so do not let that omission create an unscoped message.
+    tenant_id = tenant_id or log.get("tenant_id")
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
         msg, _ = await Message.update_or_create(
@@ -532,12 +535,14 @@ class ChatManager:
             if msg["log"].get("type") == "approval-info":
                 return
             runlog_executor_id = self._single_account_id(msg["log"].get("executor"))
+            runlog_tenant_id = msg.get("tenant_id") or msg["log"].get("tenant_id")
             message["data"] = orjson.dumps(
                 await creat_message(
                     room_id=msg["room_id"],
                     log=msg["log"],
                     user=msg["updator"],
                     redis=self.redis,
+                    tenant_id=runlog_tenant_id,
                 )
             )
         if msg.get("type") == "ai-thinking":
@@ -973,6 +978,11 @@ class ChatManager:
                 data = await self.redis.get(key)
                 if data:
                     # 消费作战室的执行记录
+                    if data.get("tenant_id"):
+                        # The run request metadata is bound to the room and
+                        # authenticated tenant; normalize old worker payloads
+                        # before persistence and websocket delivery.
+                        log["tenant_id"] = data["tenant_id"]
                     data["log"] = log
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
                     event = await Events.get_or_none(room_id=data["room_id"], tenant_id=data["tenant_id"])

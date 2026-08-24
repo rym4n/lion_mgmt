@@ -1,8 +1,11 @@
 # coding=utf-8
+from types import SimpleNamespace
+
 import orjson
 import pytest
 
 from libs.chat import ChatManager
+from services.warroom import views
 
 
 class FakeWebSocket:
@@ -18,8 +21,10 @@ async def test_runlog_delivery_falls_back_to_executor_when_room_context_is_stale
     manager = ChatManager.__new__(ChatManager)
     manager.redis = None
     published = []
+    created = []
 
     async def create_message(**kwargs):
+        created.append(kwargs)
         return {
             "type": "runlog",
             "room_id": kwargs["room_id"],
@@ -44,13 +49,13 @@ async def test_runlog_delivery_falls_back_to_executor_when_room_context_is_stale
                         "run_id": "run-1",
                         "node_id": "node-1",
                         "executor": "user-1",
-                        "tenant_id": "tenant-1",
                     },
                 }
             ),
         }
     )
 
+    assert created[0]["tenant_id"] == "tenant-1"
     assert published == [
         (
             {
@@ -61,7 +66,6 @@ async def test_runlog_delivery_falls_back_to_executor_when_room_context_is_stale
                         "run_id": "run-1",
                         "node_id": "node-1",
                         "executor": "user-1",
-                        "tenant_id": "tenant-1",
                     }
                 ],
             },
@@ -112,3 +116,59 @@ async def test_room_runlog_executor_fallback_respects_tenant():
     assert len(current_room.sent) == 1
     assert len(same_tenant_executor.sent) == 1
     assert other_tenant_executor.sent == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_runlog_history_rebuilds_missing_message_index(monkeypatch):
+    runlogs = [
+        SimpleNamespace(run_id="run-2", ctime="2026-08-24 10:00:00"),
+        SimpleNamespace(run_id="run-1", ctime="2026-08-24 09:00:00"),
+    ]
+
+    class FakeRunlogQuery:
+        def filter(self, **kwargs):
+            assert kwargs == {
+                "run_id__in": ["run-1", "run-2"],
+                "tenant_id": "tenant-1",
+                "deleted": False,
+            }
+            return self
+
+        def order_by(self, *fields):
+            assert fields == ("ctime", "id")
+            return self
+
+        async def all(self):
+            return runlogs
+
+    class FakeRunlog:
+        @classmethod
+        def filter(cls, **kwargs):
+            return FakeRunlogQuery().filter(**kwargs)
+
+    class FakeAccount:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            assert kwargs == {"username": "system"}
+            return SimpleNamespace(id="system-1", username="system", display_name="系统")
+
+    async def summaries(*args):
+        return {
+            "run-1": {"run_id": "run-1", "status": "success"},
+            "run-2": {"run_id": "run-2", "status": "failed"},
+        }
+
+    monkeypatch.setattr(views, "Runlog", FakeRunlog)
+    monkeypatch.setattr(views, "Account", FakeAccount)
+    monkeypatch.setattr(views, "runlog_batch_summaries", summaries)
+
+    data = await views._legacy_runlog_messages(
+        SimpleNamespace(id="room-1", run_id=["run-1", "run-2"]),
+        "tenant-1",
+        0,
+        50,
+    )
+
+    assert data["pagination"] == {"total": 2, "offset": 0, "limit": 50}
+    assert [item["content"]["run_id"] for item in data["messages"]] == ["run-1", "run-2"]
+    assert data["messages"][0]["sender_display_name"] == "系统"
