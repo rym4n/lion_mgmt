@@ -2568,12 +2568,18 @@ async def add_permission(request):
     name = request.json.get("name")
     resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
-    users_id = list(set(request.json.get("users_id", [])))
-    roles_id = list(set(request.json.get("roles_id", [])))
+    users_id = request.json.get("users_id", [])
+    roles_id = request.json.get("roles_id", [])
     if not name or not resource_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
     if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    users_id = list(set(users_id))
+    roles_id = list(set(roles_id))
+    selected_actions = {str(action) for action in actions if str(action)}
+    if not selected_actions:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    resource_id = str(resource_id)
 
     tenant_id = request.ctx.session.get("tenant_id")
     maintenance_mode = await _current_maintenance_mode(request)
@@ -2585,59 +2591,38 @@ async def add_permission(request):
     )
 
     async with in_transaction():
-        if "all" in actions:
+        if "all" in selected_actions:
             await _ensure_action_permission(
                 name,
                 "all",
                 "动作全部动作权限",
                 tenant_id,
             )
-            permission_query = ActionPermissions.filter(
+        permissions = (
+            await ActionPermissions.filter(
                 tool_name=name,
-                action_name="all",
                 deleted=False,
                 tenant_id=tenant_id,
             )
-        else:
-            permission_query = ActionPermissions.filter(
-                tool_name=name,
-                action_name__in=actions,
-                deleted=False,
-                tenant_id=tenant_id,
-            )
-        permissions = await permission_query.select_for_update().order_by("id").all()
+            .select_for_update()
+            .order_by("id")
+            .all()
+        )
 
-        if not permissions:
+        if not permissions or not selected_actions.issubset(
+            {permission.action_name for permission in permissions}
+        ):
             raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
         for permission in permissions:
-            user_dict_list = []
-            if isinstance(permission.users, list):
-                user_dict_list = permission.users.copy()
-            elif isinstance(permission.users, str):
-                try:
-                    user_dict_list = orjson.loads(permission.users)
-                except orjson.JSONDecodeError:
-                    user_dict_list = []
-
-            if not user_dict_list or not isinstance(user_dict_list[0], dict):
-                user_dict_list = [{}]
-
-            user_dict_list[0][resource_id] = users_id
-
-            role_dict_list = []
-            if isinstance(permission.roles, list):
-                role_dict_list = permission.roles.copy()
-            elif isinstance(permission.roles, str):
-                try:
-                    role_dict_list = orjson.loads(permission.roles)
-                except orjson.JSONDecodeError:
-                    role_dict_list = []
-
-            if not role_dict_list or not isinstance(role_dict_list[0], dict):
-                role_dict_list = [{}]
-
-            role_dict_list[0][resource_id] = roles_id
+            user_dict_list = _resource_permission_subject_map(permission.users)
+            role_dict_list = _resource_permission_subject_map(permission.roles)
+            if permission.action_name in selected_actions:
+                user_dict_list[0][resource_id] = users_id
+                role_dict_list[0][resource_id] = roles_id
+            else:
+                user_dict_list[0].pop(resource_id, None)
+                role_dict_list[0].pop(resource_id, None)
 
             permission.users = user_dict_list
             permission.roles = role_dict_list
@@ -2694,6 +2679,10 @@ async def add_permission(request):
                                         "roles_id": {
                                             "type": "array",
                                             "items": {"type": "string"},
+                                        },
+                                        "configured": {
+                                            "type": "boolean",
+                                            "description": "该资源是否曾为此动作配置过授权主体（即使主体已清空也保持为true）",
                                         },
                                     },
                                 },
@@ -2779,7 +2768,9 @@ async def select_permission_all(request):
                 users_data = []
 
         user_ids = []
+        user_configured = False
         if users_data and isinstance(users_data[0], dict):
+            user_configured = resource_id in users_data[0]
             user_ids = users_data[0].get(resource_id, [])
 
         roles_data = []
@@ -2792,7 +2783,9 @@ async def select_permission_all(request):
                 roles_data = []
 
         role_ids = []
+        role_configured = False
         if roles_data and isinstance(roles_data[0], dict):
+            role_configured = resource_id in roles_data[0]
             role_ids = roles_data[0].get(resource_id, [])
 
         permission_list.append(
@@ -2801,6 +2794,7 @@ async def select_permission_all(request):
                 "description": permission.action_description,
                 "users_id": user_ids,
                 "roles_id": role_ids,
+                "configured": user_configured or role_configured,
             }
         )
 

@@ -64,6 +64,7 @@ async def test_ensure_action_permission_is_idempotent(monkeypatch):
 async def test_add_permission_locks_row_before_json_update(monkeypatch):
     operations = []
     permission = SimpleNamespace(
+        action_name="all",
         users=[{"existing": ["user-0"]}],
         roles=[{"existing": ["role-0"]}],
     )
@@ -256,8 +257,76 @@ async def test_select_permissions_for_existing_resource_keeps_grant_readback(
             "description": "查询",
             "users_id": ["user-1"],
             "roles_id": ["role-1"],
+            "configured": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_add_permission_replaces_resource_action_set_and_keeps_empty_subjects(monkeypatch):
+    permissions = [
+        SimpleNamespace(action_name="old", users=[{"resource-1": ["user-old"]}], roles=[{"resource-1": ["role-old"]}]),
+        SimpleNamespace(action_name="new", users=[{"resource-1": ["user-new"]}], roles=[{"resource-1": ["role-new"]}]),
+    ]
+
+    class FakeQuery:
+        def select_for_update(self):
+            return self
+
+        def order_by(self, _field):
+            return self
+
+        async def all(self):
+            return permissions
+
+    class FakeActionPermissions:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs == {
+                "tool_name": "sample_tool",
+                "deleted": False,
+                "tenant_id": "tenant-1",
+            }
+            return FakeQuery()
+
+        @staticmethod
+        async def bulk_update(items, fields):
+            assert items == permissions
+            assert fields == ["users", "roles"]
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def ensure_resource(*_args, **_kwargs):
+        return SimpleNamespace(id="resource-1")
+
+    monkeypatch.setattr(tool_views, "ActionPermissions", FakeActionPermissions)
+    monkeypatch.setattr(tool_views, "in_transaction", lambda: FakeTransaction())
+    monkeypatch.setattr(tool_views, "_ensure_resource_in_scope", ensure_resource)
+    monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
+
+    request = SimpleNamespace(
+        json={
+            "name": "sample_tool",
+            "resource_id": "resource-1",
+            "actions": ["new"],
+            "users_id": [],
+            "roles_id": [],
+        },
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+
+    result = await inspect.unwrap(tool_views.add_permission)(request)
+
+    assert result == {"message": "工具动作权限新增成功"}
+    assert permissions[0].users == [{}]
+    assert permissions[0].roles == [{}]
+    assert permissions[1].users == [{"resource-1": []}]
+    assert permissions[1].roles == [{"resource-1": []}]
 
 
 def test_action_permission_migration_merges_grants_before_soft_delete():

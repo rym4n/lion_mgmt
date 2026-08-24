@@ -363,6 +363,12 @@ def group_loop_rows(rows, loop_limit: int, truncated: bool) -> tuple[list[dict],
 def batch_status(row: dict) -> int:
     if int(row.get("failed_count") or 0) > 0:
         return -1
+    # A flow's end node is the authoritative completion marker.  Late or
+    # duplicate non-terminal rows can remain in the batch after the flow has
+    # already reached its end node; they must not keep the whole playbook in
+    # "running" forever.
+    if int(row.get("end_success_count") or 0) > 0:
+        return 0
     if int(row.get("running_count") or 0) > 0:
         return 1
     if int(row.get("log_count") or 0) and int(row.get("success_count") or 0) == int(
@@ -450,6 +456,9 @@ async def runlog_batch_summaries(
             failed_count=Count("id", _filter=Q(status__in=[-1, 3])),
             running_count=Count("id", _filter=Q(status__in=[1, 2])),
             success_count=Count("id", _filter=Q(status=0)),
+            end_success_count=Count(
+                "id", _filter=Q(node_type="end-node", status=0)
+            ),
             started_at=Min("start_time"),
             finished_at=Max("end_time"),
             playbook_name=Max("playbook_name"),
@@ -466,6 +475,7 @@ async def runlog_batch_summaries(
             "failed_count",
             "running_count",
             "success_count",
+            "end_success_count",
             "started_at",
             "finished_at",
             "playbook_name",

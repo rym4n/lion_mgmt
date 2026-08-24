@@ -10,10 +10,35 @@ import libs.utils as utils
 import models
 from libs.error_code.exception import CustomError
 from libs.runlog_pagination import (
+    batch_status,
     enrich_subscript_runlogs,
     root_playbook_names,
     runlog_batch_summaries,
 )
+
+
+def test_batch_status_uses_completed_end_node_as_flow_terminal_marker():
+    assert batch_status(
+        {
+            "failed_count": 0,
+            "running_count": 3,
+            "success_count": 4,
+            "log_count": 7,
+            "end_success_count": 1,
+        }
+    ) == 0
+
+
+def test_batch_status_keeps_failures_authoritative_over_completed_end_node():
+    assert batch_status(
+        {
+            "failed_count": 1,
+            "running_count": 0,
+            "success_count": 4,
+            "log_count": 5,
+            "end_success_count": 1,
+        }
+    ) == -1
 from services.command_center import views
 
 

@@ -134,6 +134,11 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
 
     adapter = types.ModuleType("services.digital_employee.lion_agent_adapter")
     adapter.stream_prompt_events = _stream_prompt_events
+    adapter.identity_only_memory = lambda tenant_id: {
+        "enabled": False,
+        "tenant_id": tenant_id,
+        "employee_id": None,
+    }
     sys.modules["services.digital_employee.lion_agent_adapter"] = adapter
 
     lion_agent_client = types.ModuleType("services.digital_employee.lion_agent_client")
@@ -375,6 +380,11 @@ def test_run_uses_command_run_session_and_emits_runtime_callbacks():
     assert result["content"] == "AB"
     assert result["usage"]["input_tokens"] == 100
     assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-1"
+    assert RECORDED_STREAM_PAYLOADS[0]["memory"] == {
+        "enabled": False,
+        "tenant_id": "tenant-1",
+        "employee_id": None,
+    }
     assert [event_type for event_type, _ in runtime_events] == ["thinking", "tool_call", "delta", "delta", "end"]
     assert task.result is None
     assert task.saved_update_fields == []

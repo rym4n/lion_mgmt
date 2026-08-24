@@ -11,7 +11,7 @@ from settings import (
 
 from .aioe_credential_manager import get_employee_api_token
 from .knowledge_payload import build_knowledge_payload
-from .lion_agent_adapter import stream_prompt_events
+from .lion_agent_adapter import identity_only_memory, stream_prompt_events
 from .prompt_builder import build_runtime_prompt
 
 
@@ -209,11 +209,20 @@ async def run(
             employee_id=employee.id,
         )
         workspace_id = continuation_workspace["workspace_id"]
-    try:
-        embedding = await resolve_llm(task.tenant_id, purpose="embedding")
-    except CustomError:
-        embedding = None
-    memory_section = _build_memory_payload(task, employee, embedding=embedding)
+    embedding = None
+    if not (command_run is not None and continuation_workspace is None):
+        try:
+            embedding = await resolve_llm(task.tenant_id, purpose="embedding")
+        except CustomError:
+            embedding = None
+    # Command-center dispatches are independent task runs.  They still use the
+    # employee workspace and its role/skill snapshot, but must not recall or
+    # write employee-level long-term memory: a previous task's volatile report
+    # or download URL is not evidence for the current task.
+    if command_run is not None and continuation_workspace is None:
+        memory_section = identity_only_memory(task.tenant_id)
+    else:
+        memory_section = _build_memory_payload(task, employee, embedding=embedding)
     aioe_token = await get_employee_api_token(employee)
     knowledge_section = await build_knowledge_payload(employee)
     llm = await resolve_llm(
