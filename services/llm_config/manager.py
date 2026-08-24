@@ -34,6 +34,10 @@ async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]
             "api_key": mask_api_key(row.api_key),
             "model_name": row.model_name,
             "purpose": row.purpose,
+            # 前端编辑表单要回填维度：不返回的话，embedding 配置每次编辑
+            # 都会以空维度提交，用户被迫重选，选错就换了向量空间。
+            # list_catalog 是闭集（见其 docstring），那边不加。
+            "dimensions": getattr(row, "dimensions", None),
             "enabled": row.enabled,
             "ctime": row.ctime,
             "utime": row.utime,
