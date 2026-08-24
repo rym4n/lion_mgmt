@@ -5,6 +5,8 @@
 因此所有接口都要求 ``digital_employee:manage`` 权限，且维度变更需二次确认。
 """
 
+from datetime import datetime, timezone
+
 from sanic import Blueprint, Request
 from sanic.log import logger
 from sanic.response import HTTPResponse
@@ -19,6 +21,7 @@ from services.digital_employee.openviking import (
     restart_openviking_container,
     schedule_reindex,
     validate_embedding_config,
+    wait_for_openviking_ready,
     write_config_to_disk,
 )
 
@@ -123,6 +126,19 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
     except Exception as ex:
         logger.error(f"restart openviking container failed: {ex}")
         raise CustomError(ErrorCode.EMBEDDING_CONFIG_RESTART_FAILED)
+
+    # 等待容器就绪，避免 reindex 打在还没起来的服务上
+    try:
+        await wait_for_openviking_ready()
+    except CustomError:
+        raise
+    except Exception as ex:
+        logger.error(f"wait openviking ready failed: {ex}")
+        raise CustomError(ErrorCode.EMBEDDING_SERVICE_NOT_READY)
+
+    # 配置已真正生效，记录应用时间
+    config.applied_at = datetime.now(timezone.utc)
+    await config.save()
 
     result = {"config_id": config_id, "dimension_changed": dimension_changed}
 

@@ -8,17 +8,38 @@ lion_viking 的 entrypoint.sh 用 ``python3 -m json.tool`` 校验配置合法性
 本模块的解析/哈希逻辑必须与该 entrypoint 对齐，否则会写出无法启动的配置。
 """
 
+import asyncio
 import hashlib
 import json
+import logging
+import os
 import re
+from pathlib import Path
 from typing import Any, Optional, Tuple
 
+import httpx
+
 from core.error_code import ErrorCode
+from libs import supervisor
 from libs.error_code.exception import CustomError
+from settings import (
+    OPENVIKING_ADMIN_BASE_URL,
+    OPENVIKING_CONFIG_BACKUP_NAME,
+    OPENVIKING_CONFIG_DIR,
+    OPENVIKING_CONTAINER_NAME,
+    OPENVIKING_READY_TIMEOUT,
+    OPENVIKING_SUPERVISOR_PROGRAM,
+)
+
+logger = logging.getLogger(__name__)
 
 # 与常见 embedding 模型对齐的合法维度上限
 MIN_DIMENSION = 1
 MAX_DIMENSION = 4096
+
+# /health 轮询参数
+HEALTH_POLL_INTERVAL = 2.0
+HEALTH_REQUEST_TIMEOUT = 5.0
 
 # 兜底解析：形如 `embedding.dimension = 1536` 或 `dimension = 1536` 的扁平写法
 _FLAT_DIMENSION_RE = re.compile(
@@ -133,25 +154,181 @@ def validate_embedding_config(content: str) -> Tuple[int, str]:
 
 
 # --------------------------------------------------------------------------
-# 以下为 Task 3 / Task 4 的落地点，当前为占位实现。
-# 保持签名稳定，views_embedding 已按此签名调用。
+# 配置落盘与容器重启编排（Task 3）
 # --------------------------------------------------------------------------
 
 
-def write_config_to_disk(content: str) -> None:
-    """将配置写入 ``$RY_DATA_DIR/openviking/ov.conf``。
+def _config_paths() -> Tuple[Path, Path, Path]:
+    """返回 (配置目录, ov.conf 路径, 备份路径)。
 
-    TODO(Task 3): 实现落盘 + 权限设置 + 旧配置备份。
+    单独抽出便于单测 monkeypatch ``OPENVIKING_CONFIG_DIR``。
     """
-    return None
+    config_dir = Path(OPENVIKING_CONFIG_DIR)
+    return (
+        config_dir,
+        config_dir / "ov.conf",
+        config_dir / OPENVIKING_CONFIG_BACKUP_NAME,
+    )
+
+
+def write_config_to_disk(content: str) -> None:
+    """将配置写入 ``$OPENVIKING_CONFIG_DIR/ov.conf``。
+
+    要点：
+    1. **写前校验 JSON**。entrypoint.sh 对非法 JSON 会拒绝启动（无备份时直接
+       ``exit 1`` 造成 crash loop），所以宁可在这里失败也不能写坏配置。
+    2. **原地截断写入，不用"临时文件 + rename"**。ov.conf 是以单文件形式
+       bind mount 进 lion-viking 容器的（``./data/viking/ov.conf:/app/ov.conf:ro``），
+       rename 会换掉 inode，导致容器仍看到旧文件。
+    3. 写入前把旧配置备份到 ``.ov_conf_backup``——entrypoint.sh 在配置校验失败时
+       会从这个文件恢复（容器内路径 ``/app/data/.ov_conf_backup``）。
+
+    Raises:
+        CustomError: 配置非法（EMBEDDING_CONFIG_INVALID_JSON）或落盘失败
+                     （EMBEDDING_CONFIG_APPLY_FAILED）
+    """
+    # 写前校验：非法 JSON 会让 lion-viking 起不来
+    parse_config(content)
+
+    config_dir, config_file, backup_file = _config_paths()
+
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # 备份旧配置，供 entrypoint.sh 校验失败时回滚
+        if config_file.exists():
+            try:
+                backup_file.write_text(
+                    config_file.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+            except OSError as ex:
+                # 备份失败不阻塞主流程，只降低回滚能力
+                logger.warning(f"backup openviking config failed: {ex}")
+
+        # 原地截断写入，保持 inode 不变（bind mount 依赖 inode）
+        with open(config_file, "w", encoding="utf-8") as fp:
+            fp.write(content)
+            fp.flush()
+            os.fsync(fp.fileno())
+
+        os.chmod(config_file, 0o644)
+    except OSError as ex:
+        logger.error(f"write openviking config to {config_file} failed: {ex}")
+        raise CustomError(ErrorCode.EMBEDDING_CONFIG_APPLY_FAILED)
+
+    logger.info(f"openviking config written to {config_file}")
+
+
+async def _restart_via_supervisor() -> bool:
+    """尝试通过 Supervisor 重启。
+
+    ``libs.supervisor`` 是同步 XMLRPC 调用，放到线程池避免阻塞事件循环。
+    返回 False 表示未托管/不可达，由调用方降级。
+    """
+    try:
+        return await asyncio.to_thread(
+            supervisor.restart_process, OPENVIKING_SUPERVISOR_PROGRAM
+        )
+    except Exception as ex:
+        logger.warning(f"supervisor restart openviking failed: {ex}")
+        return False
+
+
+async def _restart_via_docker() -> bool:
+    """尝试通过 docker CLI 重启容器。返回 False 表示不可用或执行失败。"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "restart",
+            OPENVIKING_CONTAINER_NAME,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        # 镜像里没装 docker CLI，或未挂载 docker.sock
+        logger.warning("docker CLI not available, cannot restart openviking")
+        return False
+    except Exception as ex:
+        logger.warning(f"spawn docker restart failed: {ex}")
+        return False
+
+    stdout, stderr = await proc.communicate()
+    if proc.returncode == 0:
+        logger.info(f"openviking restarted via docker CLI: {OPENVIKING_CONTAINER_NAME}")
+        return True
+
+    detail = (stderr or stdout or b"").decode("utf-8", "replace").strip()
+    logger.warning(f"docker restart {OPENVIKING_CONTAINER_NAME} failed: {detail}")
+    return False
 
 
 async def restart_openviking_container() -> None:
-    """重启 OpenViking 容器（Supervisor 优先，降级 docker CLI）。
+    """重启 OpenViking 使新配置生效（Supervisor 优先，降级 docker CLI）。
 
-    TODO(Task 3): 实现重启编排与 /health 就绪等待。
+    重启后 entrypoint.sh 会比对配置哈希；维度变化时清空 ``/app/data/accounts``
+    下的向量库，因此调用方需在重启后等待 ``/health`` 就绪再触发 reindex。
+
+    Raises:
+        CustomError: EMBEDDING_CONFIG_RESTART_FAILED（两种方式都没成功）
     """
-    return None
+    if await _restart_via_supervisor():
+        logger.info(f"openviking restarted via supervisor: {OPENVIKING_SUPERVISOR_PROGRAM}")
+        return
+
+    if await _restart_via_docker():
+        return
+
+    logger.error("failed to restart openviking via supervisor and docker CLI")
+    raise CustomError(ErrorCode.EMBEDDING_CONFIG_RESTART_FAILED)
+
+
+async def wait_for_openviking_ready(timeout: Optional[int] = None) -> None:
+    """轮询 OpenViking ``/health``，等待重启后的服务就绪。
+
+    Args:
+        timeout: 超时秒数，默认取 ``OPENVIKING_READY_TIMEOUT``（120s）。
+                 维度变化时容器要先清空向量库，耗时会明显变长。
+
+    Raises:
+        CustomError: EMBEDDING_SERVICE_NOT_READY（超时仍未就绪）
+    """
+    if timeout is None:
+        timeout = OPENVIKING_READY_TIMEOUT
+
+    base_url = (OPENVIKING_ADMIN_BASE_URL or "").rstrip("/")
+    if not base_url:
+        logger.warning("OPENVIKING_ADMIN_BASE_URL not configured, skip readiness wait")
+        return
+
+    health_url = f"{base_url}/health"
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    last_error: Optional[str] = None
+
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                resp = await client.get(health_url, timeout=HEALTH_REQUEST_TIMEOUT)
+                if resp.status_code == 200:
+                    logger.info("openviking is ready")
+                    return
+                last_error = f"HTTP {resp.status_code}"
+            except Exception as ex:
+                # 重启窗口内连接被拒是预期现象，继续轮询
+                last_error = str(ex)
+
+            if loop.time() >= deadline:
+                logger.error(
+                    f"openviking not ready within {timeout}s, last error: {last_error}"
+                )
+                raise CustomError(ErrorCode.EMBEDDING_SERVICE_NOT_READY)
+
+            await asyncio.sleep(HEALTH_POLL_INTERVAL)
+
+
+# --------------------------------------------------------------------------
+# 以下为 Task 4 的落地点，当前为占位实现。
+# --------------------------------------------------------------------------
 
 
 async def schedule_reindex(config_id: str, tenant_id: str) -> Optional[str]:

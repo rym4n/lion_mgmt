@@ -6,6 +6,7 @@
 ``"dimension": <int>`` 提取维度。
 """
 
+import asyncio
 import hashlib
 import json
 
@@ -13,6 +14,7 @@ import pytest
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
+from services.digital_employee import openviking
 from services.digital_employee.openviking import (
     compute_content_hash,
     parse_config,
@@ -140,3 +142,257 @@ class TestValidateEmbeddingConfig:
     def test_accepts_boundary_dimensions(self, dimension):
         content = json.dumps({"embedding": {"dense": {"dimension": dimension}}})
         assert validate_embedding_config(content)[0] == dimension
+
+
+# ---------------------------------------------------------------------------
+# Task 3: 配置落盘与容器重启编排
+# ---------------------------------------------------------------------------
+
+
+class _FakeProc:
+    """伪装 asyncio subprocess，用于验证 docker 降级分支。"""
+
+    def __init__(self, returncode: int, stderr: bytes = b""):
+        self.returncode = returncode
+        self._stderr = stderr
+
+    async def communicate(self):
+        return b"", self._stderr
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+
+class _FakeAsyncClient:
+    """伪装 httpx.AsyncClient，按脚本依次返回结果/抛异常。"""
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.calls = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    async def get(self, url, timeout=None):
+        self.calls.append(url)
+        item = self._script.pop(0) if self._script else self._last
+        self._last = item
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class TestWriteConfigToDisk:
+    def test_writes_config_and_creates_dir(self, tmp_path, monkeypatch):
+        target = tmp_path / "viking"
+        monkeypatch.setattr(openviking, "OPENVIKING_CONFIG_DIR", str(target))
+
+        openviking.write_config_to_disk(REAL_CONFIG)
+
+        config_file = target / "ov.conf"
+        assert config_file.read_text(encoding="utf-8") == REAL_CONFIG
+        # 容器以只读方式挂载，需保证其他用户可读
+        assert oct(config_file.stat().st_mode & 0o777) == "0o644"
+
+    def test_written_content_hash_matches_entrypoint(self, tmp_path, monkeypatch):
+        """落盘内容的 sha256 必须与 compute_content_hash 一致，
+        否则 entrypoint.sh 的哈希比对会认为配置未变化而跳过重建。"""
+        monkeypatch.setattr(openviking, "OPENVIKING_CONFIG_DIR", str(tmp_path))
+        openviking.write_config_to_disk(REAL_CONFIG)
+
+        on_disk = (tmp_path / "ov.conf").read_bytes()
+        assert hashlib.sha256(on_disk).hexdigest() == compute_content_hash(REAL_CONFIG)
+
+    def test_preserves_inode_on_rewrite(self, tmp_path, monkeypatch):
+        """ov.conf 是单文件 bind mount，换 inode 会让容器继续读到旧文件。"""
+        monkeypatch.setattr(openviking, "OPENVIKING_CONFIG_DIR", str(tmp_path))
+        config_file = tmp_path / "ov.conf"
+
+        openviking.write_config_to_disk(REAL_CONFIG)
+        first_inode = config_file.stat().st_ino
+
+        updated = json.dumps({"embedding": {"dense": {"dimension": 3072}}})
+        openviking.write_config_to_disk(updated)
+
+        assert config_file.stat().st_ino == first_inode
+        assert config_file.read_text(encoding="utf-8") == updated
+
+    def test_backs_up_previous_config(self, tmp_path, monkeypatch):
+        """entrypoint.sh 校验失败时会从 .ov_conf_backup 回滚。"""
+        monkeypatch.setattr(openviking, "OPENVIKING_CONFIG_DIR", str(tmp_path))
+
+        openviking.write_config_to_disk(REAL_CONFIG)
+        assert not (tmp_path / ".ov_conf_backup").exists()  # 首次写入无旧配置
+
+        updated = json.dumps({"embedding": {"dense": {"dimension": 3072}}})
+        openviking.write_config_to_disk(updated)
+
+        backup = tmp_path / ".ov_conf_backup"
+        assert backup.read_text(encoding="utf-8") == REAL_CONFIG
+
+    def test_rejects_invalid_json_before_writing(self, tmp_path, monkeypatch):
+        """非法 JSON 会让 lion-viking 起不来，必须写盘前拦截。"""
+        monkeypatch.setattr(openviking, "OPENVIKING_CONFIG_DIR", str(tmp_path))
+
+        with pytest.raises(CustomError) as exc:
+            openviking.write_config_to_disk("embedding.dimension = 1536")
+        assert exc.value.enum == ErrorCode.EMBEDDING_CONFIG_INVALID_JSON
+        assert not (tmp_path / "ov.conf").exists()
+
+    def test_does_not_clobber_existing_config_on_invalid_input(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(openviking, "OPENVIKING_CONFIG_DIR", str(tmp_path))
+        openviking.write_config_to_disk(REAL_CONFIG)
+
+        with pytest.raises(CustomError):
+            openviking.write_config_to_disk("{not json")
+
+        assert (tmp_path / "ov.conf").read_text(encoding="utf-8") == REAL_CONFIG
+
+    def test_os_error_maps_to_apply_failed(self, tmp_path, monkeypatch):
+        """挂载缺失/只读文件系统等落盘失败要转成明确错误码。"""
+        monkeypatch.setattr(openviking, "OPENVIKING_CONFIG_DIR", str(tmp_path))
+
+        def _boom(*args, **kwargs):
+            raise PermissionError("read-only file system")
+
+        monkeypatch.setattr(openviking.Path, "mkdir", _boom)
+
+        with pytest.raises(CustomError) as exc:
+            openviking.write_config_to_disk(REAL_CONFIG)
+        assert exc.value.enum == ErrorCode.EMBEDDING_CONFIG_APPLY_FAILED
+
+
+class TestRestartOpenVikingContainer:
+    @pytest.mark.asyncio
+    async def test_prefers_supervisor(self, monkeypatch):
+        monkeypatch.setattr(
+            openviking.supervisor, "restart_process", lambda name: True
+        )
+
+        def _no_docker(*args, **kwargs):
+            raise AssertionError("supervisor 成功后不应再调 docker")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_docker)
+
+        assert await openviking.restart_openviking_container() is None
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_docker(self, monkeypatch):
+        monkeypatch.setattr(
+            openviking.supervisor, "restart_process", lambda name: False
+        )
+        seen = {}
+
+        async def _fake_exec(*args, **kwargs):
+            seen["args"] = args
+            return _FakeProc(0)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+        await openviking.restart_openviking_container()
+        assert seen["args"][:2] == ("docker", "restart")
+        assert seen["args"][2] == openviking.OPENVIKING_CONTAINER_NAME
+
+    @pytest.mark.asyncio
+    async def test_supervisor_exception_falls_back(self, monkeypatch):
+        def _raise(name):
+            raise ConnectionRefusedError("supervisor down")
+
+        monkeypatch.setattr(openviking.supervisor, "restart_process", _raise)
+
+        async def _fake_exec(*args, **kwargs):
+            return _FakeProc(0)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+        await openviking.restart_openviking_container()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_both_paths_fail(self, monkeypatch):
+        monkeypatch.setattr(
+            openviking.supervisor, "restart_process", lambda name: False
+        )
+
+        async def _fake_exec(*args, **kwargs):
+            return _FakeProc(1, b"No such container: lion-viking")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+        with pytest.raises(CustomError) as exc:
+            await openviking.restart_openviking_container()
+        assert exc.value.enum == ErrorCode.EMBEDDING_CONFIG_RESTART_FAILED
+
+    @pytest.mark.asyncio
+    async def test_missing_docker_cli_raises_restart_failed(self, monkeypatch):
+        """lion_mgmt 镜像里没有 docker CLI，也没挂 docker.sock。"""
+        monkeypatch.setattr(
+            openviking.supervisor, "restart_process", lambda name: False
+        )
+
+        async def _fake_exec(*args, **kwargs):
+            raise FileNotFoundError("docker")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+        with pytest.raises(CustomError) as exc:
+            await openviking.restart_openviking_container()
+        assert exc.value.enum == ErrorCode.EMBEDDING_CONFIG_RESTART_FAILED
+
+
+class TestWaitForOpenVikingReady:
+    @pytest.mark.asyncio
+    async def test_returns_when_healthy(self, monkeypatch):
+        client = _FakeAsyncClient([_FakeResponse(200)])
+        monkeypatch.setattr(openviking.httpx, "AsyncClient", lambda **kw: client)
+
+        await openviking.wait_for_openviking_ready(timeout=5)
+        assert client.calls == [f"{openviking.OPENVIKING_ADMIN_BASE_URL}/health"]
+
+    @pytest.mark.asyncio
+    async def test_polls_until_ready(self, monkeypatch):
+        """重启窗口内连接被拒是预期现象，应继续轮询。"""
+        client = _FakeAsyncClient(
+            [
+                ConnectionError("connection refused"),
+                _FakeResponse(503),
+                _FakeResponse(200),
+            ]
+        )
+        monkeypatch.setattr(openviking.httpx, "AsyncClient", lambda **kw: client)
+        monkeypatch.setattr(openviking, "HEALTH_POLL_INTERVAL", 0)
+
+        await openviking.wait_for_openviking_ready(timeout=5)
+        assert len(client.calls) == 3
+
+    @pytest.mark.asyncio
+    async def test_timeout_raises_not_ready(self, monkeypatch):
+        client = _FakeAsyncClient([ConnectionError("refused")])
+        monkeypatch.setattr(openviking.httpx, "AsyncClient", lambda **kw: client)
+        monkeypatch.setattr(openviking, "HEALTH_POLL_INTERVAL", 0)
+
+        with pytest.raises(CustomError) as exc:
+            await openviking.wait_for_openviking_ready(timeout=0)
+        assert exc.value.enum == ErrorCode.EMBEDDING_SERVICE_NOT_READY
+
+    @pytest.mark.asyncio
+    async def test_skips_when_base_url_unset(self, monkeypatch):
+        monkeypatch.setattr(openviking, "OPENVIKING_ADMIN_BASE_URL", "")
+
+        def _no_client(**kwargs):
+            raise AssertionError("未配置地址时不应发起请求")
+
+        monkeypatch.setattr(openviking.httpx, "AsyncClient", _no_client)
+        await openviking.wait_for_openviking_ready(timeout=5)
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_configured_timeout(self, monkeypatch):
+        client = _FakeAsyncClient([_FakeResponse(200)])
+        monkeypatch.setattr(openviking.httpx, "AsyncClient", lambda **kw: client)
+        await openviking.wait_for_openviking_ready()
+        assert client.calls

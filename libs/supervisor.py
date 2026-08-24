@@ -123,6 +123,43 @@ def remove_process(process_name):
             logging.info(f"删除进程时发生错误: {e.faultString}")
 
 
+def restart_process(process_name):
+    """重启进程（stop + start）
+
+    返回 False 表示该进程不由本机 supervisor 托管（未配置 RY_JOB_SERVER、
+    supervisor 不可达或程序名不存在），调用方可据此降级到其他重启方式。
+    """
+    if not RY_JOB_SERVER:
+        logging.info("未配置 RY_JOB_SERVER，跳过 supervisor 重启")
+        return False
+    try:
+        server = ServerProxy(RY_JOB_SERVER)
+        all_processes = _get_all_processes(server, process_name)
+        if not all_processes:
+            logging.info(f"进程 {process_name} 不存在，无法重启")
+            return False
+        for p in all_processes:
+            try:
+                server.supervisor.stopProcess(p)
+            except Fault as e:
+                # 本来就没在跑，直接启动即可
+                if "NOT_RUNNING" not in e.faultString:
+                    raise
+            server.supervisor.startProcess(p)
+            logging.info(f"进程 {p} 已重启")
+        return True
+    except Fault as e:
+        if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:
+            logging.info(f"进程 {process_name} 不存在，无法重启")
+        else:
+            logging.info(f"重启进程时发生错误: {e.faultString}")
+        return False
+    except Exception as e:
+        # supervisor 不可达（连接被拒/超时等）同样按"未托管"处理，交给调用方降级
+        logging.info(f"重启进程 {process_name} 失败: {e}")
+        return False
+
+
 def process_status(process_name):
     """获取进程状态"""
     try:

@@ -136,6 +136,29 @@ OPENVIKING_ADMIN_BASE_URL = os.environ.get("OPENVIKING_ADMIN_BASE_URL", "http://
 OPENVIKING_ROOT_API_KEY = os.environ.get("OPENVIKING_ROOT_API_KEY")
 OPENVIKING_PUBLIC_BASE_URL = os.environ.get("OPENVIKING_PUBLIC_BASE_URL")
 
+# OpenViking embedding 配置落盘目录。
+# lion_mgmt 写入 <dir>/ov.conf，lion-viking 容器以 "./data/viking/ov.conf:/app/ov.conf:ro"
+# 挂载同一个宿主机文件；entrypoint.sh 比对哈希、维度变化时清空向量库。
+# 部署时需保证两个容器映射到同一宿主机目录（见 docker-compose 的 lion-viking volumes）。
+OPENVIKING_CONFIG_DIR = os.environ.get("RY_OPENVIKING_CONFIG_DIR") or os.path.join(
+    BASE_DIR, "data/viking"
+)
+# entrypoint.sh 在配置非法时会回滚到该备份（容器内 /app/data/.ov_conf_backup）
+OPENVIKING_CONFIG_BACKUP_NAME = ".ov_conf_backup"
+
+# 重启方式：优先 Supervisor 程序名，降级到 docker CLI 的容器名
+OPENVIKING_SUPERVISOR_PROGRAM = os.environ.get(
+    "RY_OPENVIKING_SUPERVISOR_PROGRAM", "lion_openviking"
+)
+OPENVIKING_CONTAINER_NAME = os.environ.get("RY_OPENVIKING_CONTAINER", "lion-viking")
+
+# 重启后等待 /health 就绪的超时时间（秒）。镜像 healthcheck 的 start_period 是 60s，
+# 维度变化时还要清空向量库，因此默认给到 120s。
+try:
+    OPENVIKING_READY_TIMEOUT = int(os.environ.get("RY_OPENVIKING_READY_TIMEOUT", "120"))
+except ValueError:
+    OPENVIKING_READY_TIMEOUT = 120
+
 OAS_UI_DEFAULT = "redoc"
 OAS_PATH_TO_REDOC_HTML = os.path.join(BASE_DIR, "settings", "apidoc.html")
 OAS_UI_REDOC = True
