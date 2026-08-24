@@ -1329,7 +1329,14 @@ async def run(request):
     ):
         raise CustomError(ErrorCode.UNAUTH)
     params["executor"] = user.id
-    msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params, "tenant_id": tenant_id}
+    msg = {
+        "run_type": run_type,
+        "run_id": gen_run_id(),
+        "run_args": params,
+        "tenant_id": tenant_id,
+        # Keep interactive warroom actions isolated from scheduled flow load.
+        "source": "warroom",
+    }
     room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
