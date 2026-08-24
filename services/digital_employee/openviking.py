@@ -3,9 +3,12 @@
 
 配置格式与 middleware/lion_viking 保持一致：**JSON**。
 lion_viking 的 entrypoint.sh 用 ``python3 -m json.tool`` 校验配置合法性，
-并用 ``"dimension": <int>`` 提取维度、``sha256sum`` 比对内容哈希，
-维度变化时清空 ``/app/data/accounts`` 下的向量库。
+并用 ``"dimension": <int>`` 提取维度、``sha256sum`` 比对内容哈希。
 本模块的解析/哈希逻辑必须与该 entrypoint 对齐，否则会写出无法启动的配置。
+
+**维度固定为 2048**：维度变化会清空 ``/app/data/accounts`` 下的向量库，
+导致所有知识库文档丢失，因此架构层面禁止变更——只允许修改模型、供应商、
+API 地址与密钥等参数。
 """
 
 import asyncio
@@ -33,9 +36,9 @@ from settings import (
 
 logger = logging.getLogger(__name__)
 
-# 与常见 embedding 模型对齐的合法维度上限
-MIN_DIMENSION = 1
-MAX_DIMENSION = 4096
+# 固定维度：OpenViking 在本产品中只允许 2048 维度
+# 维度变更会导致所有知识库向量丢失，因此架构层面禁止变更
+FIXED_DIMENSION = 2048
 
 # /health 轮询参数
 HEALTH_POLL_INTERVAL = 2.0
@@ -120,18 +123,19 @@ def compute_content_hash(content: str) -> str:
 
 
 def validate_embedding_config(content: str) -> Tuple[int, str]:
-    """校验 OpenViking embedding 配置。
+    """校验 OpenViking embedding 配置（强制维度 = 2048）。
 
     校验项：
     1. 内容非空
     2. 是合法 JSON（entrypoint.sh 会拒绝非法 JSON 并拒绝启动）
-    3. 含 dimension 且在 1-4096 范围内
+    3. 含 dimension 字段
+    4. dimension 必须等于 FIXED_DIMENSION (2048)
 
     Returns:
         (dimension, content_hash)
 
     Raises:
-        CustomError: 配置格式错误
+        CustomError: 配置格式错误或维度不为 2048
     """
     if not content or not content.strip():
         raise CustomError(ErrorCode.EMBEDDING_CONFIG_INVALID_JSON)
@@ -147,8 +151,9 @@ def validate_embedding_config(content: str) -> Tuple[int, str]:
     if dimension is None:
         raise CustomError(ErrorCode.EMBEDDING_CONFIG_MISSING_DIMENSION)
 
-    if dimension < MIN_DIMENSION or dimension > MAX_DIMENSION:
-        raise CustomError(ErrorCode.EMBEDDING_CONFIG_INVALID_DIMENSION)
+    # 强制维度必须为 2048
+    if dimension != FIXED_DIMENSION:
+        raise CustomError(ErrorCode.EMBEDDING_DIMENSION_MISMATCH)
 
     return dimension, compute_content_hash(content)
 
@@ -265,8 +270,8 @@ async def _restart_via_docker() -> bool:
 async def restart_openviking_container() -> None:
     """重启 OpenViking 使新配置生效（Supervisor 优先，降级 docker CLI）。
 
-    重启后 entrypoint.sh 会比对配置哈希；维度变化时清空 ``/app/data/accounts``
-    下的向量库，因此调用方需在重启后等待 ``/health`` 就绪再触发 reindex。
+    重启后 entrypoint.sh 会比对配置哈希。维度固定为 2048，不会触发向量库清空，
+    但仍需在重启后等待 ``/health`` 就绪再返回响应。
 
     Raises:
         CustomError: EMBEDDING_CONFIG_RESTART_FAILED（两种方式都没成功）
@@ -287,7 +292,6 @@ async def wait_for_openviking_ready(timeout: Optional[int] = None) -> None:
 
     Args:
         timeout: 超时秒数，默认取 ``OPENVIKING_READY_TIMEOUT``（120s）。
-                 维度变化时容器要先清空向量库，耗时会明显变长。
 
     Raises:
         CustomError: EMBEDDING_SERVICE_NOT_READY（超时仍未就绪）

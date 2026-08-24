@@ -16,6 +16,7 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from services.digital_employee import openviking
 from services.digital_employee.openviking import (
+    FIXED_DIMENSION,
     compute_content_hash,
     parse_config,
     parse_dimension,
@@ -23,6 +24,7 @@ from services.digital_employee.openviking import (
 )
 
 # 与 middleware/lion_viking/ov.conf 同构的真实配置
+# v2: 维度固定为 2048
 REAL_CONFIG = json.dumps(
     {
         "server": {"host": "0.0.0.0", "port": 8000, "auth_mode": "api_key"},
@@ -31,7 +33,7 @@ REAL_CONFIG = json.dumps(
             "dense": {
                 "provider": "openai",
                 "model": "text-embedding-3-small",
-                "dimension": 1536,
+                "dimension": 2048,
             }
         },
         "storage": {"workspace": "/app/data"},
@@ -42,7 +44,7 @@ REAL_CONFIG = json.dumps(
 
 class TestParseDimension:
     def test_parses_nested_dense_dimension(self):
-        assert parse_dimension(REAL_CONFIG) == 1536
+        assert parse_dimension(REAL_CONFIG) == 2048
 
     def test_parses_top_level_embedding_dimension(self):
         content = json.dumps({"embedding": {"dimension": 3072}})
@@ -71,13 +73,13 @@ class TestParseDimension:
 
     def test_matches_entrypoint_first_dimension_semantics(self):
         """entrypoint.sh 取首个 dimension，解析结果需一致。"""
-        content = json.dumps({"embedding": {"dense": {"dimension": 1536}}})
-        assert parse_dimension(content) == 1536
+        content = json.dumps({"embedding": {"dense": {"dimension": 2048}}})
+        assert parse_dimension(content) == 2048
 
 
 class TestParseConfig:
     def test_parses_valid_json(self):
-        assert parse_config(REAL_CONFIG)["embedding"]["dense"]["dimension"] == 1536
+        assert parse_config(REAL_CONFIG)["embedding"]["dense"]["dimension"] == 2048
 
     def test_rejects_malformed_json(self):
         # entrypoint.sh 会拒绝非法 JSON 并拒绝启动，此处必须提前拦截
@@ -98,7 +100,7 @@ class TestComputeContentHash:
         assert len(compute_content_hash(REAL_CONFIG)) == 64
 
     def test_hash_changes_with_content(self):
-        other = REAL_CONFIG.replace("1536", "3072")
+        other = REAL_CONFIG.replace("2048", "1536")
         assert compute_content_hash(REAL_CONFIG) != compute_content_hash(other)
 
     def test_hash_is_stable(self):
@@ -108,7 +110,7 @@ class TestComputeContentHash:
 class TestValidateEmbeddingConfig:
     def test_returns_dimension_and_hash(self):
         dimension, content_hash = validate_embedding_config(REAL_CONFIG)
-        assert dimension == 1536
+        assert dimension == 2048
         assert content_hash == hashlib.sha256(REAL_CONFIG.encode("utf-8")).hexdigest()
 
     def test_rejects_empty_content(self):
@@ -131,17 +133,41 @@ class TestValidateEmbeddingConfig:
             validate_embedding_config(content)
         assert exc.value.enum == ErrorCode.EMBEDDING_CONFIG_MISSING_DIMENSION
 
+    def test_rejects_dimension_not_2048(self):
+        """维度必须为 2048，其他值一律拒绝（v2 架构约束）"""
+        for dimension in [1536, 768, 3072, 4096, 1, 0, -1, 999999]:
+            content = json.dumps({"embedding": {"dense": {"dimension": dimension}}})
+            with pytest.raises(CustomError) as exc:
+                validate_embedding_config(content)
+            assert exc.value.enum == ErrorCode.EMBEDDING_DIMENSION_MISMATCH
+
+    def test_accepts_dimension_2048(self):
+        """只有 2048 维度通过校验"""
+        content = json.dumps({"embedding": {"dense": {"dimension": 2048}}})
+        dimension, content_hash = validate_embedding_config(content)
+        assert dimension == 2048
+        assert len(content_hash) == 64
+
+    def test_fixed_dimension_constant_is_2048(self):
+        """确保 FIXED_DIMENSION 常量为 2048"""
+        assert FIXED_DIMENSION == 2048
+
     @pytest.mark.parametrize("dimension", [0, -1, 4097, 999999])
-    def test_rejects_out_of_range_dimension(self, dimension):
+    def test_rejects_out_of_range_dimension_legacy(self, dimension):
+        """保留旧测试用于回归检查（现在会触发 MISMATCH 而非 INVALID_DIMENSION）"""
         content = json.dumps({"embedding": {"dense": {"dimension": dimension}}})
         with pytest.raises(CustomError) as exc:
             validate_embedding_config(content)
-        assert exc.value.enum == ErrorCode.EMBEDDING_CONFIG_INVALID_DIMENSION
+        # v2 架构下，任何非 2048 的维度都是 MISMATCH
+        assert exc.value.enum == ErrorCode.EMBEDDING_DIMENSION_MISMATCH
 
     @pytest.mark.parametrize("dimension", [1, 768, 1536, 3072, 4096])
-    def test_accepts_boundary_dimensions(self, dimension):
+    def test_rejects_non_2048_dimensions_v2(self, dimension):
+        """v2: 即使是有效范围内的维度，只要不是 2048 都拒绝"""
         content = json.dumps({"embedding": {"dense": {"dimension": dimension}}})
-        assert validate_embedding_config(content)[0] == dimension
+        with pytest.raises(CustomError) as exc:
+            validate_embedding_config(content)
+        assert exc.value.enum == ErrorCode.EMBEDDING_DIMENSION_MISMATCH
 
 
 # ---------------------------------------------------------------------------

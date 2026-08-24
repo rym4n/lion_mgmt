@@ -1,8 +1,8 @@
 # coding=utf-8
 """OpenViking embedding 配置 API。
 
-高危配置入口：维度变更会清空所有数字员工的向量记忆，
-因此所有接口都要求 ``digital_employee:manage`` 权限，且维度变更需二次确认。
+高危配置入口：所有接口都要求 ``digital_employee:manage`` 权限。
+维度固定为 2048（架构约束），只允许修改模型、供应商与 API 配置。
 """
 
 from datetime import datetime, timezone
@@ -63,11 +63,9 @@ def _serialize(config: EmbeddingConfig) -> dict:
 
 @embedding_bp.post("")
 async def set_embedding_config(request: Request) -> HTTPResponse:
-    """写入 OpenViking embedding 配置。
+    """写入 OpenViking embedding 配置（维度固定 2048）。
 
-    维度未变化时只换模型/供应商，向量仍可用；
-    维度变化时必须携带 ``confirm_dimension_change=true``，
-    并在容器重启后触发全员工 reindex。
+    维度强制为 2048，用户只能修改模型名称、API 地址、密钥等参数。
     """
     await check_permissions(request, EMBEDDING_MANAGE_PERMISSION)
 
@@ -78,15 +76,10 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
     content = (data.get("content") or "").strip()
     remark = data.get("remark") or ""
 
-    # 校验配置格式，拿到维度与内容哈希
+    # 校验配置格式（强制维度 = 2048）
     dimension, content_hash = validate_embedding_config(content)
 
     current = await EmbeddingConfig.filter(tenant_id=tenant_id, deleted=False).first()
-
-    # 维度变化需要前端二次确认（会清空所有员工向量记忆）
-    dimension_changed = bool(current and current.dimension != dimension)
-    if dimension_changed and not data.get("confirm_dimension_change", False):
-        raise CustomError(ErrorCode.EMBEDDING_DIMENSION_CHANGE_UNCONFIRMED)
 
     if current:
         current.content = content
@@ -138,7 +131,7 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
     config.applied_at = datetime.now(timezone.utc)
     await config.save()
 
-    return response_ok(data={"config_id": config_id})
+    return response_ok(data={"config_id": config_id, "dimension": dimension})
 
 
 @embedding_bp.get("")

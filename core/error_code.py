@@ -307,3 +307,4 @@ class ErrorCode(BaseErrorCode):
     EMBEDDING_CONFIG_APPLY_FAILED = ErrorData(4265, "配置写入失败，请检查磁盘与挂载配置")
     EMBEDDING_CONFIG_RESTART_FAILED = ErrorData(4266, "OpenViking 容器重启失败")
     EMBEDDING_SERVICE_NOT_READY = ErrorData(4269, "OpenViking 重启后未在超时时间内就绪")
+    EMBEDDING_DIMENSION_MISMATCH = ErrorData(4270, "Embedding dimension must be 2048")
