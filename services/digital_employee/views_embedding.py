@@ -100,7 +100,7 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
         )
     config_id = str(config.id)
 
-    # 落盘（Task 3 实现）
+    # 落盘到 $OPENVIKING_CONFIG_DIR/ov.conf（原地截断写入，保持 inode）
     try:
         write_config_to_disk(content)
     except CustomError:
@@ -109,7 +109,7 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
         logger.error(f"write openviking config failed: {ex}")
         raise CustomError(ErrorCode.EMBEDDING_CONFIG_APPLY_FAILED)
 
-    # 重启容器使配置生效（Task 3 实现）
+    # 重启容器使配置生效（Supervisor 优先，降级 docker CLI）
     try:
         await restart_openviking_container()
     except CustomError:
@@ -118,7 +118,7 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
         logger.error(f"restart openviking container failed: {ex}")
         raise CustomError(ErrorCode.EMBEDDING_CONFIG_RESTART_FAILED)
 
-    # 等待容器就绪，避免 reindex 打在还没起来的服务上
+    # 等待 /health 就绪再返回，避免调用方拿到成功响应却打在还没起来的服务上
     try:
         await wait_for_openviking_ready()
     except CustomError:

@@ -294,16 +294,12 @@ class ErrorCode(BaseErrorCode):
     KNOWLEDGE_FILE_TYPE_REJECTED = ErrorData(4258, "不支持的文件类型")
     KNOWLEDGE_FILE_TOO_LARGE = ErrorData(4259, "文件超过大小限制")
 
-    # OpenViking embedding config 4260-4269
+    # OpenViking embedding config 4260-4270
+    # 维度固定为 2048（架构约束：维度变更会清空向量库导致知识库文档丢失），
+    # 因此不存在"维度变更二次确认"一类的错误码，4263/4264 已随该能力一并移除。
     EMBEDDING_CONFIG_NOT_FOUND = ErrorData(4260, "Embedding 配置不存在")
     EMBEDDING_CONFIG_INVALID_JSON = ErrorData(4261, "配置格式错误，必须是有效的 JSON")
     EMBEDDING_CONFIG_MISSING_DIMENSION = ErrorData(4262, "配置缺少 embedding dimension 字段")
-    EMBEDDING_CONFIG_INVALID_DIMENSION = ErrorData(
-        4263, "embedding dimension 超出有效范围（1-4096）"
-    )
-    EMBEDDING_DIMENSION_CHANGE_UNCONFIRMED = ErrorData(
-        4264, "维度变更将清空所有数字员工的向量记忆，请二次确认后再提交"
-    )
     EMBEDDING_CONFIG_APPLY_FAILED = ErrorData(4265, "配置写入失败，请检查磁盘与挂载配置")
     EMBEDDING_CONFIG_RESTART_FAILED = ErrorData(4266, "OpenViking 容器重启失败")
     EMBEDDING_SERVICE_NOT_READY = ErrorData(4269, "OpenViking 重启后未在超时时间内就绪")
