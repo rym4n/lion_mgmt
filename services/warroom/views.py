@@ -49,7 +49,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         # 建立连接
         session_id = request.ctx.session.get("id")
         tenant_id = request.ctx.session.get("tenant_id")
-        await chat_manager.connect(account, ws, session_id)
+        await chat_manager.connect(account, ws, session_id, tenant_id)
         has_perm = False
         if not has_perm:
             for role in account.roles:

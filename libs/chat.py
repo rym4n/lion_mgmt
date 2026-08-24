@@ -361,15 +361,23 @@ class ChatManager:
         self.ai_stream_buffer = {}  # 流式消息缓冲区，key 为 room_id:receiver_id
         self.ai_task_locks: dict[str, asyncio.Lock] = {}  # lion_agent 会话锁，key 为 tenant_id:room_id
 
-    async def connect(self, user: Account, ws, session_id):
+    async def connect(self, user: Account, ws, session_id, tenant_id=None):
         """处理用户连接"""
         if user.id not in self.active_connections:
-            self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
+            self.active_connections[user.id] = {
+                session_id: {
+                    "conn": ws,
+                    "current_room": None,
+                    "run_id": None,
+                    "tenant_id": tenant_id,
+                }
+            }
         else:
             self.active_connections[user.id][session_id] = {
                 "conn": ws,
                 "current_room": None,
                 "run_id": None,
+                "tenant_id": tenant_id,
             }
         logger.info(self.active_connections)
         status_message = {
@@ -418,12 +426,21 @@ class ChatManager:
             logger.warning(f"发送消息异常: {e}")
             return False
 
-    async def _broadcast(self, payload: str, *, room_id=None, user_id=None):
+    async def _broadcast(
+        self,
+        payload: str,
+        *,
+        room_id=None,
+        user_id=None,
+        extra_user_id=None,
+        tenant_id=None,
+    ):
         """广播消息到活跃连接。
 
         投递规则（按优先级）：
         - user_id 指定时：发给该用户的所有连接（私聊/@/AI 回复）
         - room_id 指定时：发给 current_room 匹配该房间的连接
+        - extra_user_id 指定时：在 room_id 广播之外，额外发给该用户的所有连接
         - 两者均为 None：全员广播
 
         遍历的是连接快照，发送失败的连接在循环结束后统一移除，
@@ -436,7 +453,14 @@ class ChatManager:
             if user_id is not None:
                 should_send = uid == user_id
             elif room_id is not None:
-                should_send = info.get("current_room") == room_id
+                should_send = info.get("current_room") == room_id or (
+                    extra_user_id is not None
+                    and uid == extra_user_id
+                    and (
+                        tenant_id is None
+                        or str(info.get("tenant_id")) == str(tenant_id)
+                    )
+                )
             else:
                 should_send = True
             if not should_send:
@@ -503,9 +527,11 @@ class ChatManager:
                 await self._broadcast(orjson.dumps(msg.get("mention")).decode(), user_id=msg.get("user"))
             return
         # 处理作战室产生的runlog
+        runlog_executor_id = None
         if "log" in msg.keys():
             if msg["log"].get("type") == "approval-info":
                 return
+            runlog_executor_id = self._single_account_id(msg["log"].get("executor"))
             message["data"] = orjson.dumps(
                 await creat_message(
                     room_id=msg["room_id"],
@@ -571,7 +597,12 @@ class ChatManager:
         else:
             room_id = msg.get("room_id")
             if room_id:
-                await self._broadcast(message["data"].decode(), room_id=room_id)
+                await self._broadcast(
+                    message["data"].decode(),
+                    room_id=room_id,
+                    extra_user_id=runlog_executor_id,
+                    tenant_id=msg.get("tenant_id"),
+                )
             else:
                 # room_id 为空时全员广播（如用户在线状态等全局消息）
                 await self._broadcast(message["data"].decode())
