@@ -6,7 +6,6 @@
 """
 
 from datetime import datetime, timezone
-import uuid
 
 from sanic import Blueprint, Request
 from sanic.log import logger
@@ -17,10 +16,8 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import check_permissions
 from models.embedding_config import EmbeddingConfig
-from models.reindex_task import ReindexTask
 from services.digital_employee.openviking import (
     restart_openviking_container,
-    schedule_reindex,
     validate_embedding_config,
     wait_for_openviking_ready,
     write_config_to_disk,
@@ -141,21 +138,7 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
     config.applied_at = datetime.now(timezone.utc)
     await config.save()
 
-    result = {"config_id": config_id, "dimension_changed": dimension_changed}
-
-    # 维度变化时创建 reindex 任务：只创建 + 拉起后台协程，立即返回 task_id，
-    # 真正的逐个 workspace 重建由 reindex_worker 在后台跑，不阻塞本次响应。
-    if dimension_changed:
-        try:
-            task_id = await schedule_reindex(config_id, tenant_id)
-        except CustomError:
-            raise
-        except Exception as ex:
-            logger.error(f"schedule reindex failed: {ex}")
-            raise CustomError(ErrorCode.EMBEDDING_REINDEX_SCHEDULE_FAILED)
-        result["reindex_task_id"] = str(task_id) if task_id else None
-
-    return response_ok(data=result)
+    return response_ok(data={"config_id": config_id})
 
 
 @embedding_bp.get("")
@@ -168,38 +151,3 @@ async def get_embedding_config(request: Request) -> HTTPResponse:
     if not config:
         return response_ok(data=None)
     return response_ok(data=_serialize(config))
-
-
-@embedding_bp.get("/reindex-status/<task_id:str>")
-async def get_reindex_status(request: Request, task_id: str) -> HTTPResponse:
-    """查询 reindex 任务进度，供前端轮询。"""
-    await check_permissions(request, EMBEDDING_MANAGE_PERMISSION)
-
-    tenant_id = _tenant_id(request)
-
-    # id 是 UUID 主键，非法串会在 ORM 层抛 ValueError 变成 400；
-    # 这是个高频轮询接口，直接按"任务不存在"返回语义更清楚。
-    try:
-        uuid.UUID(str(task_id))
-    except (ValueError, AttributeError, TypeError):
-        raise CustomError(ErrorCode.EMBEDDING_REINDEX_TASK_NOT_FOUND)
-
-    task = await ReindexTask.filter(
-        id=task_id, tenant_id=tenant_id, deleted=False
-    ).first()
-    if not task:
-        raise CustomError(ErrorCode.EMBEDDING_REINDEX_TASK_NOT_FOUND)
-
-    return response_ok(
-        data={
-            "id": str(task.id),
-            "status": task.status,
-            "total_workspaces": task.total_workspaces,
-            "processed_workspaces": task.processed_workspaces,
-            "failed_workspaces": task.failed_workspaces,
-            "details": task.details,
-            "started_at": task.started_at.isoformat() if task.started_at else None,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-            "error": task.error,
-        }
-    )

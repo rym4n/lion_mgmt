@@ -306,6 +306,4 @@ class ErrorCode(BaseErrorCode):
     )
     EMBEDDING_CONFIG_APPLY_FAILED = ErrorData(4265, "配置写入失败，请检查磁盘与挂载配置")
     EMBEDDING_CONFIG_RESTART_FAILED = ErrorData(4266, "OpenViking 容器重启失败")
-    EMBEDDING_REINDEX_SCHEDULE_FAILED = ErrorData(4267, "重建索引任务创建失败")
-    EMBEDDING_REINDEX_TASK_NOT_FOUND = ErrorData(4268, "重建索引任务不存在")
     EMBEDDING_SERVICE_NOT_READY = ErrorData(4269, "OpenViking 重启后未在超时时间内就绪")

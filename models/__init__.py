@@ -16,7 +16,6 @@ from .openviking import *
 from .network_topology import *
 from .network_topology_v2 import *
 from .playbook import *
-from .reindex_task import *
 from .report import *
 from .runlog import *
 from .scene import *
