@@ -162,3 +162,56 @@ async def test_rm_never_recursive():
     await client.rm("viking://resources/spaces/ops/a.md")
 
     assert "recursive=false" in captured["url"].lower()
+
+
+@pytest.mark.asyncio
+async def test_ensure_client_provisions_existing_tenant_only_for_licensed_module(
+    monkeypatch,
+):
+    from services.knowledge import client as module
+    import services.openviking as openviking
+
+    calls = []
+    provisioned = object()
+    ready_client = object()
+
+    async def fake_get(tenant_id):
+        calls.append(("get", tenant_id))
+        return None if len(calls) == 1 else ready_client
+
+    async def fake_provision(tenant_id):
+        calls.append(("provision", tenant_id))
+        return provisioned
+
+    monkeypatch.setattr(module, "_knowledge_module_is_licensed", lambda: True)
+    monkeypatch.setattr(module, "get_knowledge_client", fake_get)
+    monkeypatch.setattr(openviking, "provision_tenant_knowledge", fake_provision)
+
+    assert await module.ensure_knowledge_client("legacy-tenant") is ready_client
+    assert calls == [
+        ("get", "legacy-tenant"),
+        ("provision", "legacy-tenant"),
+        ("get", "legacy-tenant"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ensure_client_does_not_provision_without_knowledge_license(monkeypatch):
+    from services.knowledge import client as module
+    import services.openviking as openviking
+
+    provision_calls = []
+
+    async def fail_if_called(_tenant_id):
+        provision_calls.append(True)
+        raise AssertionError("unlicensed tenants must not be provisioned")
+
+    monkeypatch.setattr(module, "_knowledge_module_is_licensed", lambda: False)
+    async def no_client(_tenant_id):
+        return None
+
+    monkeypatch.setattr(module, "get_knowledge_client", no_client)
+    monkeypatch.setattr(openviking, "provision_tenant_knowledge", fail_if_called)
+
+    assert await module.ensure_knowledge_client("tenant") is None
+    assert provision_calls == []

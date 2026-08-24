@@ -193,3 +193,51 @@ async def get_knowledge_client(tenant_id: str) -> KnowledgeClient | None:
         base_url=OPENVIKING_ADMIN_BASE_URL,
         api_key=credential.api_key,  # EncryptedCharField 自动解密
     )
+
+
+def _knowledge_module_is_licensed() -> bool:
+    """仅在当前 License 明确包含知识空间模块时才允许自动补建。"""
+    try:
+        from libs.security.authorization import load_license
+        from libs.security.license_modules import is_licensed_module_active
+
+        license_data = load_license() or {}
+        return any(
+            item.get("module") == "knowledge_bp"
+            and is_licensed_module_active(license_data, item)
+            for item in license_data.get("moduleList", [])
+        )
+    except Exception:
+        # License 读取失败不应阻塞已有凭证的正常使用；这里只影响自动补建。
+        return False
+
+
+async def ensure_knowledge_client(tenant_id: str) -> KnowledgeClient | None:
+    """返回租户客户端，并兼容 License 导入前已存在的租户。
+
+    知识库能力上线后，历史租户没有经历租户创建流程，因而缺少
+    ``TenantOpenVikingCredential``。健康检查是页面打开时的第一个请求，
+    在这里做一次幂等补建即可让旧租户平滑接入；配置缺失时仍返回 ``None``。
+    远端 provisioning 异常继续向上抛出，由调用方按服务不可用处理。
+    """
+    client = await get_knowledge_client(tenant_id)
+    if client is not None:
+        return client
+
+    if not _knowledge_module_is_licensed():
+        return None
+
+    from services.openviking import provision_tenant_knowledge
+
+    try:
+        credential = await provision_tenant_knowledge(tenant_id)
+    except Exception:
+        # 多 worker 同时打开页面时，另一个 worker 可能刚好完成了补建；
+        # 先回读一次，避免把这类唯一键竞争误报成服务不可用。
+        client = await get_knowledge_client(tenant_id)
+        if client is not None:
+            return client
+        raise
+    if credential is None:
+        return None
+    return await get_knowledge_client(tenant_id)

@@ -163,3 +163,38 @@ async def test_ensure_space_is_idempotent(monkeypatch):
     monkeypatch.setattr(manager.KnowledgeSpace, "get_or_none", fake_get_or_none)
     result = await manager.ensure_space("t1", "skill-vuln", "漏洞扫描", "skill_package", "vuln-scan")
     assert result is existing
+
+
+@pytest.mark.asyncio
+async def test_health_provisions_legacy_tenant_when_credential_is_missing(monkeypatch):
+    from services.knowledge import manager
+
+    calls = []
+
+    class _HealthClient:
+        async def health(self):
+            calls.append("health")
+
+    async def fake_ensure(tenant_id):
+        calls.append(tenant_id)
+        return _HealthClient()
+
+    monkeypatch.setattr(manager, "ensure_knowledge_client", fake_ensure)
+
+    assert await manager.health("legacy-tenant") == {"available": True}
+    assert calls == ["legacy-tenant", "health"]
+
+
+@pytest.mark.asyncio
+async def test_health_keeps_not_provisioned_when_provisioning_is_not_configured(monkeypatch):
+    from services.knowledge import manager
+
+    async def no_client(_tenant_id):
+        return None
+
+    monkeypatch.setattr(manager, "ensure_knowledge_client", no_client)
+
+    assert await manager.health("tenant-without-viking") == {
+        "available": False,
+        "reason": "not_provisioned",
+    }

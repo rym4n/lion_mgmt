@@ -15,10 +15,9 @@ from libs.error_code.exception import CustomError
 from models.command_center import CommandAgent
 from models.knowledge import KnowledgeDocument, KnowledgeSpace
 from settings import TZ
-from services.knowledge.client import get_knowledge_client
+from services.knowledge.client import ensure_knowledge_client, get_knowledge_client
 from services.knowledge.scope import (
     build_uri,
-    resolve_search_roots,
     uri_in_space,
     validate_rel_path,
     validate_space_key,
@@ -444,7 +443,10 @@ async def _decorate_hits(tenant_id: str, raw: dict) -> list[dict]:
 
 
 async def health(tenant_id: str) -> dict:
-    client = await get_knowledge_client(tenant_id)
+    try:
+        client = await ensure_knowledge_client(tenant_id)
+    except Exception:
+        return {"available": False, "reason": "service_unavailable"}
     if client is None:
         return {"available": False, "reason": "not_provisioned"}
     try:
