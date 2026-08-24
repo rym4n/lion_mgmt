@@ -6,6 +6,7 @@
 """
 
 from datetime import datetime, timezone
+import uuid
 
 from sanic import Blueprint, Request
 from sanic.log import logger
@@ -142,7 +143,8 @@ async def set_embedding_config(request: Request) -> HTTPResponse:
 
     result = {"config_id": config_id, "dimension_changed": dimension_changed}
 
-    # 维度变化时创建 reindex 任务（Task 4 实现）
+    # 维度变化时创建 reindex 任务：只创建 + 拉起后台协程，立即返回 task_id，
+    # 真正的逐个 workspace 重建由 reindex_worker 在后台跑，不阻塞本次响应。
     if dimension_changed:
         try:
             task_id = await schedule_reindex(config_id, tenant_id)
@@ -174,6 +176,14 @@ async def get_reindex_status(request: Request, task_id: str) -> HTTPResponse:
     await check_permissions(request, EMBEDDING_MANAGE_PERMISSION)
 
     tenant_id = _tenant_id(request)
+
+    # id 是 UUID 主键，非法串会在 ORM 层抛 ValueError 变成 400；
+    # 这是个高频轮询接口，直接按"任务不存在"返回语义更清楚。
+    try:
+        uuid.UUID(str(task_id))
+    except (ValueError, AttributeError, TypeError):
+        raise CustomError(ErrorCode.EMBEDDING_REINDEX_TASK_NOT_FOUND)
+
     task = await ReindexTask.filter(
         id=task_id, tenant_id=tenant_id, deleted=False
     ).first()

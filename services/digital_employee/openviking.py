@@ -327,16 +327,18 @@ async def wait_for_openviking_ready(timeout: Optional[int] = None) -> None:
 
 
 # --------------------------------------------------------------------------
-# 以下为 Task 4 的落地点，当前为占位实现。
+# Reindex 调度（Task 4）
 # --------------------------------------------------------------------------
 
 
 async def schedule_reindex(config_id: str, tenant_id: str) -> Optional[str]:
-    """维度变化后创建 ReindexTask 并拉起后台重建。
+    """维度变化后创建 ReindexTask 并拉起后台重建，返回任务 ID。
 
-    TODO(Task 4): 实现任务创建与后台 worker 调度。
-
-    Returns:
-        任务 ID；当前占位实现返回 ``None``。
+    实现放在 ``services/digital_employee/reindex_worker`` 里，本函数只做转发：
+    本模块被 ``tests/test_openviking_config.py`` 在无数据库的环境下直接导入，
+    在这里 import ORM 模型会把 tortoise 模型注册拖进纯配置校验的用例里。
+    延迟导入同时避免 openviking -> reindex_worker -> manager -> ... 的环形依赖。
     """
-    return None
+    from services.digital_employee.reindex_worker import create_reindex_task
+
+    return await create_reindex_task(config_id, tenant_id)
