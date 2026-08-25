@@ -116,7 +116,7 @@ class EmployeeApiCredential(BaseModel):
 
 
 class PackageIngestOutbox(BaseModel):
-    """技能包随包文档 ingest 到 OpenViking 的 durable outbox。
+    """技能包随包文档 ingest 的 durable outbox。
 
     以 (tenant_id, package_identity, content_hash) 幂等派发。
     状态：pending / processing / succeeded / failed
@@ -125,8 +125,8 @@ class PackageIngestOutbox(BaseModel):
     package_identity = fields.CharField(max_length=255, description="包标识（type:key:version）")
     file_path = fields.TextField(description="原始文件路径（相对包解压目录）")
     content_hash = fields.CharField(max_length=64, description="文件内容 SHA256")
-    target_uri = fields.TextField(description="目标 viking:// URI")
-    task_id = fields.CharField(max_length=255, null=True, description="OpenViking 后台任务 ID")
+    target_uri = fields.TextField(description="历史目标坐标（新链路不使用）")
+    task_id = fields.CharField(max_length=255, null=True, description="远端后台任务或文档 ID")
     status = fields.CharField(max_length=32, default="pending", description="pending/processing/succeeded/failed")
     error = fields.TextField(null=True, description="失败原因")
     attempt_count = fields.IntField(default=0, description="重试次数")

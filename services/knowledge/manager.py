@@ -367,8 +367,7 @@ async def delete_document(tenant_id: str, document_id: str) -> dict:
 async def retry_document(tenant_id: str, document_id: str) -> dict:
     """重新提交失败的文档。
 
-    原文还在 RustFS，直接重新提交 ingest 即可——不像 OpenViking 时代
-    要靠 add_url 指回自身那种 hack。
+    原文还在 RustFS，直接重新提交 ingest 即可。
     """
     document = await get_document_or_404(tenant_id, document_id)
     if document.status not in ("failed", "processing"):

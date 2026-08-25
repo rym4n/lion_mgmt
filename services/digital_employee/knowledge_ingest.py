@@ -1,12 +1,11 @@
 # coding=utf-8
 """技能包随包文档入库（SPEC §11.3）。
 
-改造要点（相对阶段三之前的实现）：
-1. 不再自己调 OpenViking——统一走 services/knowledge/manager 的 upsert，
+改造要点：
+1. 统一走 services/knowledge/manager 的 upsert，
    这样随包文档也进 KnowledgeDocument 表，在管理界面可见、可删、有状态。
 2. 每个技能包一个空间 skill-{skill_key}，员工绑了该技能即可见。
-3. URI 不含租户前缀与版本号：租户隔离由 OpenViking account 保证；
-   版本升级时同名文档直接覆盖，content_hash 相同则跳过。
+3. 文档以文件名和内容哈希幂等；版本升级时同内容直接跳过。
 """
 
 import hashlib
@@ -118,7 +117,7 @@ async def ingest_package_docs(
         try:
             content = file_path.read_bytes()
             content_hash = _compute_content_hash(content)
-            rel_path = _make_target_rel_path(relative_path)
+            filename = Path(_make_target_rel_path(relative_path)).name
 
             existing = await PackageIngestOutbox.filter(
                 tenant_id=tenant_id,
@@ -136,8 +135,8 @@ async def ingest_package_docs(
                 package_identity=package_identity,
                 content_hash=content_hash,
                 defaults={
-                    "file_path": rel_path,
-                    "target_uri": f"viking://resources/spaces/{space_key}/{rel_path}",
+                    "file_path": relative_path,
+                    "target_uri": "",
                     "status": STATUS_PENDING,
                 },
             )
@@ -152,9 +151,9 @@ async def ingest_package_docs(
             result = await upsert_document(
                 tenant_id,
                 space_key=space_key,
-                rel_path=rel_path,
+                filename=filename,
                 content=content,
-                title=Path(rel_path).name,
+                title=filename,
                 source="skill_package",
                 source_ref=str(package_key),
             )
@@ -201,7 +200,7 @@ async def forget_package_docs(tenant_id: str, package_identity: str) -> dict[str
     for record in records:
         try:
             document = await KnowledgeDocument.get_or_none(
-                tenant_id=tenant_id, uri=record.target_uri, deleted=False
+                tenant_id=tenant_id, id=record.task_id, deleted=False
             )
             if document:
                 await delete_document(tenant_id, str(document.id))
@@ -209,10 +208,10 @@ async def forget_package_docs(tenant_id: str, package_identity: str) -> dict[str
             await record.save()
             deleted += 1
         except Exception as exc:
-            errors.append(f"{record.target_uri}: {type(exc).__name__}")
+            errors.append(f"{record.file_path}: {type(exc).__name__}")
             logger.error(
-                "knowledge_ingest: forget failed uri=%s error_type=%s",
-                record.target_uri, type(exc).__name__,
+                "knowledge_ingest: forget failed file=%s error_type=%s",
+                record.file_path, type(exc).__name__,
             )
 
     return {"deleted": deleted, "errors": errors}

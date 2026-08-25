@@ -96,14 +96,6 @@ async def space_delete(request: Request):
     )
 
 
-@knowledge_bp.post("/space/sync")
-@requires_permission("knowledge:u")
-async def space_sync(request: Request):
-    params = _json(request)
-    _require(params, "space_key")
-    return response_ok(await manager.sync_space(_tenant(request), str(params["space_key"])))
-
-
 @knowledge_bp.post("/document/list")
 @requires_permission("knowledge:r")
 async def document_list(request: Request):
@@ -127,11 +119,12 @@ async def document_upload(request: Request):
     space_key = (form.get("space_key") or [None])[0] if hasattr(form, "get") else None
     if not uploaded or not space_key:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    rel_path = (form.get("path") or [uploaded.name])[0]
     return response_ok(
         await manager.upsert_document(
-            _tenant(request), space_key=str(space_key), rel_path=str(rel_path),
+            _tenant(request),
+            space_key=str(space_key),
             content=uploaded.body, title=(form.get("title") or [None])[0],
+            filename=uploaded.name,
             source="manual", uploader_id=_operator_id(request)
         )
     )
@@ -141,15 +134,15 @@ async def document_upload(request: Request):
 @requires_permission("knowledge:c")
 async def document_upsert(request: Request):
     params = _json(request)
-    _require(params, "space_key", "path")
-    content, url = params.get("content"), params.get("url")
-    if not content and not url:
-        raise CustomError(ErrorCode.PARAM_ERROR)
+    _require(params, "space_key", "filename", "content")
+    content = params["content"]
     return response_ok(
         await manager.upsert_document(
-            _tenant(request), space_key=str(params["space_key"]), rel_path=str(params["path"]),
-            content=content.encode("utf-8") if isinstance(content, str) else content, url=url,
-            title=params.get("title"), instruction=params.get("instruction"), source="api",
+            _tenant(request),
+            space_key=str(params["space_key"]),
+            content=content.encode("utf-8") if isinstance(content, str) else content,
+            filename=str(params["filename"]),
+            title=params.get("title"), source="api",
             uploader_id=_operator_id(request)
         )
     )

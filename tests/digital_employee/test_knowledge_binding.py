@@ -45,7 +45,6 @@ def _load_real_module_snapshot() -> dict[str, object]:
             "models.command_center",
             "models.digital_employee",
             "models.knowledge",
-            "models.openviking",
             "sanic.log",
         ):
             importlib.import_module(name)

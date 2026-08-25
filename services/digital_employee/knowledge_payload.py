@@ -1,8 +1,8 @@
 # coding=utf-8
 """执行 payload 的 knowledge 段（SPEC §11.1）。
 
-只下发空间清单，不下发任何凭证。OpenViking 的 api_key 只在
-lion_mgmt 持有；agent 通过 /knowledge/agent/* 访问知识库，隔离在服务端完成。
+只下发空间清单，不下发任何凭证。agent 通过 /knowledge/agent/*
+访问知识库，隔离在服务端完成。
 """
 
 from sanic.log import logger

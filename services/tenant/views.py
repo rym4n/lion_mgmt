@@ -23,12 +23,6 @@ from libs.security.authorization import (
 )
 from libs.utils import get_expiration_date
 from models import Account, Role, Scene, Tenant
-from services.openviking import (
-    deprovision_tenant_knowledge,
-    provision_tenant_knowledge,
-    restore_tenant_knowledge,
-    rotate_tenant_knowledge_key,
-)
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     SESSION_HTTPONLY,
@@ -88,18 +82,6 @@ def _can_restore_tenant_admin(operator, current_tenant_id, target_tenant_id):
         and target_tenant_id != DEFAULT_TENANT_ID
         and is_superadmin(operator)
     )
-
-
-async def _provision_tenant_knowledge_best_effort(tenant_id):
-    try:
-        await provision_tenant_knowledge(tenant_id)
-    except Exception:
-        logger.warning(
-            "Failed to provision knowledge for tenant %s",
-            tenant_id,
-            exc_info=True,
-        )
-
 
 async def _clear_maintenance_mode_for_non_default_tenant(request, tenant_id):
     if not should_clear_maintenance_mode(tenant_id):
@@ -220,9 +202,6 @@ async def add_tenant(request):
         # 创建默认场景"日常运营"
         await Scene.create(name="日常运营", remark="默认场景", status=1, creator=creator, updator=creator, tenant_id=tenant.id)
 
-    # 外部知识库配置是提交后的附加能力，失败不改变已成功创建的租户。
-    await _provision_tenant_knowledge_best_effort(tenant.id)
-
     return response_ok(tenant.json)
 
 
@@ -307,13 +286,6 @@ async def del_tenant(request):
                 tenant.id,
                 exc_info=True,
             )
-
-    # 租户软删除时处理知识库凭证（阶段三）
-    try:
-        await deprovision_tenant_knowledge(tenant.id, soft_delete=True)
-    except Exception as e:
-        # 知识库软删除失败不阻塞租户删除，记录日志
-        request.app.ctx.logger.warning(f"Failed to soft-delete knowledge for tenant {tenant.id}: {e}")
 
     return response_ok("success")
 
@@ -755,87 +727,3 @@ async def get_tenant_user(request):
             "data": rows,
         }
     )
-
-
-@tenant_bp.post("/restore")
-@openapi.definition(
-    summary="恢复已删除的租户",
-    description="恢复已删除的租户（需要租户更新权限）",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["id"],
-                "properties": {"id": {"type": "string", "description": "租户id"}},
-            }
-        }
-    },
-    response={"200": {"description": "恢复成功"}},
-)
-@requires_permission("tenant:u")
-async def restore_tenant(request):
-    """恢复已软删除的租户（阶段三：OpenViking 知识层）。"""
-    tenant_id = request.json.get("id")
-    if not tenant_id:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tenant = await Tenant.get_or_none(id=tenant_id)
-    if tenant is None:
-        raise CustomError(ErrorCode.TENANT_NOT_FOUND)
-
-    if not tenant.deleted:
-        return response_ok({"message": "租户未被删除，无需恢复"})
-
-    # 恢复租户
-    tenant.deleted = False
-    await tenant.save()
-
-    # 恢复知识库凭证（重新签发 key，递增 credential_version）
-    try:
-        await restore_tenant_knowledge(tenant.id)
-    except Exception as e:
-        # 知识库恢复失败不阻塞租户恢复
-        request.app.ctx.logger.warning(f"Failed to restore knowledge for tenant {tenant.id}: {e}")
-
-    return response_ok({"message": "租户恢复成功"})
-
-
-@tenant_bp.post("/rotate-knowledge-key")
-@openapi.definition(
-    summary="轮换租户知识库 API key",
-    description="轮换租户知识库 API key（需要租户更新权限，阶段三）",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["id"],
-                "properties": {"id": {"type": "string", "description": "租户id"}},
-            }
-        }
-    },
-    response={"200": {"description": "轮换成功"}},
-)
-@requires_permission("tenant:u")
-async def rotate_knowledge_key(request):
-    """轮换租户知识库 API key（阶段三：OpenViking 知识层）。"""
-    tenant_id = request.json.get("id")
-    if not tenant_id:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tenant = await Tenant.get_or_none(id=tenant_id, deleted=False)
-    if tenant is None:
-        raise CustomError(ErrorCode.TENANT_NOT_FOUND)
-
-    try:
-        credential = await rotate_tenant_knowledge_key(tenant.id)
-        if credential is None:
-            return response_ok({"message": "未找到知识库凭证或 OpenViking 未配置"})
-
-        return response_ok({
-            "message": "知识库 key 轮换成功",
-            "credential_version": credential.credential_version,
-        })
-
-    except Exception as e:
-        request.app.ctx.logger.error(f"Failed to rotate knowledge key for tenant {tenant.id}: {e}", exc_info=True)
-        raise CustomError(ErrorCode.INTERNAL_SERVER_ERROR)

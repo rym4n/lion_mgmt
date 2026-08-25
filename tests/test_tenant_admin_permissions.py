@@ -23,7 +23,6 @@ def _function(path: Path, name: str) -> ast.AsyncFunctionDef:
         if isinstance(node, ast.AsyncFunctionDef) and node.name == name
     )
 
-
 def test_new_tenant_admin_uses_platform_wildcard_permissions():
     function = _function(ROOT / "services/tenant/views.py", "add_tenant")
     role_create = next(
@@ -340,26 +339,3 @@ def test_admin_recovery_requires_builtin_admin_in_default_tenant(monkeypatch):
         tenant_views.DEFAULT_TENANT_ID,
         "target-tenant",
     )
-
-
-@pytest.mark.asyncio
-async def test_knowledge_provision_failure_is_logged_without_failing_create(
-    monkeypatch,
-):
-    warnings = []
-
-    async def fail(_tenant_id):
-        raise RuntimeError("OpenViking unavailable")
-
-    monkeypatch.setattr(tenant_views, "provision_tenant_knowledge", fail)
-    monkeypatch.setattr(
-        tenant_views,
-        "logger",
-        SimpleNamespace(warning=lambda *args, **kwargs: warnings.append((args, kwargs))),
-    )
-
-    await tenant_views._provision_tenant_knowledge_best_effort("tenant-a")
-
-    assert warnings
-    assert warnings[0][0][-1] == "tenant-a"
-    assert warnings[0][1]["exc_info"] is True

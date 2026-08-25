@@ -1,7 +1,7 @@
 # coding=utf-8
 """知识库执行层客户端：调 lion_agent 的 /internal/v1/knowledge/*。
 
-取代原先的 OpenViking REST 客户端。不再有 per-tenant 凭证——
+取代旧的外部存储 REST 客户端。不再有 per-tenant 凭证——
 租户隔离由 lion_agent 侧的 collection 命名承担（SPEC D1/D6），
 本客户端只持有服务间的内部 token。
 """
@@ -138,7 +138,7 @@ class KnowledgeAgentClient:
 def get_knowledge_client() -> KnowledgeAgentClient:
     """构造客户端。
 
-    不再按租户区分、也不再返回 None——凭证体系已随 OpenViking 一起删除
+    不再按租户区分、也不再返回 None——旧凭证体系已删除
     （SPEC D6）。租户身份由每次调用的 tenant_id 参数承载。
     """
     return KnowledgeAgentClient()

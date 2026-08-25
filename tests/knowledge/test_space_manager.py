@@ -155,3 +155,26 @@ def test_scope_still_validates_space_key():
     for bad in ("../x", "OPS", "a/b", ""):
         with pytest.raises(CustomError):
             validate_space_key(bad)
+
+
+def test_openviking_package_is_gone():
+    import importlib
+
+    for module in ("services.openviking", "models.openviking",
+                   "services.digital_employee.openviking"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module)
+
+
+def test_settings_has_no_openviking_config():
+    import settings
+
+    for gone in ("OPENVIKING_ADMIN_BASE_URL", "OPENVIKING_ROOT_API_KEY"):
+        assert not hasattr(settings, gone), f"{gone} 仍存在"
+
+
+def test_space_sync_route_removed():
+    from services.knowledge.views import knowledge_bp
+
+    paths = {getattr(r, "path", "") for r in knowledge_bp.routes}
+    assert not any("sync" in p for p in paths)

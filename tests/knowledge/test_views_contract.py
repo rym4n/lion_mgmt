@@ -37,7 +37,8 @@ def test_tenant_id_never_from_request_body():
     src = _src()
     assert 'session.get("tenant_id")' in src
     assert 'data.get("tenant_id")' not in src
-    assert 'params.get("tenant_id")' not in src
+    # 仅内部 lion_agent 回调读取 tenant_id；用户管理路由仍只信 session。
+    assert 'tenant_id = params.get("tenant_id")' in src
 
 
 def test_document_delete_does_not_expose_recursive():

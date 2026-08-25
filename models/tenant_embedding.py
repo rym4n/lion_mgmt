@@ -2,7 +2,7 @@
 """知识库 embedding 配置，租户级（SPEC §7.1 D9）。
 
 取代旧的 EmbeddingConfig（全局单例 + 维度硬编码 2048）与
-services/digital_employee/openviking.py（写配置文件 + 重启容器）。
+旧的外部存储配置模块（写配置文件 + 重启容器）。
 新架构下配置只是一份数据，随每次请求下发给 lion_agent，
 不落盘、不重启任何容器。
 """
