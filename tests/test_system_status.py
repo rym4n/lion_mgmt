@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+import copy
 import inspect
 from datetime import datetime
 from types import SimpleNamespace
@@ -170,3 +171,103 @@ def test_apply_rate_diff_handles_empty_and_single_point():
 
     single = system_views._apply_rate_diff([{"timestamp": "t1", "net_input_bytes": 100}])
     assert single[0]["net_input_bytes_rate"] is None
+
+
+def test_pick_bucket_hours_by_span():
+    # 24 小时以内不降采样
+    assert system_views._pick_bucket_hours(1) is None
+    assert system_views._pick_bucket_hours(24) is None
+    # 超过 24 小时按 1 小时桶
+    assert system_views._pick_bucket_hours(25) == 1
+    assert system_views._pick_bucket_hours(168) == 1
+    # 超过 7 天按 4 小时桶
+    assert system_views._pick_bucket_hours(169) == 4
+    assert system_views._pick_bucket_hours(720) == 4
+
+
+def test_downsample_averages_numeric_fields_within_bucket():
+    points = [
+        {"timestamp": "2026-08-25 10:00:00", "cpu_percent": 10.0, "connected_clients": 100},
+        {"timestamp": "2026-08-25 10:20:00", "cpu_percent": 20.0, "connected_clients": 200},
+        {"timestamp": "2026-08-25 10:40:00", "cpu_percent": 30.0, "connected_clients": 300},
+        {"timestamp": "2026-08-25 11:10:00", "cpu_percent": 40.0, "connected_clients": 400},
+    ]
+
+    result = system_views._downsample(points, bucket_hours=1)
+
+    assert len(result) == 2
+    assert result[0]["timestamp"] == "2026-08-25 10:00:00"
+    assert result[0]["cpu_percent"] == 20.0
+    assert result[0]["connected_clients"] == 200.0
+    assert result[1]["timestamp"] == "2026-08-25 11:00:00"
+    assert result[1]["cpu_percent"] == 40.0
+
+
+def test_downsample_preserves_string_fields_using_last_value():
+    points = [
+        {
+            "timestamp": "2026-08-25 10:00:00",
+            "rdb_last_bgsave_status": "ok",
+            "cpu_percent": 10.0,
+        },
+        {
+            "timestamp": "2026-08-25 10:30:00",
+            "rdb_last_bgsave_status": "err",
+            "cpu_percent": 20.0,
+        },
+    ]
+
+    result = system_views._downsample(points, bucket_hours=1)
+
+    assert len(result) == 1
+    assert result[0]["rdb_last_bgsave_status"] == "err"
+    assert result[0]["cpu_percent"] == 15.0
+
+
+def test_downsample_ignores_none_values_in_average():
+    points = [
+        {"timestamp": "2026-08-25 10:00:00", "net_input_bytes_rate": None},
+        {"timestamp": "2026-08-25 10:20:00", "net_input_bytes_rate": 100},
+        {"timestamp": "2026-08-25 10:40:00", "net_input_bytes_rate": 200},
+    ]
+
+    result = system_views._downsample(points, bucket_hours=1)
+
+    assert result[0]["net_input_bytes_rate"] == 150.0
+
+
+def test_downsample_returns_all_none_bucket_as_none():
+    points = [
+        {"timestamp": "2026-08-25 10:00:00", "net_input_bytes_rate": None},
+        {"timestamp": "2026-08-25 10:20:00", "net_input_bytes_rate": None},
+    ]
+
+    result = system_views._downsample(points, bucket_hours=1)
+
+    assert result[0]["net_input_bytes_rate"] is None
+
+
+def test_downsample_handles_empty_input():
+    assert system_views._downsample([], bucket_hours=1) == []
+
+
+def test_rate_diff_precedes_downsample_for_cumulative_metrics():
+    points = [
+        {"timestamp": "2026-08-25 10:00:00", "net_input_bytes": 0},
+        {"timestamp": "2026-08-25 10:20:00", "net_input_bytes": 60},
+        {"timestamp": "2026-08-25 10:40:00", "net_input_bytes": 120},
+        {"timestamp": "2026-08-25 11:00:00", "net_input_bytes": 180},
+    ]
+
+    ordered = system_views._downsample(
+        system_views._apply_rate_diff(copy.deepcopy(points)),
+        bucket_hours=1,
+    )
+    reversed_order = system_views._apply_rate_diff(
+        system_views._downsample(copy.deepcopy(points), bucket_hours=1)
+    )
+
+    assert ordered[0]["net_input_bytes_rate"] == 60.0
+    assert ordered[1]["net_input_bytes_rate"] == 60.0
+    assert reversed_order[0]["net_input_bytes_rate"] is None
+    assert reversed_order[1]["net_input_bytes_rate"] == 120.0

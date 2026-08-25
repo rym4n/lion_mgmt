@@ -169,6 +169,89 @@ def _apply_rate_diff(points: list[dict]) -> list[dict]:
     return points
 
 
+# 降采样阈值：原始粒度 5 分钟，30 天跨度即 8640 点，直接返回会拖垮前端渲染
+_DOWNSAMPLE_RULES = (
+    (168, 4),   # > 7 天 -> 4 小时桶
+    (24, 1),    # > 24 小时 -> 1 小时桶
+)
+
+
+def _pick_bucket_hours(span_hours: float) -> int | None:
+    """Return bucket size in hours, or None when no downsampling is needed."""
+    for threshold, bucket in _DOWNSAMPLE_RULES:
+        if span_hours > threshold:
+            return bucket
+    return None
+
+
+def _downsample(points: list[dict], bucket_hours: int) -> list[dict]:
+    """Average numeric fields within fixed-size local-time buckets.
+
+    ``None`` values are excluded from numeric averages. A bucket with only
+    ``None`` values stays ``None``; other non-numeric fields use their last
+    non-null value in the bucket.
+    """
+    if not points:
+        return points
+
+    buckets = {}
+    bucket_order = []
+
+    for point in points:
+        timestamp = point.get("timestamp", "")
+        try:
+            dt = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+
+        bucket_hour = (dt.hour // bucket_hours) * bucket_hours
+        bucket_dt = dt.replace(hour=bucket_hour, minute=0, second=0, microsecond=0)
+        bucket_key = bucket_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        if bucket_key not in buckets:
+            buckets[bucket_key] = []
+            bucket_order.append(bucket_key)
+        buckets[bucket_key].append(point)
+
+    result = []
+    for bucket_key in bucket_order:
+        members = buckets[bucket_key]
+        merged = {"timestamp": bucket_key}
+
+        field_names = set()
+        for member in members:
+            field_names.update(member.keys())
+        field_names.discard("timestamp")
+
+        for field in field_names:
+            numeric_values = []
+            last_other = None
+            saw_field = False
+
+            for member in members:
+                if field not in member:
+                    continue
+                saw_field = True
+                value = member[field]
+                if isinstance(value, bool):
+                    last_other = value
+                elif isinstance(value, (int, float)):
+                    numeric_values.append(value)
+                elif value is not None:
+                    last_other = value
+
+            if numeric_values:
+                merged[field] = sum(numeric_values) / len(numeric_values)
+            elif last_other is not None:
+                merged[field] = last_other
+            elif saw_field:
+                merged[field] = None
+
+        result.append(merged)
+
+    return result
+
+
 def _replace_builtin_resource_placeholder(value, resource_id):
     """Resolve the install-time resource placeholder after resources are imported."""
     if isinstance(value, dict):
