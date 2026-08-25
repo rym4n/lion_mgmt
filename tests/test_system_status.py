@@ -336,3 +336,199 @@ def test_rate_diff_precedes_downsample_for_cumulative_metrics():
     assert ordered[1]["net_input_bytes_rate"] == 60.0
     assert reversed_order[0]["net_input_bytes_rate"] is None
     assert reversed_order[1]["net_input_bytes_rate"] == 120.0
+
+
+def test_metrics_detail_rejects_missing_params(monkeypatch):
+    import pytest
+
+    from core.error_code import ErrorCode
+    from libs.error_code.exception import CustomError
+
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    with pytest.raises(CustomError) as exc_info:
+        _run(
+            system_views.get_metrics_detail,
+            SimpleNamespace(json={"host": "192.0.2.10"}),
+        )
+
+    assert exc_info.value.enum == ErrorCode.PARAM_ERROR
+
+
+def test_metrics_detail_extracts_series_sorted_ascending(monkeypatch):
+    calls = []
+
+    async def fake_query_vlog(query, **kwargs):
+        calls.append((query, kwargs))
+        return [
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:10:00+0800",'
+                    '"log_type":"middleware_metrics","data":{"lion-redis":'
+                    '{"connected_clients":70,"net_input_bytes":3000}}}'
+                ),
+            },
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:00:00+0800",'
+                    '"log_type":"middleware_metrics","data":{"lion-redis":'
+                    '{"connected_clients":63,"net_input_bytes":1000}}}'
+                ),
+            },
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:05:00+0800",'
+                    '"log_type":"middleware_metrics","data":{"lion-redis":'
+                    '{"connected_clients":65,"net_input_bytes":2000}}}'
+                ),
+            },
+        ]
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(
+        system_views.get_metrics_detail,
+        SimpleNamespace(
+            json={
+                "host": "192.0.2.10",
+                "middleware": "lion-redis",
+                "start_time": "2026-08-25T07:00:00Z",
+                "end_time": "2026-08-25T07:30:00Z",
+            }
+        ),
+    )
+    data = result["data"]
+
+    query, kwargs = calls[0]
+    assert 'log_type:"middleware_metrics"' in query
+    assert 'log_ip:"192.0.2.10"' in query
+    assert [p["connected_clients"] for p in data] == [63, 65, 70]
+    assert data[0]["timestamp"] == "2026-08-25 15:00:00"
+    assert data[0]["net_input_bytes_rate"] is None
+    assert data[1]["net_input_bytes_rate"] == 1000
+    assert data[2]["net_input_bytes_rate"] == 1000
+
+
+def test_metrics_detail_filters_to_requested_middleware(monkeypatch):
+    async def fake_query_vlog(query, **kwargs):
+        return [
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:00:00+0800",'
+                    '"log_type":"middleware_metrics","data":{'
+                    '"lion-redis":{"connected_clients":63},'
+                    '"lion-db":{"active_conn":5}}}'
+                ),
+            }
+        ]
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(
+        system_views.get_metrics_detail,
+        SimpleNamespace(
+            json={
+                "host": "192.0.2.10",
+                "middleware": "lion-db",
+                "start_time": "2026-08-25T07:00:00Z",
+                "end_time": "2026-08-25T07:30:00Z",
+            }
+        ),
+    )
+
+    assert result["data"][0]["active_conn"] == 5
+    assert "connected_clients" not in result["data"][0]
+
+
+def test_metrics_detail_returns_empty_when_no_data(monkeypatch):
+    async def fake_query_vlog(query, **kwargs):
+        return []
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(
+        system_views.get_metrics_detail,
+        SimpleNamespace(
+            json={
+                "host": "192.0.2.10",
+                "middleware": "lion-redis",
+                "start_time": "2026-08-25T07:00:00Z",
+                "end_time": "2026-08-25T07:30:00Z",
+            }
+        ),
+    )
+
+    assert result["data"] == []
+
+
+def test_metrics_detail_downsamples_long_span(monkeypatch):
+    points = []
+    for hour in range(0, 72):
+        for minute in (0, 30):
+            points.append(
+                {
+                    "log_ip": "192.0.2.10",
+                    "_msg": (
+                        '{"log_ip":"192.0.2.10","ctime":"2026-08-%02dT%02d:%02d:00+0800",'
+                        '"log_type":"middleware_metrics","data":{"lion-redis":'
+                        '{"connected_clients":%d}}}'
+                    )
+                    % (20 + hour // 24, hour % 24, minute, 60 + hour),
+                }
+            )
+
+    async def fake_query_vlog(query, **kwargs):
+        return points
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(
+        system_views.get_metrics_detail,
+        SimpleNamespace(
+            json={
+                "host": "192.0.2.10",
+                "middleware": "lion-redis",
+                "start_time": "2026-08-20T00:00:00Z",
+                "end_time": "2026-08-23T00:00:00Z",
+            }
+        ),
+    )
+    data = result["data"]
+
+    assert len(data) < 144
+    assert all(p["timestamp"].endswith(":00:00") for p in data)
+
+
+def test_metrics_detail_scales_query_limit_with_span(monkeypatch):
+    captured = {}
+
+    async def fake_query_vlog(query, **kwargs):
+        captured.update(kwargs)
+        captured["query"] = query
+        return []
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    _run(
+        system_views.get_metrics_detail,
+        SimpleNamespace(
+            json={
+                "host": "192.0.2.10",
+                "middleware": "lion-redis",
+                "start_time": "2026-07-26T00:00:00Z",
+                "end_time": "2026-08-25T00:00:00Z",
+            }
+        ),
+    )
+
+    assert captured["limit"] >= 8640
+    assert captured["limit"] <= 20000

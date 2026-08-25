@@ -890,6 +890,11 @@ def _format_check_time(ctime):
 # 中间件容器白名单：只有这些容器有专属性能指标
 _MIDDLEWARE_CONTAINERS = ("lion-redis", "lion-db", "lion-mq", "lion-vl", "lion-fs")
 
+# Middleware metrics are collected every five minutes. Keep enough rows for
+# the requested range while bounding an accidentally huge query.
+_METRICS_POINTS_PER_HOUR = 12
+_METRICS_QUERY_LIMIT_MAX = 20000
+
 
 @system_bp.post("/metrics/overview")
 @openapi.definition(
@@ -959,6 +964,109 @@ async def get_metrics_overview(request):
         }
 
     return response_ok(list(host_latest.values()))
+
+
+@system_bp.post("/metrics/detail")
+@openapi.definition(
+    summary="查询中间件性能指标历史",
+    description="返回指定主机与中间件的指标时间序列，需要系统状态查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["host", "middleware", "start_time", "end_time"],
+                "properties": {
+                    "host": {"type": "string", "description": "主机IP地址"},
+                    "middleware": {"type": "string", "description": "中间件容器名"},
+                    "start_time": {"type": "string"},
+                    "end_time": {"type": "string"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "查询成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("status:r")
+async def get_metrics_detail(request):
+    params = request.json or {}
+    host = params.get("host")
+    middleware = params.get("middleware")
+    start_time = params.get("start_time")
+    end_time = params.get("end_time")
+
+    if not host or not middleware or not start_time or not end_time:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    try:
+        start_dt = datetime.fromisoformat(str(start_time).replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(str(end_time).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    start_iso = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    span_hours = max((end_dt - start_dt).total_seconds() / 3600, 0)
+
+    # Add a small boundary margin because a range can include points exactly
+    # on either endpoint. The hard cap protects VictoriaLogs from huge spans.
+    required_points = int(span_hours * _METRICS_POINTS_PER_HOUR + 0.999999)
+    limit = min(
+        max(required_points + 100, 100),
+        _METRICS_QUERY_LIMIT_MAX,
+    )
+    query = f'log_type:"middleware_metrics" AND log_ip:"{host}" | first {limit} by (_time desc)'
+    data_res = await query_vlog(
+        query,
+        project_id=0,
+        start=start_iso,
+        end=end_iso,
+        limit=limit,
+    )
+
+    if not data_res:
+        return response_ok([])
+
+    points = []
+    for log_data in data_res:
+        data, ctime = _health_log_data(log_data)
+        metrics = data.get(middleware)
+        if not isinstance(metrics, dict) or not metrics:
+            continue
+
+        if not ctime:
+            ctime = log_data.get("timestamp", log_data.get("_time", ""))
+        point = {"timestamp": _format_check_time(ctime)}
+        point.update(metrics)
+        points.append(point)
+
+    if not points:
+        return response_ok([])
+
+    # VictoriaLogs returns newest-first; rate calculation needs ascending data.
+    points.sort(key=lambda point: point.get("timestamp", ""))
+
+    # Cumulative counters must be differenced before any bucket averaging.
+    _apply_rate_diff(points)
+    bucket_hours = _pick_bucket_hours(span_hours)
+    if bucket_hours:
+        points = _downsample(points, bucket_hours)
+
+    return response_ok(points)
 
 
 @system_bp.post("/oauth/status")
