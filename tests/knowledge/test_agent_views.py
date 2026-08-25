@@ -1,5 +1,5 @@
 # coding=utf-8
-"""Agent 面隔离行为（SPEC §10.2、§15.2）。"""
+"""Agent 面隔离行为（SPEC §3.1、§3.3）。"""
 
 import inspect
 from pathlib import Path
@@ -19,75 +19,69 @@ class _FakeEmployee:
 
 
 @pytest.mark.asyncio
-async def test_search_limits_target_uri_to_visible_spaces(monkeypatch):
+async def test_search_limits_space_keys_to_visible_spaces(monkeypatch):
     from services.knowledge import agent_views
 
     captured = {}
 
-    async def fake_find(query, *, target_uri, limit=5, level=None):
-        captured["target_uri"] = target_uri
-        return {"contexts": []}
+    async def fake_scope(tenant_id, space_keys, requested):
+        captured["keys"] = list(space_keys)
+        return ["ops", "runbook"]
 
     class _Client:
-        find = staticmethod(fake_find)
+        async def search(self, **kwargs):
+            captured["search"] = kwargs
+            return [{"document_id": "d1", "excerpt": "x"}]
 
-    async def fake_get_client(tenant_id):
-        return _Client()
+    async def fake_embedding(tenant_id):
+        return {"base_url": "http://e", "model": "m", "dimensions": 8}
 
-    async def fake_roots(tenant_id, space_keys):
-        return [f"viking://resources/spaces/{key}" for key in space_keys]
+    async def fake_decorate(tenant_id, hits):
+        return hits
 
-    monkeypatch.setattr(agent_views, "get_knowledge_client", fake_get_client)
-    monkeypatch.setattr(agent_views.scope, "visible_space_roots", fake_roots)
-
-    employee = _FakeEmployee(space_keys=["ops", "runbook"])
-    await agent_views.do_search(employee, "磁盘满了", space_key=None, top_k=5)
-
-    assert captured["target_uri"] == [
-        "viking://resources/spaces/ops",
-        "viking://resources/spaces/runbook",
-    ]
+    monkeypatch.setattr(agent_views.scope, "resolve_search_scope", fake_scope)
+    monkeypatch.setattr(agent_views, "get_embedding_payload", fake_embedding)
+    monkeypatch.setattr(agent_views, "get_knowledge_client", lambda: _Client())
+    monkeypatch.setattr(agent_views, "_decorate_hits", fake_decorate)
+    result = await agent_views.do_search(_FakeEmployee(space_keys=["ops", "runbook"]), "q")
+    assert captured["keys"] == ["ops", "runbook"]
+    assert captured["search"]["space_keys"] == ["ops", "runbook"]
+    assert result[0]["document_id"] == "d1"
 
 
 @pytest.mark.asyncio
 async def test_search_with_unbound_space_returns_empty(monkeypatch):
     from services.knowledge import agent_views
 
-    called = {"find": False}
+    called = {"search": False}
+
+    async def fake_scope(tenant_id, space_keys, requested):
+        return []
 
     class _Client:
-        @staticmethod
-        async def find(query, *, target_uri, limit=5, level=None):
-            called["find"] = True
-            return {"contexts": []}
+        async def search(self, **kwargs):
+            called["search"] = True
+            return []
 
-    async def fake_get_client(tenant_id):
-        return _Client()
-
-    async def fake_roots(tenant_id, space_keys):
-        return [f"viking://resources/spaces/{key}" for key in space_keys]
-
-    monkeypatch.setattr(agent_views, "get_knowledge_client", fake_get_client)
-    monkeypatch.setattr(agent_views.scope, "visible_space_roots", fake_roots)
-
-    employee = _FakeEmployee(space_keys=["ops"])
-    result = await agent_views.do_search(employee, "x", space_key="secret", top_k=5)
-
-    assert result == []
-    assert called["find"] is False
+    monkeypatch.setattr(agent_views.scope, "resolve_search_scope", fake_scope)
+    monkeypatch.setattr(agent_views, "get_knowledge_client", lambda: _Client())
+    assert await agent_views.do_search(_FakeEmployee(space_keys=["ops"]), "x", space_key="secret") == []
+    assert called["search"] is False
 
 
 @pytest.mark.asyncio
-async def test_search_with_no_binding_returns_empty(monkeypatch):
+async def test_search_with_no_embedding_returns_empty(monkeypatch):
     from services.knowledge import agent_views
 
-    async def fake_roots(tenant_id, space_keys):
-        return []
+    async def fake_scope(tenant_id, space_keys, requested):
+        return ["ops"]
 
-    monkeypatch.setattr(agent_views.scope, "visible_space_roots", fake_roots)
+    async def no_embedding(tenant_id):
+        return None
 
-    employee = _FakeEmployee(space_keys=[])
-    assert await agent_views.do_search(employee, "x", space_key=None, top_k=5) == []
+    monkeypatch.setattr(agent_views.scope, "resolve_search_scope", fake_scope)
+    monkeypatch.setattr(agent_views, "get_embedding_payload", no_embedding)
+    assert await agent_views.do_search(_FakeEmployee(), "x") == []
 
 
 @pytest.mark.asyncio
@@ -98,20 +92,37 @@ async def test_read_rejects_document_outside_visible_spaces(monkeypatch):
     class _Doc:
         id = "doc-9"
         space_key = "secret"
-        uri = "viking://resources/spaces/secret/a.md"
         title = "机密"
-        deleted = False
 
     async def fake_get_doc(tenant_id, document_id):
         return _Doc()
 
     monkeypatch.setattr(agent_views, "get_document_or_404", fake_get_doc)
-
-    employee = _FakeEmployee(space_keys=["ops"])
     with pytest.raises(CustomError) as excinfo:
-        await agent_views.do_read(employee, "doc-9")
-
+        await agent_views.do_read(_FakeEmployee(space_keys=["ops"]), "doc-9")
     assert excinfo.value.enum is ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_read_gets_text_from_rustfs(monkeypatch):
+    from services.knowledge import agent_views
+
+    class _Doc:
+        id = "doc-1"
+        space_key = "ops"
+        title = "runbook"
+
+    async def fake_get_doc(tenant_id, document_id):
+        return _Doc()
+
+    async def fake_text(document_id):
+        assert document_id == "doc-1"
+        return "全文"
+
+    monkeypatch.setattr(agent_views, "get_document_or_404", fake_get_doc)
+    monkeypatch.setattr(agent_views.object_store, "get_text", fake_text)
+    result = await agent_views.do_read(_FakeEmployee(), "doc-1")
+    assert result["content"] == "全文"
 
 
 @pytest.mark.asyncio
@@ -119,10 +130,8 @@ async def test_write_without_write_space_is_rejected():
     from core.error_code import ErrorCode
     from services.knowledge import agent_views
 
-    employee = _FakeEmployee(space_keys=["ops"], write_space=None)
     with pytest.raises(CustomError) as excinfo:
-        await agent_views.do_write(employee, title="t", content="c", path=None)
-
+        await agent_views.do_write(_FakeEmployee(space_keys=["ops"], write_space=None), title="t", content="c")
     assert excinfo.value.enum is ErrorCode.KNOWLEDGE_WRITE_NOT_ALLOWED
 
 
@@ -138,42 +147,23 @@ async def test_write_goes_to_configured_space(monkeypatch):
         return {"id": "doc-new", "status": "processing"}
 
     monkeypatch.setattr(agent_views, "upsert_document", fake_upsert)
-
-    employee = _FakeEmployee(space_keys=["ops", "runbook"], write_space="runbook")
-    await agent_views.do_write(employee, title="处置记录", content="内容", path=None)
-
+    await agent_views.do_write(
+        _FakeEmployee(space_keys=["ops", "runbook"], write_space="runbook"),
+        title="处置记录", content="内容",
+    )
     assert captured["space_key"] == "runbook"
     assert captured["source"] == "agent"
     assert captured["source_ref"] == "emp-1"
-    assert captured["rel_path"].endswith(".md")
+    assert captured["filename"].endswith(".md")
 
 
-def test_write_cannot_target_readonly_space():
+def test_write_signature_has_no_path():
     from services.knowledge import agent_views
 
     sig = inspect.signature(agent_views.do_write)
+    assert "path" not in sig.parameters
     assert "space" not in sig.parameters
     assert "space_key" not in sig.parameters
-
-
-@pytest.mark.asyncio
-async def test_delete_rejects_document_in_readonly_space(monkeypatch):
-    from services.knowledge import agent_views
-
-    class _Doc:
-        id = "doc-1"
-        space_key = "ops"
-        uri = "viking://resources/spaces/ops/a.md"
-        deleted = False
-
-    async def fake_get_doc(tenant_id, document_id):
-        return _Doc()
-
-    monkeypatch.setattr(agent_views, "get_document_or_404", fake_get_doc)
-
-    employee = _FakeEmployee(space_keys=["ops", "runbook"], write_space="runbook")
-    with pytest.raises(CustomError):
-        await agent_views.do_delete(employee, "doc-1")
 
 
 def test_agent_blueprint_prefix():

@@ -1,10 +1,11 @@
 # coding=utf-8
 """知识库 Agent 面 API（给数字员工用）。
 
-与管理面 API 的根本区别：范围由服务端按员工身份注入，请求参数只能收窄不能放大。
-员工只能通过 document_id 接触文档，OpenViking URI 不直接暴露给调用方。
+范围由服务端按员工身份注入，请求参数只能收窄不能放大。
+员工只能通过 document_id 接触文档，空间键是唯一的过滤坐标。
 """
 
+import re
 from datetime import datetime
 
 from sanic import Blueprint, Request
@@ -15,7 +16,8 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from models.command_center import CommandAgent
 from models.digital_employee import EmployeeApiCredential
-from services.knowledge import scope
+from models.tenant_embedding import get_embedding_payload
+from services.knowledge import object_store, scope
 from services.knowledge.client import get_knowledge_client
 from services.knowledge.manager import (
     _decorate_hits,
@@ -48,9 +50,7 @@ async def resolve_employee(request: Request) -> CommandAgent:
     if not credential:
         raise CustomError(ErrorCode.FORBIDDEN)
 
-    employee = await CommandAgent.get_or_none(
-        id=credential.employee_id, deleted=False
-    )
+    employee = await CommandAgent.get_or_none(id=credential.employee_id, deleted=False)
     if not employee:
         raise CustomError(ErrorCode.FORBIDDEN)
     return employee
@@ -71,50 +71,45 @@ async def do_search(
     employee, query: str, *, space_key: str | None = None, top_k: int = DEFAULT_TOP_K
 ) -> list[dict]:
     """检索范围恒由员工可见空间决定；space_key 只能收窄。"""
-    roots = await scope.resolve_search_roots(
+    keys = await scope.resolve_search_scope(
         employee.tenant_id, _space_keys(employee), space_key
     )
-    if not roots:
-        # 未绑定空间或指定不可见空间时静默降级，且不触发存储检索。
+    if not keys:
+        # 未绑定空间或指定不可见空间时静默降级，且不发起检索。
         return []
 
-    client = await get_knowledge_client(employee.tenant_id)
-    if client is None:
+    embedding = await get_embedding_payload(employee.tenant_id)
+    if embedding is None:
         return []
 
     try:
         limit = max(1, min(MAX_TOP_K, int(top_k or DEFAULT_TOP_K)))
     except (TypeError, ValueError):
         raise CustomError(ErrorCode.PARAM_ERROR) from None
-    raw = await client.find(query=query, target_uri=roots, limit=limit)
-    hits = await _decorate_hits(employee.tenant_id, raw)
-    for hit in hits:
+
+    hits = await get_knowledge_client().search(
+        tenant_id=employee.tenant_id, space_keys=keys,
+        query=query, top_k=limit, embedding=embedding,
+    )
+    decorated = await _decorate_hits(employee.tenant_id, hits)
+    for hit in decorated:
         hit["excerpt"] = str(hit.get("excerpt") or "")[:EXCERPT_LIMIT]
-    return hits
+    return decorated
 
 
 async def _assert_visible(employee, document) -> None:
     if document.space_key not in _space_keys(employee):
-        # 404 不确认 document_id 对应的不可见文档是否存在。
         raise CustomError(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND)
 
 
 async def do_read(employee, document_id: str) -> dict:
     document = await get_document_or_404(employee.tenant_id, document_id)
     await _assert_visible(employee, document)
-
-    client = await get_knowledge_client(employee.tenant_id)
-    content = ""
-    if client is not None:
-        try:
-            content = await client.read(document.uri)
-        except CustomError:
-            content = ""
     return {
         "document_id": str(document.id),
         "title": document.title,
         "space_key": document.space_key,
-        "content": content,
+        "content": await object_store.get_text(str(document.id)),
     }
 
 
@@ -144,33 +139,31 @@ async def do_list(employee, space_key: str | None = None) -> list[dict]:
     ]
 
 
-async def do_write(employee, *, title: str, content: str, path: str | None = None) -> dict:
+async def do_write(employee, *, title: str, content: str) -> dict:
     """写入员工唯一配置的可写空间。
 
-    函数签名刻意不提供 space/space_key，空间选择是服务端配置而非请求参数。
+    签名不含 space —— 空间选择是服务端配置而非请求参数。
+    也不再含 path —— 文件系统语义已随 D3 砍掉，文件名由标题派生。
     """
     write_space = _write_space(employee)
     if not content:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    rel_path = path or f"agent/{datetime.now(TZ).strftime('%Y%m%d-%H%M%S')}.md"
-    if not rel_path.endswith(".md"):
-        rel_path = f"{rel_path}.md"
+    safe_title = (title or "").strip() or datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
+    filename = f"{re.sub(r'[^0-9A-Za-z一-鿿_-]+', '-', safe_title)[:80]}.md"
 
     result = await upsert_document(
         employee.tenant_id,
         space_key=write_space,
-        rel_path=rel_path,
         content=content.encode("utf-8"),
-        title=title or rel_path.rsplit("/", 1)[-1],
+        filename=filename,
+        title=safe_title,
         source="agent",
         source_ref=str(employee.id),
     )
     logger.info(
         "knowledge_agent_write tenant=%s employee=%s space=%s",
-        employee.tenant_id,
-        employee.id,
-        write_space,
+        employee.tenant_id, employee.id, write_space,
     )
     return {"document_id": result.get("id"), "status": result.get("status")}
 
@@ -231,7 +224,6 @@ async def agent_write(request: Request):
             employee,
             title=str(params.get("title") or ""),
             content=str(params["content"]),
-            path=params.get("path"),
         )
     )
 

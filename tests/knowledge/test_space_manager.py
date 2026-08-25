@@ -1,5 +1,5 @@
 # coding=utf-8
-"""空间管理业务逻辑（SPEC §10.1、§10.5）。"""
+"""空间管理业务逻辑（SPEC §3.1）。"""
 
 import pytest
 
@@ -19,10 +19,6 @@ class _FakeSpace:
         self.saved = False
 
     @property
-    def root_uri(self):
-        return f"viking://resources/spaces/{self.space_key}"
-
-    @property
     def json(self):
         return {"id": self.id, "space_key": self.space_key, "name": self.name}
 
@@ -30,13 +26,15 @@ class _FakeSpace:
         self.saved = True
 
 
-class _FakeClient:
-    def __init__(self):
-        self.mkdir_calls = []
+class _FakeQS:
+    def __init__(self, n):
+        self._n = n
 
-    async def mkdir(self, uri):
-        self.mkdir_calls.append(uri)
-        return {}
+    async def count(self):
+        return self._n
+
+    async def update(self, **kwargs):
+        return self._n
 
 
 @pytest.mark.asyncio
@@ -52,11 +50,10 @@ async def test_create_space_rejects_duplicate_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_space_makes_openviking_dir(monkeypatch):
+async def test_create_space_writes_only_local_metadata(monkeypatch):
     from services.knowledge import manager
 
     created = _FakeSpace()
-    fake_client = _FakeClient()
 
     async def fake_get_or_none(**kwargs):
         return None
@@ -64,15 +61,10 @@ async def test_create_space_makes_openviking_dir(monkeypatch):
     async def fake_create(**kwargs):
         return created
 
-    async def fake_get_client(tenant_id):
-        return fake_client
-
     monkeypatch.setattr(manager.KnowledgeSpace, "get_or_none", fake_get_or_none)
     monkeypatch.setattr(manager.KnowledgeSpace, "create", fake_create)
-    monkeypatch.setattr(manager, "get_knowledge_client", fake_get_client)
     result = await manager.create_space("t1", "ops", "运维")
     assert result is created
-    assert fake_client.mkdir_calls == ["viking://resources/spaces/ops"]
 
 
 @pytest.mark.asyncio
@@ -83,8 +75,7 @@ async def test_create_space_validates_key(monkeypatch):
         await manager.create_space("t1", "Bad_Key", "x")
 
 
-@pytest.mark.asyncio
-async def test_update_space_cannot_change_key():
+def test_update_space_cannot_change_key():
     import inspect
 
     from services.knowledge import manager
@@ -92,17 +83,6 @@ async def test_update_space_cannot_change_key():
     sig = inspect.signature(manager.update_space)
     assert "name" in sig.parameters
     assert "description" in sig.parameters
-
-
-class _FakeQS:
-    def __init__(self, n):
-        self._n = n
-
-    async def count(self):
-        return self._n
-
-    async def update(self, **kwargs):
-        return self._n
 
 
 @pytest.mark.asyncio
@@ -128,12 +108,10 @@ async def test_delete_space_dry_run_does_not_mutate(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_delete_space_soft_deletes_and_keeps_openviking(monkeypatch):
+async def test_delete_space_soft_deletes_local_records(monkeypatch):
     from services.knowledge import manager
 
     space = _FakeSpace()
-    client = _FakeClient()
-    client.rm_calls = []
 
     async def fake_get(tenant_id, space_key):
         return space
@@ -143,12 +121,10 @@ async def test_delete_space_soft_deletes_and_keeps_openviking(monkeypatch):
 
     monkeypatch.setattr(manager, "get_space_or_404", fake_get)
     monkeypatch.setattr(manager, "_employees_bound_to", fake_affected)
-    monkeypatch.setattr(manager, "get_knowledge_client", lambda tenant_id: client)
     monkeypatch.setattr(manager.KnowledgeDocument, "filter", lambda **kw: _FakeQS(3))
     await manager.delete_space("t1", "ops", dry_run=False)
     assert space.deleted is True
     assert space.saved is True
-    assert getattr(client, "rm_calls", []) == []
 
 
 @pytest.mark.asyncio
@@ -165,36 +141,17 @@ async def test_ensure_space_is_idempotent(monkeypatch):
     assert result is existing
 
 
-@pytest.mark.asyncio
-async def test_health_provisions_legacy_tenant_when_credential_is_missing(monkeypatch):
-    from services.knowledge import manager
+def test_scope_has_no_uri_helpers():
+    from services.knowledge import scope
 
-    calls = []
-
-    class _HealthClient:
-        async def health(self):
-            calls.append("health")
-
-    async def fake_ensure(tenant_id):
-        calls.append(tenant_id)
-        return _HealthClient()
-
-    monkeypatch.setattr(manager, "ensure_knowledge_client", fake_ensure)
-
-    assert await manager.health("legacy-tenant") == {"available": True}
-    assert calls == ["legacy-tenant", "health"]
+    for gone in ("build_uri", "uri_in_space", "validate_rel_path", "visible_space_roots"):
+        assert not hasattr(scope, gone), f"{gone} 仍存在"
 
 
-@pytest.mark.asyncio
-async def test_health_keeps_not_provisioned_when_provisioning_is_not_configured(monkeypatch):
-    from services.knowledge import manager
+def test_scope_still_validates_space_key():
+    from services.knowledge.scope import validate_space_key
 
-    async def no_client(_tenant_id):
-        return None
-
-    monkeypatch.setattr(manager, "ensure_knowledge_client", no_client)
-
-    assert await manager.health("tenant-without-viking") == {
-        "available": False,
-        "reason": "not_provisioned",
-    }
+    validate_space_key("ops")
+    for bad in ("../x", "OPS", "a/b", ""):
+        with pytest.raises(CustomError):
+            validate_space_key(bad)

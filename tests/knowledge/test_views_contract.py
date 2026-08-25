@@ -20,7 +20,7 @@ def test_all_management_routes_declared():
     src = _src()
     for route in [
         "/space/list", "/space/create", "/space/update", "/space/delete",
-        "/space/sync", "/document/list", "/document/upload", "/document/upsert",
+        "/document/list", "/document/upload", "/document/upsert",
         "/document/detail", "/document/delete", "/document/retry", "/search", "/health",
     ]:
         assert f'"{route}"' in src, f"缺少路由 {route}"

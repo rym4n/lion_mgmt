@@ -1,7 +1,8 @@
 # coding=utf-8
-"""文档上传、幂等、删除与配额（SPEC §10.3、§10.5、§10.6）。"""
+"""文档上传、幂等、删除与配额（SPEC §3.4、§3.5）。"""
 
 import hashlib
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -16,27 +17,25 @@ class _FakeSpace:
         self.name = "运维"
         self.deleted = False
 
-    @property
-    def root_uri(self):
-        return f"viking://resources/spaces/{self.space_key}"
-
 
 class _FakeDoc:
     def __init__(self, **kw):
         self.id = kw.get("id", "doc-1")
         self.tenant_id = kw.get("tenant_id", "t1")
         self.space_key = kw.get("space_key", "ops")
-        self.rel_path = kw.get("rel_path", "a.md")
-        self.uri = kw.get("uri", "viking://resources/spaces/ops/a.md")
         self.title = kw.get("title", "a.md")
         self.content_hash = kw.get("content_hash", "")
         self.size = kw.get("size", 0)
-        self.status = kw.get("status", "pending")
-        self.task_id = kw.get("task_id")
+        self.status = kw.get("status", "processing")
+        self.storage_key = kw.get("storage_key", "knowledge/doc-1/raw")
         self.error = kw.get("error")
+        self.indexed_at = kw.get("indexed_at")
         self.source = kw.get("source", "manual")
         self.deleted = False
         self.saved = False
+        from settings import TZ
+
+        self.utime = kw.get("utime", datetime.now(TZ))
 
     async def save(self):
         self.saved = True
@@ -48,80 +47,106 @@ class _FakeDoc:
 
 class _FakeClient:
     def __init__(self):
-        self.uploads = []
-        self.removed = []
+        self.ingests = []
+        self.deleted = []
 
-    async def upload_file(self, *, to, filename, content, instruction=None):
-        self.uploads.append({"to": to, "filename": filename, "size": len(content)})
-        return {"task_id": "task-1"}
+    async def ingest(self, **kwargs):
+        self.ingests.append(kwargs)
+        return {"status": "accepted"}
 
-    async def add_url(self, *, to, url, instruction=None):
-        self.uploads.append({"to": to, "url": url})
-        return {"task_id": "task-2"}
-
-    async def rm(self, uri):
-        self.removed.append(uri)
+    async def delete_document(self, **kwargs):
+        self.deleted.append(kwargs)
         return {}
 
 
-def _patch_common(monkeypatch, space=None, client=None, existing=None):
-    from services.knowledge import manager
+class _FakeQuery:
+    def __init__(self, docs=None, count=0):
+        self.docs = docs or []
+        self._count = count
 
-    class _FakeQuery:
-        async def all(self):
-            return []
+    async def all(self):
+        return self.docs
+
+    async def count(self):
+        return self._count if self._count else len(self.docs)
+
+    def filter(self, **kwargs):
+        return self
+
+    def offset(self, value):
+        return self
+
+    def limit(self, value):
+        return self
+
+    async def update(self, **kwargs):
+        return self._count
+
+
+def _patch_common(monkeypatch, *, space=None, client=None, existing=None, embedding=None):
+    from services.knowledge import manager
 
     async def fake_get_space(tenant_id, space_key):
         if space is None:
-            raise CustomError(
-                __import__("core.error_code", fromlist=["ErrorCode"]).ErrorCode.KNOWLEDGE_SPACE_NOT_FOUND
-            )
+            raise CustomError(__import__("core.error_code", fromlist=["ErrorCode"]).ErrorCode.KNOWLEDGE_SPACE_NOT_FOUND)
         return space
 
-    async def fake_get_client(tenant_id):
+    def fake_get_client():
         return client
+
+    async def fake_embedding(tenant_id):
+        return embedding if embedding is not None else {
+            "base_url": "http://e", "model": "m", "dimensions": 8
+        }
 
     async def fake_doc_get_or_none(**kwargs):
         return existing
 
     monkeypatch.setattr(manager, "get_space_or_404", fake_get_space)
     monkeypatch.setattr(manager, "get_knowledge_client", fake_get_client)
-    monkeypatch.setattr(
-        manager.KnowledgeDocument, "get_or_none", fake_doc_get_or_none
-    )
+    monkeypatch.setattr(manager, "get_embedding_payload", fake_embedding)
+    monkeypatch.setattr(manager.KnowledgeDocument, "get_or_none", fake_doc_get_or_none)
     monkeypatch.setattr(manager.KnowledgeDocument, "filter", lambda **kwargs: _FakeQuery())
+    monkeypatch.setattr(manager.object_store, "put_raw", lambda doc_id, data: _put_raw(doc_id))
+    monkeypatch.setattr(manager.object_store, "delete_objects", lambda doc_id: _delete_objects(doc_id))
     return manager
+
+
+async def _put_raw(document_id):
+    return f"knowledge/{document_id}/raw"
+
+
+async def _delete_objects(document_id):
+    return None
 
 
 @pytest.mark.asyncio
 async def test_upsert_rejects_disallowed_suffix(monkeypatch):
     manager = _patch_common(monkeypatch, space=_FakeSpace(), client=_FakeClient())
-
     with pytest.raises(CustomError):
-        await manager.upsert_document(
-            "t1", space_key="ops", rel_path="evil.py", content=b"import os"
-        )
+        await manager.upsert_document("t1", space_key="ops", filename="evil.py", content=b"x")
 
 
 @pytest.mark.asyncio
 async def test_upsert_rejects_oversized_file(monkeypatch):
     manager = _patch_common(monkeypatch, space=_FakeSpace(), client=_FakeClient())
-    oversized = b"x" * (manager.MAX_FILE_SIZE + 1)
-
     with pytest.raises(CustomError):
         await manager.upsert_document(
-            "t1", space_key="ops", rel_path="big.md", content=oversized
+            "t1", space_key="ops", filename="big.md", content=b"x" * (manager.MAX_FILE_SIZE + 1)
         )
 
 
 @pytest.mark.asyncio
-async def test_upsert_rejects_path_traversal(monkeypatch):
-    manager = _patch_common(monkeypatch, space=_FakeSpace(), client=_FakeClient())
+async def test_upsert_rejects_when_embedding_unconfigured(monkeypatch):
+    """未配置 embedding 必须拒绝入库，不能用默认维度糊过去。"""
+    manager = _patch_common(monkeypatch, space=_FakeSpace(), client=_FakeClient(), embedding=None)
 
+    async def no_config(tenant_id):
+        return None
+
+    monkeypatch.setattr(manager, "get_embedding_payload", no_config)
     with pytest.raises(CustomError):
-        await manager.upsert_document(
-            "t1", space_key="ops", rel_path="../../etc/passwd", content=b"x"
-        )
+        await manager.upsert_document("t1", space_key="ops", content=b"x", filename="a.md")
 
 
 @pytest.mark.asyncio
@@ -130,40 +155,15 @@ async def test_upsert_same_hash_skips_reupload(monkeypatch):
     digest = hashlib.sha256(content).hexdigest()
     existing = _FakeDoc(content_hash=digest, status="ready")
     client = _FakeClient()
-    manager = _patch_common(
-        monkeypatch, space=_FakeSpace(), client=client, existing=existing
-    )
-
-    result = await manager.upsert_document(
-        "t1", space_key="ops", rel_path="a.md", content=content
-    )
-
-    assert client.uploads == []
+    manager = _patch_common(monkeypatch, space=_FakeSpace(), client=client, existing=existing)
+    result = await manager.upsert_document("t1", space_key="ops", filename="a.md", content=content)
+    assert client.ingests == []
     assert result["status"] == "ready"
     assert result["skipped"] is True
 
 
 @pytest.mark.asyncio
-async def test_upsert_changed_content_reuploads(monkeypatch):
-    existing = _FakeDoc(content_hash="oldhash", status="ready")
-    client = _FakeClient()
-    manager = _patch_common(
-        monkeypatch, space=_FakeSpace(), client=client, existing=existing
-    )
-
-    result = await manager.upsert_document(
-        "t1", space_key="ops", rel_path="a.md", content=b"# new content"
-    )
-
-    assert len(client.uploads) == 1
-    assert client.uploads[0]["to"] == "viking://resources/spaces/ops/a.md"
-    assert existing.status == "processing"
-    assert existing.task_id == "task-1"
-    assert result["status"] == "processing"
-
-
-@pytest.mark.asyncio
-async def test_upsert_creates_new_document(monkeypatch):
+async def test_upsert_creates_document_and_submits_ingest(monkeypatch):
     created = {}
     client = _FakeClient()
     manager = _patch_common(monkeypatch, space=_FakeSpace(), client=client)
@@ -173,36 +173,21 @@ async def test_upsert_creates_new_document(monkeypatch):
         return _FakeDoc(**{k: v for k, v in kwargs.items() if k != "space"})
 
     monkeypatch.setattr(manager.KnowledgeDocument, "create", fake_create)
-
-    await manager.upsert_document(
-        "t1", space_key="ops", rel_path="new.md", content=b"# new", source="api"
-    )
-
-    assert created["uri"] == "viking://resources/spaces/ops/new.md"
+    await manager.upsert_document("t1", space_key="ops", filename="new.md", content=b"# new", source="api")
+    assert created["space_key"] == "ops"
     assert created["source"] == "api"
     assert created["status"] == "processing"
-    assert len(client.uploads) == 1
+    assert len(client.ingests) == 1
+    assert client.ingests[0]["storage_key"] == "knowledge/doc-1/raw"
 
 
 @pytest.mark.asyncio
-async def test_upsert_without_client_raises_not_provisioned(monkeypatch):
-    manager = _patch_common(monkeypatch, space=_FakeSpace(), client=None)
-
-    with pytest.raises(CustomError):
-        await manager.upsert_document(
-            "t1", space_key="ops", rel_path="a.md", content=b"x"
-        )
-
-
-@pytest.mark.asyncio
-async def test_delete_document_removes_from_openviking_and_soft_deletes(monkeypatch):
+async def test_delete_document_removes_vector_objects_and_soft_deletes(monkeypatch):
     doc = _FakeDoc()
     client = _FakeClient()
     manager = _patch_common(monkeypatch, space=_FakeSpace(), client=client, existing=doc)
-
     result = await manager.delete_document("t1", "doc-1")
-
-    assert client.removed == ["viking://resources/spaces/ops/a.md"]
+    assert client.deleted[0]["document_id"] == "doc-1"
     assert doc.deleted is True
     assert doc.saved is True
     assert result["deleted"] is True
@@ -210,9 +195,33 @@ async def test_delete_document_removes_from_openviking_and_soft_deletes(monkeypa
 
 @pytest.mark.asyncio
 async def test_delete_missing_document_404(monkeypatch):
-    manager = _patch_common(
-        monkeypatch, space=_FakeSpace(), client=_FakeClient(), existing=None
-    )
-
+    manager = _patch_common(monkeypatch, space=_FakeSpace(), client=_FakeClient(), existing=None)
     with pytest.raises(CustomError):
         await manager.delete_document("t1", "nope")
+
+
+def test_upsert_signature_has_no_path_or_url():
+    import inspect
+
+    from services.knowledge.manager import upsert_document
+
+    params = inspect.signature(upsert_document).parameters
+    for gone in ("rel_path", "url", "instruction"):
+        assert gone not in params, f"{gone} 仍在签名里"
+    assert "filename" in params
+
+
+def test_manager_no_longer_imports_status_module():
+    import inspect
+
+    from services.knowledge import manager
+
+    source = inspect.getsource(manager)
+    assert "status import refresh_pending" not in source
+    assert "sync_space" not in source
+
+
+def test_stale_processing_threshold_defined():
+    from services.knowledge.manager import STALE_PROCESSING_MINUTES
+
+    assert STALE_PROCESSING_MINUTES == 30
