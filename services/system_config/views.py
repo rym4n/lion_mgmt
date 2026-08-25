@@ -82,6 +82,93 @@ def _health_log_data(log_data):
     return data, ctime
 
 
+# 累计型指标：容器/进程启动至今单调递增的计数器，展示速率需相邻点做差
+_CUMULATIVE_SUFFIXES: tuple[str, ...] = (
+    "_bytes",       # net_input_bytes / block_read_bytes 等 docker stats 累计量
+    "_total",       # rows_ingested_total / merges_total 等 Prometheus 计数器
+)
+_CUMULATIVE_EXACT = frozenset(
+    {
+        "total_commands_processed",  # Redis 命令累计数
+        "xact_commit",               # PostgreSQL 事务提交累计
+        "xact_rollback",
+        "expired_keys",
+        "evicted_keys",
+        "keyspace_hits",
+        "keyspace_misses",
+    }
+)
+# 以累计后缀结尾但语义是瞬时值的字段，必须排除
+_CUMULATIVE_EXCLUDE = frozenset(
+    {
+        "consumer_lag_total",          # 积压量会上下波动，非单调递增
+        "used_memory",                 # 瞬时内存占用
+        "mem_usage_bytes",
+        "mem_limit_bytes",
+        "data_size_bytes",             # VictoriaLogs 当前存储量
+        "compressed_data_size_bytes",
+        "free_disk_space_bytes",
+        "storage_disk_free_bytes",     # Redpanda 剩余磁盘
+        "storage_disk_total_bytes",
+        "storage_bytes",               # RustFS 存储用量
+        "db_size_bytes",               # PostgreSQL 库大小
+        "temp_bytes",
+        "bytes_ingested_total",        # 与 rows_ingested_total 二选一即可，避免字段翻倍
+    }
+)
+
+
+def _is_cumulative_field(name: str) -> bool:
+    """Return True when the field is a monotonic counter needing rate conversion."""
+    if name in _CUMULATIVE_EXCLUDE:
+        return False
+    if name in _CUMULATIVE_EXACT:
+        return True
+    return name.endswith(_CUMULATIVE_SUFFIXES)
+
+
+def _apply_rate_diff(points: list[dict]) -> list[dict]:
+    """Add ``<field>_rate`` for cumulative fields by differencing adjacent points.
+
+    Points must be sorted ascending by time. The first point has no predecessor
+    so its rate is None. A negative delta means the counter reset (container
+    restart) and also yields None -- the chart should break the line there
+    rather than draw a dip that never happened.
+    """
+    if not points:
+        return points
+
+    # 收集所有出现过的累计字段（不同点可能字段不全）
+    cumulative_fields = set()
+    for point in points:
+        for key, value in point.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if _is_cumulative_field(key):
+                    cumulative_fields.add(key)
+
+    for index, point in enumerate(points):
+        for field in cumulative_fields:
+            rate_key = f"{field}_rate"
+            if index == 0:
+                point[rate_key] = None
+                continue
+
+            current = point.get(field)
+            previous = points[index - 1].get(field)
+
+            if not isinstance(current, (int, float)) or isinstance(current, bool):
+                point[rate_key] = None
+                continue
+            if not isinstance(previous, (int, float)) or isinstance(previous, bool):
+                point[rate_key] = None
+                continue
+
+            delta = current - previous
+            point[rate_key] = delta if delta >= 0 else None
+
+    return points
+
+
 def _replace_builtin_resource_placeholder(value, resource_id):
     """Resolve the install-time resource placeholder after resources are imported."""
     if isinstance(value, dict):

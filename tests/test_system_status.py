@@ -93,3 +93,80 @@ def test_system_status_history_reads_flattened_data(monkeypatch):
     assert result["data"][0]["name"] == "lion-job"
     assert result["data"][0]["cpu_percent"] == "1.25%"
     assert result["data"][0]["mem_usage"] == "10MiB / 1GiB"
+
+
+def test_is_cumulative_field_identifies_counter_fields():
+    assert system_views._is_cumulative_field("net_input_bytes") is True
+    assert system_views._is_cumulative_field("net_output_bytes") is True
+    assert system_views._is_cumulative_field("block_read_bytes") is True
+    assert system_views._is_cumulative_field("block_write_bytes") is True
+    assert system_views._is_cumulative_field("rows_ingested_total") is True
+    assert system_views._is_cumulative_field("total_commands_processed") is True
+    assert system_views._is_cumulative_field("xact_commit") is True
+
+    # 瞬时值不应被识别为累计值
+    assert system_views._is_cumulative_field("connected_clients") is False
+    assert system_views._is_cumulative_field("cache_hit_ratio") is False
+    assert system_views._is_cumulative_field("mem_percent") is False
+    assert system_views._is_cumulative_field("consumer_lag_total") is False
+
+
+def test_apply_rate_diff_computes_deltas_and_nulls_first_point():
+    points = [
+        {"timestamp": "2026-08-25 15:00:00", "net_input_bytes": 1000, "connected_clients": 10},
+        {"timestamp": "2026-08-25 15:05:00", "net_input_bytes": 3000, "connected_clients": 12},
+        {"timestamp": "2026-08-25 15:10:00", "net_input_bytes": 8000, "connected_clients": 11},
+    ]
+
+    result = system_views._apply_rate_diff(points)
+
+    # 首个点无前驱，速率为 None
+    assert result[0]["net_input_bytes_rate"] is None
+    # 后续点为与前一点的差值
+    assert result[1]["net_input_bytes_rate"] == 2000
+    assert result[2]["net_input_bytes_rate"] == 5000
+    # 瞬时值字段不产生 _rate
+    assert "connected_clients_rate" not in result[0]
+    # 原始累计值保留
+    assert result[2]["net_input_bytes"] == 8000
+
+
+def test_apply_rate_diff_returns_none_on_counter_reset():
+    # 容器重启导致计数器归零，差值为负
+    points = [
+        {"timestamp": "2026-08-25 15:00:00", "block_read_bytes": 9000},
+        {"timestamp": "2026-08-25 15:05:00", "block_read_bytes": 100},
+        {"timestamp": "2026-08-25 15:10:00", "block_read_bytes": 500},
+    ]
+
+    result = system_views._apply_rate_diff(points)
+
+    assert result[0]["block_read_bytes_rate"] is None
+    # 负差值返回 None，前端断线而非画成 0
+    assert result[1]["block_read_bytes_rate"] is None
+    # 重启后恢复正常差分
+    assert result[2]["block_read_bytes_rate"] == 400
+
+
+def test_apply_rate_diff_skips_missing_and_non_numeric_values():
+    points = [
+        {"timestamp": "t1", "net_input_bytes": 1000},
+        {"timestamp": "t2"},                                  # 该点缺该字段
+        {"timestamp": "t3", "net_input_bytes": 5000},
+        {"timestamp": "t4", "net_input_bytes": "invalid"},     # 非数值
+    ]
+
+    result = system_views._apply_rate_diff(points)
+
+    assert result[0]["net_input_bytes_rate"] is None
+    assert result[1].get("net_input_bytes_rate") is None
+    # t3 的前驱 t2 缺值，无法差分
+    assert result[2]["net_input_bytes_rate"] is None
+    assert result[3].get("net_input_bytes_rate") is None
+
+
+def test_apply_rate_diff_handles_empty_and_single_point():
+    assert system_views._apply_rate_diff([]) == []
+
+    single = system_views._apply_rate_diff([{"timestamp": "t1", "net_input_bytes": 100}])
+    assert single[0]["net_input_bytes_rate"] is None
