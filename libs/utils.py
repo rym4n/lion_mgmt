@@ -449,7 +449,7 @@ def _is_empty_stream_id_query_error(response) -> bool:
     )
 
 
-async def query_vlog(query, project_id, start=None, end=None, account_id=0, limit=None):
+async def query_vlog(query, project_id, start=None, end=None, account_id=0, limit=None, offset=None):
     # 构建VictoriaLogs查询参数
     params = {"query": query}
     if start:
@@ -458,6 +458,8 @@ async def query_vlog(query, project_id, start=None, end=None, account_id=0, limi
         params["end"] = local_time_to_utc(end)
     if limit:
         params["limit"] = limit
+    if offset is not None:
+        params["offset"] = offset
 
     header = {
         "AccountID": str(account_id),

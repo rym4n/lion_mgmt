@@ -33,6 +33,29 @@ def test_audit_query_is_scoped_to_current_tenant(monkeypatch):
     assert all('tenant_id:"tenant-a"' in query for query in queries)
 
 
+def test_audit_query_uses_victoria_logs_pagination(monkeypatch):
+    calls = []
+
+    async def fake_query_vlog(query, **kwargs):
+        calls.append((query, kwargs))
+        return []
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: data)
+    request = SimpleNamespace(
+        json={"page": 51, "size": 20},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+
+    result = _run_handler(system_views.search_audit, request)
+
+    assert result["data"] == []
+    data_query, data_kwargs = next((query, kwargs) for query, kwargs in calls if "sort(_time desc)" in query)
+    assert data_query.endswith("| sort(_time desc)")
+    assert data_kwargs["limit"] == 20
+    assert data_kwargs["offset"] == 1000
+
+
 def test_outgoing_vector_sinks_are_filtered_per_tenant():
     base_config = {
         "sources": {"aioe_kafka_audit": {"type": "kafka"}},
@@ -104,6 +127,12 @@ def test_outgoing_vector_sinks_are_filtered_per_tenant():
         (tenant_a_filter,),
         (tenant_b_filter,),
     }
+    assert all(sink["acknowledgements"] == {"enabled": False} for sink in custom_sinks)
+    assert all(
+        sink["buffer"]
+        == {"type": "memory", "max_events": 10_000, "when_full": "drop_newest"}
+        for sink in custom_sinks
+    )
 
     without_tenant_a = system_views._build_outgoing_vector_config(
         base_config,

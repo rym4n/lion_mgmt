@@ -20,6 +20,16 @@ class _FakeHttpClient:
         return self.response
 
 
+class _CapturingHttpClient(_FakeHttpClient):
+    def __init__(self, response):
+        super().__init__(response)
+        self.kwargs = None
+
+    async def get(self, *_args, **kwargs):
+        self.kwargs = kwargs
+        return self.response
+
+
 def _query_with_response(monkeypatch, response):
     monkeypatch.setattr(
         utils.httpx,
@@ -50,3 +60,19 @@ def test_other_invalid_log_queries_remain_service_errors(monkeypatch):
     )
 
     assert _query_with_response(monkeypatch, response) is None
+
+
+def test_query_vlog_passes_offset_to_victoria_logs(monkeypatch):
+    response = httpx.Response(
+        200,
+        request=httpx.Request("GET", "http://victoria-logs/select/logsql/query"),
+        text='{"id":"audit-1"}\n',
+    )
+    client = _CapturingHttpClient(response)
+    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_kwargs: client)
+
+    assert asyncio.run(utils.query_vlog("topic:lion_audit", project_id=0, limit=20, offset=40)) == [
+        {"id": "audit-1"}
+    ]
+    assert client.kwargs["params"]["limit"] == 20
+    assert client.kwargs["params"]["offset"] == 40

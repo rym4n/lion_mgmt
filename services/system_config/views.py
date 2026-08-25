@@ -8,7 +8,7 @@ import io
 import os
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlparse
 
 import aiofile
@@ -24,7 +24,7 @@ from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.maintenance import can_enable_maintenance_mode
-from core.response import response_fail, response_ok
+from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import get_superadmin_role, requires_permission
 from libs.utils import (
@@ -45,6 +45,41 @@ system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
 
 _BUILTIN_RESOURCE_PLACEHOLDER = "{{LION_MGMT_RESOURCE_ID}}"
+
+
+def _health_log_data(log_data):
+    """Return health-check payloads from both JSON and flattened log fields."""
+    data = log_data.get("data")
+    ctime = log_data.get("ctime", "")
+
+    if not data and "_msg" in log_data:
+        try:
+            msg_data = orjson.loads(log_data["_msg"])
+            if isinstance(msg_data, dict):
+                data = msg_data.get("data", {})
+                ctime = msg_data.get("ctime", ctime)
+        except (orjson.JSONDecodeError, TypeError):
+            pass
+
+    if isinstance(data, (str, bytes, bytearray)):
+        try:
+            parsed_data = orjson.loads(data)
+            data = parsed_data if isinstance(parsed_data, dict) else {}
+        except (orjson.JSONDecodeError, TypeError):
+            data = {}
+
+    if not data:
+        data = {}
+        for key, value in log_data.items():
+            if not key.startswith("data."):
+                continue
+            parts = key.split(".", 2)
+            if len(parts) != 3:
+                continue
+            service_name, field_name = parts[1:]
+            data.setdefault(service_name, {})[field_name] = value
+
+    return data, ctime
 
 
 def _replace_builtin_resource_placeholder(value, resource_id):
@@ -75,6 +110,7 @@ _PICTURE_TYPES = ("background", "webico", "logo")
 _OUTGOING_AUDIT_CONFIG_KEY = "outgoing_audit_log"
 _TENANT_AUDIT_TRANSFORM_PREFIX = "aioe_tenant_audit_"
 _TENANT_AUDIT_SINK_PREFIX = "aioe_tenant_sink_"
+_OUTGOING_SINK_BUFFER_MAX_EVENTS = 10_000
 _OUTGOING_CONFIG_LOCK = asyncio.Lock()
 _DEFAULT_PICTURE_URLS = {
     "background": "",
@@ -445,8 +481,16 @@ async def get_platform_config(request):
 async def get_system_status(request):
     # 从VictoriaLog查询最新的健康检查数据
     # 查询最近5分钟的数据，确保能覆盖所有主机
-    query = 'log_type:"health_check" | sort(_time desc)'
-    data_res = await query_vlog(query, project_id=0, limit=100)
+    end_time = datetime.now(timezone.utc)
+    start_time = end_time - timedelta(minutes=5)
+    query = 'log_type:"health_check" | first 100 by (_time desc)'
+    data_res = await query_vlog(
+        query,
+        project_id=0,
+        start=start_time.isoformat().replace("+00:00", "Z"),
+        end=end_time.isoformat().replace("+00:00", "Z"),
+        limit=100,
+    )
 
     if not data_res:
         return response_ok([])
@@ -463,32 +507,7 @@ async def get_system_status(request):
 
     result = []
     for log_ip, log_data in host_latest.items():
-        data = log_data.get("data")
-        ctime = log_data.get("ctime", "")
-
-        # 尝试从 _msg 中解析，因为 VictoriaLogs 可能不会自动展开 JSON 对象
-        if not data and "_msg" in log_data:
-            try:
-                msg_data = orjson.loads(log_data["_msg"])
-                if isinstance(msg_data, dict):
-                    data = msg_data.get("data", {})
-                    ctime = msg_data.get("ctime", ctime)
-            except Exception:
-                pass
-
-        # 如果还是没有 data，尝试从展开的字段中重建（处理 Kafka 源的数据）
-        if not data:
-            data = {}
-            # 查找所有 data.xxx.yyy 格式的字段
-            for key, value in log_data.items():
-                if key.startswith("data."):
-                    parts = key.split(".", 2)  # 分割为 ["data", "service_name", "field_name"]
-                    if len(parts) == 3:
-                        service_name = parts[1]
-                        field_name = parts[2]
-                        if service_name not in data:
-                            data[service_name] = {}
-                        data[service_name][field_name] = value
+        data, ctime = _health_log_data(log_data)
 
         # 如果没有 ctime，尝试使用 timestamp（Kafka 源的数据）
         if not ctime:
@@ -619,7 +638,7 @@ async def get_system_status_history(request):
 
     # 构建查询条件
     query = f'log_type:"health_check" AND log_ip:"{host}"'
-    data_query = f"{query} | sort(_time desc)"
+    data_query = f"{query} | first 1500 by (_time desc)"
 
     # 从VictoriaLog查询指定时间范围的健康检查数据
     data_res = await query_vlog(data_query, project_id=0, start=start_time_iso, end=end_time_iso, limit=1500)
@@ -630,21 +649,9 @@ async def get_system_status_history(request):
     result = []
     for log_data in data_res:
         log_ip = log_data.get("log_ip", host)
-        data = log_data.get("data")
-        ctime = log_data.get("ctime", "")
-
-        # 尝试从 _msg 中解析，因为 VictoriaLogs 可能不会自动展开 JSON 对象
-        if not data and "_msg" in log_data:
-            try:
-                msg_data = orjson.loads(log_data["_msg"])
-                if isinstance(msg_data, dict):
-                    data = msg_data.get("data", {})
-                    ctime = msg_data.get("ctime", ctime)
-            except Exception:
-                pass
-
-        if not data:
-            data = {}
+        data, ctime = _health_log_data(log_data)
+        if not ctime:
+            ctime = log_data.get("timestamp", log_data.get("_time", ""))
 
         # 处理时间格式
         check_time = ""
@@ -1254,9 +1261,6 @@ async def search_audit(request):
     size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
 
-    if offset >= 1000:
-        return response_fail(ErrorCode.OUT_OF_PAGE)
-
     username = request.json.get("username")
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
@@ -1297,10 +1301,17 @@ async def search_audit(request):
     count_query = f"{query} | stats count()"
     count_task = query_vlog(count_query, project_id=0, start=start_iso, end=end_iso)
 
-    # 获取数据
+    # 获取当前页数据。VictoriaLogs支持limit+offset服务端分页，避免把最多1000条
+    # 日志全部拉回应用进程后再进行内存切片。
     data_query = f"{query} | sort(_time desc)"
-    # 由于VictoriaLogs不支持offset，最多查询1000条数据
-    data_task = query_vlog(data_query, project_id=0, start=start_iso, end=end_iso, limit=1000)
+    data_task = query_vlog(
+        data_query,
+        project_id=0,
+        start=start_iso,
+        end=end_iso,
+        limit=size,
+        offset=offset,
+    )
 
     count_res, data_res = await asyncio.gather(count_task, data_task)
 
@@ -1310,9 +1321,7 @@ async def search_audit(request):
 
     data = []
     if data_res:
-        # 内存分页
-        page_data = data_res[offset : offset + size]
-        for item in page_data:
+        for item in data_res:
             # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
             utc_str = item.get("_time")
             utc_time = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
@@ -1355,6 +1364,23 @@ def _parse_outgoing_config(value: str) -> list[dict]:
     if not isinstance(parsed, list):
         raise ValueError("outgoing audit config must be a list")
     return parsed
+
+
+def _outgoing_sink_delivery_policy() -> dict:
+    """Keep an unavailable external sink from applying backpressure upstream.
+
+    External audit delivery is best effort.  The VictoriaLogs sink remains the
+    durable copy, while an unavailable tenant destination is allowed to drop
+    new events once its bounded buffer is full.
+    """
+    return {
+        "acknowledgements": {"enabled": False},
+        "buffer": {
+            "type": "memory",
+            "max_events": _OUTGOING_SINK_BUFFER_MAX_EVENTS,
+            "when_full": "drop_newest",
+        },
+    }
 
 
 async def _load_outgoing_configs() -> dict[str, list[dict]]:
@@ -1449,6 +1475,7 @@ def _build_outgoing_sinks(
                 "mode": mode,
                 **common_config,
             }
+        sink_config.update(_outgoing_sink_delivery_policy())
         sinks[sink_key] = sink_config
 
     return sinks
