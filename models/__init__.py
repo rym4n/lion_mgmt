@@ -5,14 +5,13 @@ from .command_center import *
 from .config import *
 from .approvement import *
 from .digital_employee import *
-from .embedding_config import *
+from .tenant_embedding import *
 from .employee_report import *
 from .event import *
 from .inspection import *
 from .knowledge import *
 from .large_screen import *
 from .llm_model_config import *
-from .openviking import *
 from .network_topology import *
 from .network_topology_v2 import *
 from .playbook import *

@@ -21,12 +21,12 @@ from services.asset_management.views import asset_management_bp
 from services.command_center.views import command_bp
 from services.dashboard.views import dashboard_bp
 from services.digital_employee.views import digital_employee_bp
-from services.digital_employee.views_embedding import embedding_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.inspection.views import inspection_bp
 from services.knowledge.views import knowledge_bp
 from services.knowledge.agent_views import knowledge_agent_bp
+from services.knowledge.embedding_views import knowledge_embedding_bp
 from services.license.views import license_bp
 from services.llm_config.views import llm_config_bp
 from services.log_view.views import logs_bp
@@ -92,7 +92,8 @@ def _licensed_blueprints() -> dict:
         "agent_bp": agent_bp,
         "mcp_bp": mcp_bp,
         "command_bp": command_bp,
-        "digital_employee_bp": (digital_employee_bp, embedding_bp),
+        "digital_employee_bp": digital_employee_bp,
+        "knowledge_bp": (knowledge_bp, knowledge_embedding_bp),
         "asset_management_bp": asset_management_bp,
         "network_access_control_bp": network_access_control_bp,
         "topology_bp": topology_bp,
