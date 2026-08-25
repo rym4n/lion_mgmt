@@ -355,6 +355,30 @@ def test_metrics_detail_rejects_missing_params(monkeypatch):
     assert exc_info.value.enum == ErrorCode.PARAM_ERROR
 
 
+def test_metrics_detail_rejects_invalid_time_format(monkeypatch):
+    import pytest
+
+    from core.error_code import ErrorCode
+    from libs.error_code.exception import CustomError
+
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    with pytest.raises(CustomError) as exc_info:
+        _run(
+            system_views.get_metrics_detail,
+            SimpleNamespace(
+                json={
+                    "host": "192.0.2.10",
+                    "middleware": "lion-redis",
+                    "start_time": "not-a-timestamp",
+                    "end_time": "2026-08-25T07:30:00Z",
+                }
+            ),
+        )
+
+    assert exc_info.value.enum == ErrorCode.PARAM_ERROR
+
+
 def test_metrics_detail_extracts_series_sorted_ascending(monkeypatch):
     calls = []
 
@@ -444,6 +468,37 @@ def test_metrics_detail_filters_to_requested_middleware(monkeypatch):
 
     assert result["data"][0]["active_conn"] == 5
     assert "connected_clients" not in result["data"][0]
+
+
+def test_metrics_detail_returns_empty_for_unknown_middleware(monkeypatch):
+    async def fake_query_vlog(query, **kwargs):
+        return [
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:00:00+0800",'
+                    '"log_type":"middleware_metrics","data":{"lion-redis":'
+                    '{"connected_clients":63}}}'
+                ),
+            }
+        ]
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(
+        system_views.get_metrics_detail,
+        SimpleNamespace(
+            json={
+                "host": "192.0.2.10",
+                "middleware": "lion-unknown",
+                "start_time": "2026-08-25T07:00:00Z",
+                "end_time": "2026-08-25T07:30:00Z",
+            }
+        ),
+    )
+
+    assert result["data"] == []
 
 
 def test_metrics_detail_returns_empty_when_no_data(monkeypatch):
