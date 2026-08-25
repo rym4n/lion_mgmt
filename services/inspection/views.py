@@ -482,7 +482,10 @@ def _actions_contain_custom_report_placeholder(actions):
                 "required": ["schedule_cron", "name"],
                 "properties": {
                     "id": {"type": "string", "description": "巡检任务ID（更新时必填）"},
-                    "schedule_cron": {"type": "string", "description": "定时周期(Cron表达式)"},
+                    "schedule_cron": {
+                        "type": "string",
+                        "description": "执行周期（六段 Cron 表达式，秒和分固定为 0）",
+                    },
                     "name": {"type": "string", "description": "任务名称"},
                     "owner": {"type": "string", "description": "负责人"},
                     "enabled": {"type": "boolean", "description": "是否启用"},

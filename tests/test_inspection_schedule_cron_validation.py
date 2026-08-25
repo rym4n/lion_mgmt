@@ -8,13 +8,12 @@ from services.inspection.logic import is_valid_schedule_cron
 @pytest.mark.parametrize(
     "expression",
     [
-        "@hourly",
-        "*/5 * * * *",
-        "0 */5 * * * *",
+        "0 0 * * * *",
+        "0 0 */5 * * *",
         "0 0 12 * * 1-5",
     ],
 )
-def test_inspection_schedule_accepts_engine_supported_cron(expression):
+def test_inspection_schedule_accepts_zero_second_and_minute_cron(expression):
     assert is_valid_schedule_cron(expression)
 
 
@@ -23,6 +22,11 @@ def test_inspection_schedule_accepts_engine_supported_cron(expression):
     [
         None,
         "",
+        "@hourly",
+        "*/5 * * * *",
+        "0 */5 * * * *",
+        "5 0 * * * *",
+        "0 5 * * * *",
         "100 * * * * *",
         "* * *",
         "not-a-cron",

@@ -17,7 +17,10 @@ class InspectionSchedule(BaseModel):
     """
 
     name = fields.CharField(max_length=255, default="默认巡检计划", description="任务名称")
-    schedule_cron = fields.CharField(max_length=100, description="定时周期(Cron表达式)")
+    schedule_cron = fields.CharField(
+        max_length=100,
+        description="执行周期（六段 Cron 表达式，秒和分固定为 0）",
+    )
     owner = fields.CharField(max_length=255, null=True, description="负责人")
     enabled = fields.BooleanField(default=True, description="是否启用")
     description = fields.TextField(null=True, description="任务描述")

@@ -58,13 +58,11 @@ _INSPECTION_SAMPLE_PROFILES = (
 
 
 def is_valid_schedule_cron(value: Any) -> bool:
-    """校验执行引擎支持的宏、5 段或秒在首位的 6 段 Cron。"""
+    """校验巡检执行周期：六段 Cron 且秒、分字段必须固定为 0。"""
     fields = str(value or "").strip().split()
-    if len(fields) == 6:
-        return croniter.is_valid(" ".join(fields), second_at_beginning=True)
-    if len(fields) in (1, 5):
-        return croniter.is_valid(" ".join(fields))
-    return False
+    if len(fields) != 6 or fields[0] != "0" or fields[1] != "0":
+        return False
+    return croniter.is_valid(" ".join(fields), second_at_beginning=True)
 
 
 def normalize_category_type(value: Any = None) -> str:
@@ -2028,7 +2026,7 @@ async def export_targets_to_excel(target_ids: List[str], tenant_id: str) -> byte
 
 【必填字段】
 • 任务名称：巡检任务的名称，相同任务名称的行会归属到同一个任务下
-• Cron表达式：定时执行规则，如 '0 9 * * *' 表示每天9点执行
+• Cron表达式：六段执行周期，秒和分固定为 0，如 '0 0 9 * * *' 表示每天9点执行
 • 类别名称：巡检类别名称，相同任务下的相同类别会归属到一起
 • 类别类型：action 表示执行动作，playbook 表示执行剧本；为空默认 action
 • 应用名称：action 类型填写工具应用名称，playbook 类型填写剧本名称或剧本ID
@@ -2222,7 +2220,14 @@ async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict
             continue
 
         # 验证必填字段
-        if not schedule_name or not schedule_cron or not category_name or not app_name or not target_content:
+        if (
+            not schedule_name
+            or not schedule_cron
+            or not is_valid_schedule_cron(schedule_cron)
+            or not category_name
+            or not app_name
+            or not target_content
+        ):
             continue
         if category_type == INSPECTION_CATEGORY_TYPE_ACTION and not action_name:
             continue
