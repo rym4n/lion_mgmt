@@ -8,6 +8,8 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from services.knowledge import manager
+from services.digital_employee.views import _check_internal
+from services.knowledge.callbacks import apply_ingest_result
 
 knowledge_bp = Blueprint("knowledge", url_prefix="/knowledge")
 
@@ -195,3 +197,16 @@ async def search_preview(request: Request):
 @requires_permission("knowledge:r")
 async def health(request: Request):
     return response_ok(await manager.health(_tenant(request)))
+
+
+@knowledge_bp.post("/internal/documents/<document_id>/status")
+async def internal_document_status(request: Request, document_id: str):
+    """lion_agent 入库完成后的回调。内部 token 鉴权，不走用户 session。"""
+    _check_internal(request)
+    params = _json(request)
+    tenant_id = params.get("tenant_id")
+    if not tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return response_ok(
+        await apply_ingest_result(str(tenant_id), str(document_id), params)
+    )
