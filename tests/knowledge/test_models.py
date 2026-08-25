@@ -30,11 +30,18 @@ def test_space_key_and_tenant_unique_together():
     assert ("tenant_id", "space_key") in KnowledgeSpace._meta.unique_together
 
 
-def test_space_root_uri_format():
-    """root_uri 决定 OpenViking 侧的路径，格式错了隔离就失效。"""
-    KnowledgeSpace, _ = _import_models()
-    space = KnowledgeSpace(space_key="monitoring", name="监控手册")
-    assert space.root_uri == "viking://resources/spaces/monitoring"
+def test_document_has_no_openviking_fields():
+    """rel_path/uri/task_id 是 OpenViking fs 与异步任务的残留，必须消失。"""
+    _, KnowledgeDocument = _import_models()
+    fields = KnowledgeDocument._meta.fields_map
+    for gone in ("rel_path", "uri", "task_id"):
+        assert gone not in fields, f"{gone} 仍存在"
+
+
+def test_document_has_storage_key():
+    """storage_key 指向 RustFS 上的原始字节，是重建索引的唯一依据。"""
+    _, KnowledgeDocument = _import_models()
+    assert "storage_key" in KnowledgeDocument._meta.fields_map
 
 
 def test_space_source_type_default_is_manual():
@@ -43,17 +50,18 @@ def test_space_source_type_default_is_manual():
     assert field.default == "manual"
 
 
-def test_document_uri_unique_per_tenant():
-    """同一 URI 在租户内只能有一行，这是 upsert 幂等的基础。"""
+def test_document_unique_key_is_content_hash_based():
     _, KnowledgeDocument = _import_models()
-    assert ("tenant_id", "uri") in KnowledgeDocument._meta.unique_together
+    assert KnowledgeDocument._meta.unique_together == (
+        ("tenant_id", "space_key", "content_hash"),
+    )
 
 
-def test_document_status_default_is_pending():
-    """新建文档必须从 pending 起步，直接写 ready 会让界面显示假的就绪状态。"""
+def test_document_status_default_is_processing():
+    """新建文档必须从 processing 起步，等待 lion_agent 回调。"""
     _, KnowledgeDocument = _import_models()
     field = KnowledgeDocument._meta.fields_map["status"]
-    assert field.default == "pending"
+    assert field.default == "processing"
 
 
 def test_document_size_is_big_int():
@@ -77,3 +85,19 @@ def test_document_space_foreign_key_cascade():
     _, KnowledgeDocument = _import_models()
     field = KnowledgeDocument._meta.fields_map["space"]
     assert field.model_name == "models.KnowledgeSpace"
+
+
+def test_space_has_no_root_uri():
+    KnowledgeSpace, _ = _import_models()
+    assert not hasattr(KnowledgeSpace, "root_uri")
+
+
+def test_document_json_excludes_storage_key():
+    """storage_key 是内部存储坐标，不对外暴露。"""
+    _, KnowledgeDocument = _import_models()
+    document = KnowledgeDocument(
+        tenant_id="t1", space_key="ops", title="t", content_hash="h",
+        storage_key="knowledge/x/raw", size=1, status="ready",
+    )
+    assert "storage_key" not in document.json
+    assert "rel_path" not in document.json
