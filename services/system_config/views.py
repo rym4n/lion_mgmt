@@ -874,6 +874,93 @@ async def get_system_status_history(request):
     return response_ok(result)
 
 
+def _format_check_time(ctime):
+    """Convert a collector timestamp to local ``%Y-%m-%d %H:%M:%S``."""
+    if not ctime:
+        return ""
+    try:
+        if "+" in ctime or ctime.endswith("Z"):
+            dt = datetime.fromisoformat(ctime.replace("Z", "+00:00"))
+            return dt.astimezone(TZ).strftime("%Y-%m-%d %H:%M:%S")
+        return ctime
+    except Exception:
+        return ctime
+
+
+# 中间件容器白名单：只有这些容器有专属性能指标
+_MIDDLEWARE_CONTAINERS = ("lion-redis", "lion-db", "lion-mq", "lion-vl", "lion-fs")
+
+
+@system_bp.post("/metrics/overview")
+@openapi.definition(
+    summary="获取各主机的中间件指标概览",
+    description="列出每台主机上有性能指标数据的中间件，需要系统状态查看权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "host": {"type": "string"},
+                                        "check_time": {"type": "string"},
+                                        "middlewares": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("status:r")
+async def get_metrics_overview(request):
+    # 查最近 15 分钟：采集周期是 5 分钟，留 3 个周期容忍单次采集失败
+    end_time = datetime.now(timezone.utc)
+    start_time = end_time - timedelta(minutes=15)
+    query = 'log_type:"middleware_metrics" | first 100 by (_time desc)'
+
+    data_res = await query_vlog(
+        query,
+        project_id=0,
+        start=start_time.isoformat().replace("+00:00", "Z"),
+        end=end_time.isoformat().replace("+00:00", "Z"),
+        limit=100,
+    )
+
+    if not data_res:
+        return response_ok([])
+
+    # 按主机取最新一条（query 已按 _time 降序）
+    host_latest = {}
+    for item in data_res:
+        data, ctime = _health_log_data(item)
+        log_ip = item.get("log_ip")
+        if not log_ip:
+            continue
+        if log_ip in host_latest:
+            continue
+        host_latest[log_ip] = {
+            "host": log_ip,
+            "check_time": _format_check_time(ctime),
+            "middlewares": [name for name in _MIDDLEWARE_CONTAINERS if name in data],
+        }
+
+    return response_ok(list(host_latest.values()))
+
+
 @system_bp.post("/oauth/status")
 @openapi.definition(
     summary="获取SSO状态",

@@ -96,6 +96,71 @@ def test_system_status_history_reads_flattened_data(monkeypatch):
     assert result["data"][0]["mem_usage"] == "10MiB / 1GiB"
 
 
+def test_metrics_overview_groups_by_host_and_lists_middlewares(monkeypatch):
+    calls = []
+
+    async def fake_query_vlog(query, **kwargs):
+        calls.append((query, kwargs))
+        return [
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:30:00+0800",'
+                    '"log_type":"middleware_metrics","data":{'
+                    '"lion-redis":{"connected_clients":63},'
+                    '"lion-db":{"active_conn":1},'
+                    '"lion-mgmt":{"cpu_percent":1.2}}}'
+                ),
+            },
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:25:00+0800",'
+                    '"log_type":"middleware_metrics","data":{"lion-redis":{"connected_clients":50}}}'
+                ),
+            },
+            {
+                "log_ip": "192.0.2.11",
+                "_msg": (
+                    '{"log_ip":"192.0.2.11","ctime":"2026-08-25T15:29:00+0800",'
+                    '"log_type":"middleware_metrics","data":{"lion-worker":{"cpu_percent":0.5}}}'
+                ),
+            },
+        ]
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(system_views.get_metrics_overview, SimpleNamespace(json={}))
+    data = result["data"]
+
+    query, kwargs = calls[0]
+    assert 'log_type:"middleware_metrics"' in query
+    assert "first 100 by (_time desc)" in query
+    assert kwargs["limit"] == 100
+    start = datetime.fromisoformat(kwargs["start"].replace("Z", "+00:00"))
+    end = datetime.fromisoformat(kwargs["end"].replace("Z", "+00:00"))
+    assert 899 <= (end - start).total_seconds() <= 901
+
+    assert len(data) == 2
+    hosts = {item["host"]: item for item in data}
+    assert set(hosts["192.0.2.10"]["middlewares"]) == {"lion-redis", "lion-db"}
+    assert hosts["192.0.2.10"]["check_time"] == "2026-08-25 15:30:00"
+    assert hosts["192.0.2.11"]["middlewares"] == []
+
+
+def test_metrics_overview_returns_empty_when_no_data(monkeypatch):
+    async def fake_query_vlog(query, **kwargs):
+        return []
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(system_views.get_metrics_overview, SimpleNamespace(json={}))
+
+    assert result["data"] == []
+
+
 def test_is_cumulative_field_identifies_counter_fields():
     assert system_views._is_cumulative_field("net_input_bytes") is True
     assert system_views._is_cumulative_field("net_output_bytes") is True
