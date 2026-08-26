@@ -1,9 +1,13 @@
 # coding=utf-8
-"""租户级知识库 embedding 配置端点（SPEC §7.1 D9）。
+"""知识库索引状态与重建端点（SPEC §7.1 D9）。
 
-取代 services/digital_employee/views_embedding.py：那套是「JSON 配置落盘 +
-重启 OpenViking 容器」，耗时 30-120 秒。新链路只写一行数据库记录，
-配置随请求下发给 lion_agent，秒返回。
+**这里不提供 embedding 配置的写入**——配置在「系统设置 - 模型配置」里
+以 purpose='embedding' 维护（llm_model_config 表），知识库直接读那份。
+再开一处配置入口等于让用户在两处配同一件事，必然漂移。
+
+本模块只负责：
+  1. 报告当前 embedding 配置状态与索引是否需要重建
+  2. 换模型后丢弃旧 collection，为重建让路
 """
 
 from datetime import datetime
@@ -14,7 +18,13 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models.tenant_embedding import TenantEmbeddingConfig, compute_fingerprint
+from models.tenant_embedding import (
+    TenantEmbeddingIndexState,
+    compute_fingerprint,
+    get_embedding_config,
+    get_embedding_payload,
+    get_embedding_status,
+)
 from settings import TZ
 
 knowledge_embedding_bp = Blueprint(
@@ -39,49 +49,8 @@ def _operator_id(request: Request) -> str | None:
 @knowledge_embedding_bp.get("")
 @requires_permission("knowledge:r")
 async def get_config(request: Request):
-    config = await TenantEmbeddingConfig.get_or_none(
-        tenant_id=_tenant(request), deleted=False
-    )
-    return response_ok(config.json if config else None)
-
-
-@knowledge_embedding_bp.post("")
-@requires_permission("knowledge:u")
-async def set_config(request: Request):
-    """写入配置。api_key 留空表示沿用已存的密钥。"""
-    params = request.json or {}
-    base_url = str(params.get("base_url") or "").strip()
-    model = str(params.get("model") or "").strip()
-    dimensions = params.get("dimensions")
-    if not base_url or not model or dimensions is None:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-    try:
-        dims = int(dimensions)
-    except (TypeError, ValueError):
-        raise CustomError(ErrorCode.PARAM_ERROR) from None
-    if dims <= 0:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tenant_id = _tenant(request)
-    config = await TenantEmbeddingConfig.get_or_none(
-        tenant_id=tenant_id, deleted=False
-    )
-    api_key = str(params.get("api_key") or "")
-
-    if config is None:
-        config = TenantEmbeddingConfig(tenant_id=tenant_id)
-    config.base_url = base_url
-    config.model = model
-    config.dimensions = dims
-    if api_key:
-        # 留空 = 不修改。避免前端不回显密钥时把已存的值清掉。
-        config.api_key = api_key
-    config.fingerprint = compute_fingerprint(base_url, model, dims)
-    config.applied_at = datetime.now(TZ)
-    config.applied_by = _operator_id(request)
-    config.remark = params.get("remark")
-    await config.save()
-    return response_ok(config.json)
+    """当前 embedding 配置状态。未配置时 configured=False。"""
+    return response_ok(await get_embedding_status(_tenant(request)))
 
 
 @knowledge_embedding_bp.post("/rebuild")
@@ -91,7 +60,6 @@ async def rebuild_index(request: Request):
 
     只丢弃，不重灌：重新入库由用户逐篇重试或后续批量任务驱动。
     """
-    from models.tenant_embedding import get_embedding_payload
     from services.knowledge.client import get_knowledge_client
 
     tenant_id = _tenant(request)
@@ -102,11 +70,19 @@ async def rebuild_index(request: Request):
     result = await get_knowledge_client().rebuild(
         tenant_id=tenant_id, embedding=embedding
     )
-    config = await TenantEmbeddingConfig.get_or_none(
+
+    config = await get_embedding_config(tenant_id)
+    fingerprint = compute_fingerprint(
+        config.base_url, config.model_name, config.dimensions
+    )
+    state = await TenantEmbeddingIndexState.get_or_none(
         tenant_id=tenant_id, deleted=False
     )
-    if config:
-        # 记账：collection 已按当前指纹重置，不再提示需要重建。
-        config.indexed_fingerprint = config.fingerprint
-        await config.save()
+    if state is None:
+        state = TenantEmbeddingIndexState(tenant_id=tenant_id)
+    # 记账：collection 已按当前指纹重置，不再提示需要重建。
+    state.indexed_fingerprint = fingerprint
+    state.rebuilt_at = datetime.now(TZ)
+    state.rebuilt_by = _operator_id(request)
+    await state.save()
     return response_ok(result)
