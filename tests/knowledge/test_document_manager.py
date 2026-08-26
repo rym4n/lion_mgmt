@@ -31,6 +31,7 @@ class _FakeDoc:
         self.error = kw.get("error")
         self.indexed_at = kw.get("indexed_at")
         self.source = kw.get("source", "manual")
+        self.uploader_id = kw.get("uploader_id")
         self.deleted = False
         self.saved = False
         from settings import TZ
@@ -179,6 +180,70 @@ async def test_upsert_creates_document_and_submits_ingest(monkeypatch):
     assert created["status"] == "processing"
     assert len(client.ingests) == 1
     assert client.ingests[0]["storage_key"] == "knowledge/doc-1/raw"
+
+
+@pytest.mark.asyncio
+async def test_reupload_records_latest_operator(monkeypatch):
+    content = b"# repaired"
+    existing = _FakeDoc(
+        content_hash=hashlib.sha256(content).hexdigest(), status="failed"
+    )
+    manager = _patch_common(
+        monkeypatch, space=_FakeSpace(), client=_FakeClient(), existing=existing
+    )
+
+    await manager.upsert_document(
+        "t1",
+        space_key="ops",
+        filename="a.md",
+        content=content,
+        uploader_id="operator-2",
+    )
+
+    assert existing.uploader_id == "operator-2"
+
+
+@pytest.mark.asyncio
+async def test_document_list_decorates_updater(monkeypatch):
+    document = _FakeDoc(uploader_id="operator-1")
+    manager = _patch_common(
+        monkeypatch, space=_FakeSpace(), client=_FakeClient()
+    )
+    monkeypatch.setattr(
+        manager.KnowledgeDocument,
+        "filter",
+        lambda **kwargs: _FakeQuery([document]),
+    )
+
+    class _Account:
+        id = "operator-1"
+        username = "alice"
+        display_name = "Alice"
+
+    monkeypatch.setattr(
+        manager.Account,
+        "filter",
+        lambda **kwargs: _FakeQuery([_Account()]),
+    )
+
+    result = await manager.list_documents("t1", "ops")
+
+    assert result["items"][0]["updator"] == {
+        "username": "alice",
+        "display_name": "Alice",
+    }
+
+
+@pytest.mark.asyncio
+async def test_retry_records_latest_operator(monkeypatch):
+    document = _FakeDoc(status="failed", uploader_id="operator-1")
+    manager = _patch_common(
+        monkeypatch, space=_FakeSpace(), client=_FakeClient(), existing=document
+    )
+
+    await manager.retry_document("t1", "doc-1", updater_id="operator-2")
+
+    assert document.uploader_id == "operator-2"
 
 
 @pytest.mark.asyncio

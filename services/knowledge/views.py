@@ -169,7 +169,13 @@ async def document_delete(request: Request):
 async def document_retry(request: Request):
     params = _json(request)
     _require(params, "document_id")
-    return response_ok(await manager.retry_document(_tenant(request), str(params["document_id"])))
+    return response_ok(
+        await manager.retry_document(
+            _tenant(request),
+            str(params["document_id"]),
+            updater_id=_operator_id(request),
+        )
+    )
 
 
 @knowledge_bp.post("/search")

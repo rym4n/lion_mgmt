@@ -70,3 +70,12 @@ def test_document_upload_keeps_complete_form_values():
     assert 'title=form.get("title")' in src
     assert '(form.get("space_key") or [None])[0]' not in src
     assert '(form.get("title") or [None])[0]' not in src
+
+
+def test_document_retry_passes_current_operator():
+    src = _src()
+    retry_route = src[
+        src.index("async def document_retry"):src.index("async def search_preview")
+    ]
+
+    assert "updater_id=_operator_id(request)" in retry_route

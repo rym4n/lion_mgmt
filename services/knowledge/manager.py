@@ -16,6 +16,7 @@ from libs.error_code.exception import CustomError
 from models.command_center import CommandAgent
 from models.knowledge import KnowledgeDocument, KnowledgeSpace
 from models.tenant_embedding import get_embedding_payload
+from models.user import Account
 from services.knowledge import object_store
 from services.knowledge.client import get_knowledge_client
 from services.knowledge.scope import validate_space_key
@@ -278,6 +279,7 @@ async def upsert_document(
     else:
         document.title = title or document.title or filename
         document.size = len(content)
+        document.uploader_id = uploader_id
         document.status = "processing"
         document.error = None
         document.indexed_at = None
@@ -340,11 +342,30 @@ async def list_documents(
 
     total = await query.count()
     documents = await query.offset((page - 1) * size).limit(size).all()
+    updater_ids = {doc.uploader_id for doc in documents if doc.uploader_id}
+    updaters = {}
+    if updater_ids:
+        accounts = await Account.filter(
+            id__in=list(updater_ids), tenant_id=tenant_id
+        ).all()
+        updaters = {
+            str(account.id): {
+                "username": account.username,
+                "display_name": account.display_name,
+            }
+            for account in accounts
+        }
+
+    items = []
+    for document in documents:
+        payload = _mark_stale(document)
+        payload["updator"] = updaters.get(str(document.uploader_id))
+        items.append(payload)
     return {
         "total": total,
         "page": page,
         "size": size,
-        "items": [_mark_stale(doc) for doc in documents],
+        "items": items,
     }
 
 
@@ -381,7 +402,9 @@ async def delete_document(tenant_id: str, document_id: str) -> dict:
     return {"deleted": True, "document_id": document_id}
 
 
-async def retry_document(tenant_id: str, document_id: str) -> dict:
+async def retry_document(
+    tenant_id: str, document_id: str, *, updater_id: str | None = None
+) -> dict:
     """重新提交失败的文档。
 
     原文还在 RustFS，直接重新提交 ingest 即可。
@@ -396,6 +419,8 @@ async def retry_document(tenant_id: str, document_id: str) -> dict:
 
     document.status = "processing"
     document.error = None
+    if updater_id is not None:
+        document.uploader_id = updater_id
     await document.save()
     await get_knowledge_client().ingest(
         tenant_id=tenant_id,
