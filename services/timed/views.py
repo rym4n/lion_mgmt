@@ -864,9 +864,26 @@ async def get_timed_detail(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     data = timed.json
-    if timed.playbook_input:
-        input_args = await get_playbook_input(timed.playbook_input["flow_id"], tenant_id=tenant_id)
-        data["input_args"] = input_args
+    if isinstance(timed.playbook_input, dict) and timed.playbook_input:
+        flow_id = timed.playbook_input.get("flow_id")
+        if flow_id:
+            try:
+                input_args = await get_playbook_input(flow_id, tenant_id=tenant_id)
+            except CustomError as exc:
+                if exc.enum is not ErrorCode.PLAYBOOK_NOT_FOUND:
+                    raise
+                # A legacy timer can outlive a soft-deleted playbook version.
+                # Keep the timer editable so the user can select a replacement.
+                data["playbook_missing"] = True
+                data["input_args"] = []
+            else:
+                data["input_args"] = input_args
+        else:
+            data["playbook_missing"] = True
+            data["input_args"] = []
+    elif timed.playbook_input:
+        data["playbook_missing"] = True
+        data["input_args"] = []
     if timed.action_input:
         actions = await ToolAction.filter(
             tool_name=timed.action_input.get("app_name"),

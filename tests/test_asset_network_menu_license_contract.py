@@ -298,6 +298,82 @@ def test_get_license_keeps_tenant_switching_for_a_roleless_member(monkeypatch):
     assert menus == [{"tenant": True}]
 
 
+def test_get_license_repairs_a_split_menu_redirect_to_an_available_child(monkeypatch):
+    class PermissionQuery:
+        async def values(self):
+            return [
+                {
+                    "model": "agent",
+                    "description": "汇报助手",
+                    "bp": "agent_bp",
+                    "Permissions": ["agent:r"],
+                    "url": {
+                        "CN": {
+                            "path": "/command-center",
+                            "redirect": "/command-center/board",
+                            "children": [
+                                {
+                                    "path": "/command-center/report-assistant",
+                                    "meta": {"title": "汇报助手"},
+                                }
+                            ],
+                            "meta": {"title": "专家团队"},
+                        }
+                    },
+                }
+            ]
+
+    class FakeAccount:
+        def _roles_for_tenant(self, _tenant_id):
+            return [SimpleNamespace(permissions=["agent:r"])]
+
+    class AwaitableAccount:
+        def prefetch_related(self, *_relations):
+            return self
+
+        def __await__(self):
+            async def resolve():
+                return FakeAccount()
+
+            return resolve().__await__()
+
+    monkeypatch.setattr(
+        license_views,
+        "PermissionsMenu",
+        SimpleNamespace(filter=lambda **_filters: PermissionQuery()),
+    )
+    monkeypatch.setattr(
+        license_views,
+        "Account",
+        SimpleNamespace(get=lambda **_filters: AwaitableAccount()),
+    )
+    monkeypatch.setattr(
+        license_views,
+        "load_license",
+        lambda: {
+            "moduleList": [
+                {
+                    "name": "汇报助手",
+                    "module": "agent_bp",
+                    "auth": True,
+                    "expireTime": 4102444800000,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(license_views, "response_ok", lambda data: data)
+    request = SimpleNamespace(
+        json={"language": "CN"},
+        ctx=SimpleNamespace(
+            session={"sub": "account-1", "tenant_id": "tenant-current"}
+        ),
+    )
+
+    menus = asyncio.run(inspect.unwrap(get_license)(request))
+
+    assert menus[0]["redirect"] == "/command-center/report-assistant"
+
+
 def test_role_permission_menu_keeps_full_permission_values_for_split_modules():
     menu = {
         "model": "asset-management-models",

@@ -373,6 +373,12 @@ async def get_license(request: Request):
             menu["children"] = sorted(
                 children, key=lambda x: expert_team_dict.get(x["meta"]["title"], 99)
             )
+        # Split licensed menus reuse one parent route. A historical parent
+        # redirect may point to a sibling that is not in this response.
+        if menu.get("children"):
+            child_paths = {child.get("path") for child in menu["children"]}
+            if menu.get("redirect") not in child_paths:
+                menu["redirect"] = menu["children"][0].get("path")
         title = menu.get("meta", {}).get("title")
         if title in top_menu_order:
             menu["meta"]["rank"] = top_menu_order[title]
