@@ -60,10 +60,9 @@ async def space_list(request: Request):
 @requires_permission("knowledge:c")
 async def space_create(request: Request):
     params = _json(request)
-    _require(params, "space_key", "name")
+    _require(params, "name")
     space = await manager.create_space(
         _tenant(request),
-        str(params["space_key"]),
         str(params["name"]),
         description=params.get("description"),
     )
@@ -116,14 +115,15 @@ async def document_upload(request: Request):
     form = request.form or {}
     files = request.files or {}
     uploaded = files.get("file")
-    space_key = (form.get("space_key") or [None])[0] if hasattr(form, "get") else None
+    # Sanic RequestParameters.get() already returns the first scalar value.
+    space_key = form.get("space_key")
     if not uploaded or not space_key:
         raise CustomError(ErrorCode.PARAM_ERROR)
     return response_ok(
         await manager.upsert_document(
             _tenant(request),
             space_key=str(space_key),
-            content=uploaded.body, title=(form.get("title") or [None])[0],
+            content=uploaded.body, title=form.get("title"),
             filename=uploaded.name,
             source="manual", uploader_id=_operator_id(request)
         )

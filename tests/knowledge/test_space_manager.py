@@ -38,15 +38,20 @@ class _FakeQS:
 
 
 @pytest.mark.asyncio
-async def test_create_space_rejects_duplicate_key(monkeypatch):
+async def test_create_space_rejects_generated_key_conflict(monkeypatch):
     from services.knowledge import manager
 
     async def fake_get_or_none(**kwargs):
         return _FakeSpace()
 
     monkeypatch.setattr(manager.KnowledgeSpace, "get_or_none", fake_get_or_none)
+    monkeypatch.setattr(
+        manager.uuid,
+        "uuid4",
+        lambda: type("FakeUUID", (), {"hex": "1" * 32})(),
+    )
     with pytest.raises(CustomError):
-        await manager.create_space("t1", "ops", "运维")
+        await manager.create_space("t1", "运维")
 
 
 @pytest.mark.asyncio
@@ -58,21 +63,37 @@ async def test_create_space_writes_only_local_metadata(monkeypatch):
     async def fake_get_or_none(**kwargs):
         return None
 
+    captured = {}
+
     async def fake_create(**kwargs):
+        captured.update(kwargs)
         return created
 
     monkeypatch.setattr(manager.KnowledgeSpace, "get_or_none", fake_get_or_none)
     monkeypatch.setattr(manager.KnowledgeSpace, "create", fake_create)
-    result = await manager.create_space("t1", "ops", "运维")
+    monkeypatch.setattr(
+        manager.uuid,
+        "uuid4",
+        lambda: type("FakeUUID", (), {"hex": "2" * 32})(),
+    )
+    result = await manager.create_space("t1", "运维", description="运维资料")
     assert result is created
+    assert captured == {
+        "tenant_id": "t1",
+        "space_key": f"space-{'2' * 32}",
+        "name": "运维",
+        "description": "运维资料",
+        "source_type": "manual",
+        "source_ref": None,
+    }
 
 
 @pytest.mark.asyncio
-async def test_create_space_validates_key(monkeypatch):
+async def test_ensure_space_validates_internal_key(monkeypatch):
     from services.knowledge import manager
 
     with pytest.raises(CustomError):
-        await manager.create_space("t1", "Bad_Key", "x")
+        await manager.ensure_space("t1", "Bad_Key", "x")
 
 
 def test_update_space_cannot_change_key():

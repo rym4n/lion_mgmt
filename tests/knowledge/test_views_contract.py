@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+from sanic.request.parameters import RequestParameters
+
 VIEWS = Path(__file__).resolve().parents[2] / "services" / "knowledge" / "views.py"
 
 
@@ -44,3 +46,27 @@ def test_tenant_id_never_from_request_body():
 def test_document_delete_does_not_expose_recursive():
     src = _src()
     assert "recursive" not in src
+
+
+def test_space_create_only_requires_user_visible_fields():
+    src = _src()
+    create_route = src[src.index("async def space_create"):src.index("async def space_update")]
+
+    assert '_require(params, "name")' in create_route
+    assert 'params["space_key"]' not in create_route
+    assert "await manager.create_space(" in create_route
+
+
+def test_document_upload_keeps_complete_form_values():
+    form = RequestParameters()
+    form["space_key"] = ["test"]
+    form["title"] = ["完整标题"]
+
+    assert form.get("space_key") == "test"
+    assert form.get("title") == "完整标题"
+
+    src = _src()
+    assert 'space_key = form.get("space_key")' in src
+    assert 'title=form.get("title")' in src
+    assert '(form.get("space_key") or [None])[0]' not in src
+    assert '(form.get("title") or [None])[0]' not in src

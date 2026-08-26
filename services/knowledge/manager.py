@@ -6,6 +6,7 @@ lion_mgmt 是知识库的唯一写入口：前端、剧本、数字员工的写�
 """
 
 import hashlib
+import uuid
 from datetime import datetime, timedelta
 
 from sanic.log import logger
@@ -42,7 +43,7 @@ async def get_space_or_404(tenant_id: str, space_key: str) -> KnowledgeSpace:
     return space
 
 
-async def create_space(
+async def _create_space_with_key(
     tenant_id: str,
     space_key: str,
     name: str,
@@ -50,7 +51,7 @@ async def create_space(
     source_type: str = "manual",
     source_ref: str | None = None,
 ) -> KnowledgeSpace:
-    """创建空间。空间是本地授权与 Qdrant 过滤值，不创建远端目录。"""
+    """使用指定标识创建空间，供需要稳定标识的内部导入流程调用。"""
     validate_space_key(space_key)
 
     existing = await KnowledgeSpace.get_or_none(
@@ -69,6 +70,21 @@ async def create_space(
     )
 
 
+async def create_space(
+    tenant_id: str,
+    name: str,
+    description: str | None = None,
+) -> KnowledgeSpace:
+    """创建人工空间并生成内部标识。"""
+    space_key = f"space-{uuid.uuid4().hex}"
+    return await _create_space_with_key(
+        tenant_id,
+        space_key,
+        name,
+        description=description,
+    )
+
+
 async def ensure_space(
     tenant_id: str,
     space_key: str,
@@ -77,12 +93,13 @@ async def ensure_space(
     source_ref: str | None = None,
 ) -> KnowledgeSpace:
     """幂等创建。技能包导入会反复调用，已存在时直接返回。"""
+    validate_space_key(space_key)
     existing = await KnowledgeSpace.get_or_none(
         tenant_id=tenant_id, space_key=space_key, deleted=False
     )
     if existing:
         return existing
-    return await create_space(
+    return await _create_space_with_key(
         tenant_id,
         space_key,
         name,
