@@ -116,7 +116,7 @@ async def test_add_permission_locks_row_before_json_update(monkeypatch):
         json={
             "name": "sample_tool",
             "resource_id": "resource-1",
-            "actions": ["all"],
+            "actions": ["all", "query_ip_info"],
             "users_id": ["user-1"],
             "roles_id": ["role-1"],
         },
@@ -327,6 +327,15 @@ async def test_add_permission_replaces_resource_action_set_and_keeps_empty_subje
     assert permissions[0].roles == [{}]
     assert permissions[1].users == [{"resource-1": []}]
     assert permissions[1].roles == [{"resource-1": []}]
+
+
+def test_normalize_selected_action_names_makes_all_exclusive():
+    assert tool_views._normalize_selected_action_names(
+        ["query_ip_info", "all", "query_ip_info"]
+    ) == {"all"}
+    assert tool_views._normalize_selected_action_names(
+        ["query_ip_info", "lookup"]
+    ) == {"query_ip_info", "lookup"}
 
 
 def test_action_permission_migration_merges_grants_before_soft_delete():

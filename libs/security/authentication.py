@@ -175,7 +175,14 @@ async def _decode_account_token(request: Request, credential: str) -> dict:
         await request.app.ctx.cache_client.set(
             f"account_{account.id}", account, 7 * 24 * 3600
         )
-    payload = jwt.decode(token, account.password, SESSION_ENCODING_ALGORITHM)
+    try:
+        payload = jwt.decode(token, account.password, SESSION_ENCODING_ALGORITHM)
+    except jwt.InvalidTokenError:
+        # Request-scoped user delegation tokens use the platform session key.
+        # The account-id prefix keeps them compatible with aioe-auth headers.
+        payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
+    if str(payload.get("sub") or "") != str(account.id):
+        raise jwt.InvalidTokenError("credential account does not match token subject")
     tenant_name = request.headers.get("tenant_name")
     if tenant_name:
         tenant = await Tenant.get_or_none(name=tenant_name)

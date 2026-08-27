@@ -29,7 +29,12 @@ from models import (
 )
 from models.user import Account
 from models.warroom import Message, MessageAccount, Room
-from services.digital_employee.lion_agent_adapter import stream_prompt_events, workspace_id_for
+from services.digital_employee.lion_agent_adapter import (
+    identity_only_memory,
+    stream_prompt_events,
+    workspace_id_for,
+)
+from services.warroom.aioe_credentials import build_warroom_aioe_credentials
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     CACHE,
@@ -1189,8 +1194,9 @@ class ChatManager:
             raise RuntimeError(payload.get("message") or payload)
         return has_content
 
-    async def _execute_lion_agent_task(self, user_id: str, tenant_id: str, current_room_id: str, content: str, message_data: dict, stream_id: str):
+    async def _execute_lion_agent_task(self, user: Account, tenant_id: str, current_room_id: str, content: str, message_data: dict, stream_id: str):
         """在后台执行 AI 任务（独立于 websocket 连接）"""
+        user_id = str(user.id)
         lock_key = f"{tenant_id}:{current_room_id}"
         lock = self.ai_task_locks.setdefault(lock_key, asyncio.Lock())
         try:
@@ -1219,6 +1225,8 @@ class ChatManager:
                     session_id=current_room_id,
                     request_id=stream_id,
                     message=full_message,
+                    memory=identity_only_memory(tenant_id),
+                    aioe=build_warroom_aioe_credentials(user, tenant_id),
                     llm=llm,
                 ):
                     has_content = await self._publish_ai_stream_event(event_type, payload, user_id, tenant_id, current_room_id, stream_id) or has_content
@@ -1294,7 +1302,7 @@ class ChatManager:
 
         # 使用后台任务执行 lion_agent，避免 websocket 断开时任务被取消
         # 这样即使用户断开连接，lion_agent 也会继续执行，结果通过 Redis Pub/Sub 发送
-        asyncio.create_task(self._execute_lion_agent_task(user_id=user.id, tenant_id=tenant_id, current_room_id=current_room_id, content=content, message_data=message_data, stream_id=stream_id))
+        asyncio.create_task(self._execute_lion_agent_task(user=user, tenant_id=tenant_id, current_room_id=current_room_id, content=content, message_data=message_data, stream_id=stream_id))
         logger.info(f"lion_agent 后台任务已启动，room_id={current_room_id}")
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):

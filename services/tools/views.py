@@ -130,6 +130,11 @@ def _resource_permission_subject_map(value):
     return subject_map_list
 
 
+def _normalize_selected_action_names(actions):
+    selected_actions = {str(action) for action in actions if str(action)}
+    return {"all"} if "all" in selected_actions else selected_actions
+
+
 def _grant_resource_subject(permission, field_name, resource_id, subject_id):
     subject_map_list = _resource_permission_subject_map(
         getattr(permission, field_name, None)
@@ -2576,7 +2581,7 @@ async def add_permission(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
     users_id = list(set(users_id))
     roles_id = list(set(roles_id))
-    selected_actions = {str(action) for action in actions if str(action)}
+    selected_actions = _normalize_selected_action_names(actions)
     if not selected_actions:
         raise CustomError(ErrorCode.PARAM_ERROR)
     resource_id = str(resource_id)
