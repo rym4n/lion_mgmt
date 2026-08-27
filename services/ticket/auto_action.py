@@ -11,6 +11,11 @@ from libs.utils import gen_run_id
 from settings import TASK_TOPIC
 
 
+def _int_setting(action: dict, key: str, default: int) -> int:
+    value = action.get(key)
+    return int(default if value in (None, "") else value)
+
+
 def _build_params(action: dict) -> dict:
     return {
         "resource": action.get("resource", ""),
@@ -21,8 +26,8 @@ def _build_params(action: dict) -> dict:
         "app_ver": action.get("app_ver") or action.get("version", ""),
         "main": action.get("main") or action.get("tool_main", ""),
         "action_input": action.get("action_input") or {},
-        "retry_times": int(action.get("retry_times") or 3),
-        "timeout": int(action.get("timeout") or 300),
+        "retry_times": _int_setting(action, "retry_times", 3),
+        "timeout": _int_setting(action, "timeout", 300),
     }
 
 

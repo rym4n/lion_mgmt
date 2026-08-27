@@ -1,10 +1,11 @@
 # coding=utf-8
 
-import inspect
-import orjson
 from datetime import datetime, timezone
+import inspect
+from pathlib import Path
 from types import SimpleNamespace
 
+import orjson
 import pytest
 from tortoise.expressions import Q
 
@@ -343,6 +344,36 @@ def test_batch_entrypoints_offer_summary_only_responses():
     query_source = inspect.getsource(warroom_views.query_messages)
     assert "compact_runlogs" in query_source
     assert "runlog_batch_summaries" in query_source
+
+
+def test_event_runlog_batch_query_has_a_covering_scope_index():
+    from models.runlog import Runlog
+
+    assert (
+        "tenant_id",
+        "event_id",
+        "deleted",
+        "run_id",
+        "start_time",
+        "ctime",
+        "id",
+    ) in Runlog._meta.indexes
+
+    migration = (
+        Path(__file__).parents[1]
+        / "migrations/models/121_20260827120000_runlog_event_batch_index.py"
+    ).read_text(encoding="utf-8")
+    assert '"idx_runlog_tenant__ade788"' in migration
+    for column in (
+        '"tenant_id"',
+        '"event_id"',
+        '"deleted"',
+        '"run_id"',
+        '"start_time" DESC',
+        '"ctime" DESC',
+        '"id"',
+    ):
+        assert column in migration
 
 
 @pytest.mark.asyncio

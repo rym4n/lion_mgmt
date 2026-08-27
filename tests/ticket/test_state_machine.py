@@ -2,6 +2,8 @@
 """状态机。转移合法性与下一跳计算是纯函数，优先用它们锁住语义；
 带事务的 advance_ticket 用 monkeypatch 驱动（行锁本身靠 UAT 验证）。"""
 
+from datetime import datetime
+
 import pytest
 
 from core.error_code import ErrorCode
@@ -129,6 +131,69 @@ def test_condition_picks_exactly_one_edge():
     result = engine.next_node_ids(CONDITION, "cond", NODE_STATUS_APPROVED,
                                   {"amount": 5000})
     assert len(result) == 1
+
+
+def test_playbook_style_condition_array_routes_yes_and_no_branches():
+    flow = {
+        "nodes": [
+            {
+                "id": "cond",
+                "type": "condition",
+                "conditions": [
+                    {"name": "${amount}", "type": ">=", "value": "1000"},
+                    {
+                        "name": "region",
+                        "type": "in",
+                        "value": '["cn-east", "cn-north"]',
+                        "connect_type": "&&",
+                    },
+                ],
+            },
+            {"id": "yes", "type": "approve"},
+            {"id": "no", "type": "approve"},
+        ],
+        "edges": [
+            {"source": "cond", "target": "yes", "branch": "yes"},
+            {"source": "cond", "target": "no", "branch": "no", "default": True},
+        ],
+    }
+
+    assert engine.next_node_ids(
+        flow,
+        "cond",
+        NODE_STATUS_APPROVED,
+        {"amount": 1200, "region": "cn-east"},
+    ) == ["yes"]
+    assert engine.next_node_ids(
+        flow,
+        "cond",
+        NODE_STATUS_APPROVED,
+        {"amount": 1200, "region": "eu-west"},
+    ) == ["no"]
+
+
+@pytest.mark.parametrize(
+    ("condition", "form_data", "expected"),
+    [
+        ({"name": "value", "type": "not contains", "value": "x"}, {"value": "abc"}, True),
+        ({"name": "value", "type": "starts with", "value": "ab"}, {"value": "abc"}, True),
+        ({"name": "value", "type": "ends with", "value": "bc"}, {"value": "abc"}, True),
+        ({"name": "value", "type": "exists", "value": ""}, {"value": None}, True),
+        ({"name": "missing", "type": "!exists", "value": ""}, {}, True),
+        ({"name": "value", "type": "is null", "value": ""}, {"value": None}, True),
+        ({"name": "value", "type": "matches", "value": "^a"}, {"value": "abc"}, True),
+        ({"name": "ip", "type": "in cidr", "value": "10.0.0.0/8"}, {"ip": "10.1.2.3"}, True),
+    ],
+)
+def test_playbook_style_condition_operators(condition, form_data, expected):
+    assert engine._eval_condition(condition, form_data) is expected
+
+
+def test_playbook_style_condition_coerces_form_string_values():
+    assert engine._eval_condition(
+        {"name": "amount", "type": "==", "value": "1000"},
+        {"amount": "1000"},
+    )
 
 
 def test_missing_field_uses_default_branch():
@@ -322,6 +387,56 @@ async def test_activate_auto_node_enters_running_directly(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_activate_condition_node_completes_and_routes_immediately(monkeypatch):
+    flow = {
+        "nodes": [
+            {
+                "id": "condition",
+                "type": "condition",
+                "conditions": [
+                    {"name": "amount", "type": ">=", "value": "1000"}
+                ],
+            },
+            {"id": "approval", "type": "approve"},
+        ],
+        "edges": [
+            {
+                "source": "condition",
+                "target": "approval",
+                "branch": "yes",
+            }
+        ],
+    }
+    ticket = make_ticket(form_data={"amount": 1200})
+    nodes = []
+    fakes = _install_engine_fakes(monkeypatch, ticket, nodes=nodes)
+
+    await engine.activate_nodes(
+        ticket,
+        ["condition"],
+        flow,
+        form_data=ticket.form_data,
+    )
+
+    assert [row["node_id"] for row in fakes.created] == [
+        "condition",
+        "approval",
+    ]
+    assert nodes[0].status == NODE_STATUS_APPROVED
+    assert nodes[0].completed_at is not None
+    assert nodes[1].status == NODE_STATUS_PENDING
+
+
+def test_auto_action_config_preserves_explicit_zero_retries():
+    from services.ticket.auto_action import _build_params
+
+    params = _build_params({"retry_times": 0, "timeout": 60})
+
+    assert params["retry_times"] == 0
+    assert params["timeout"] == 60
+
+
+@pytest.mark.asyncio
 async def test_dispatch_auto_node_saves_run_id_in_transaction(monkeypatch):
     from services.ticket import auto_action
 
@@ -371,6 +486,52 @@ async def test_resolve_node_approvers_uses_transaction_connection(monkeypatch):
     assert query.using_db_calls == [connection]
     assert node.approvers.added == [account]
     assert node.approvers.added_using_db == [connection]
+
+
+@pytest.mark.asyncio
+async def test_resolve_node_approvers_merges_users_and_roles(monkeypatch):
+    import models
+
+    ticket = make_ticket()
+    node = make_node(node_id="ap1", status=NODE_STATUS_PENDING)
+    account_a = make_account("a")
+    account_b = make_account("b")
+    connection = object()
+    filters = []
+
+    class _FakeAccount:
+        @staticmethod
+        def filter(**kwargs):
+            filters.append(kwargs)
+            if "roles__id__in" in kwargs:
+                return FakeQuery([account_b])
+            return FakeQuery([account_a, account_b])
+
+    async def _record_activity(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(models, "Account", _FakeAccount)
+    monkeypatch.setattr(engine, "record_activity", _record_activity)
+
+    await engine.resolve_node_approvers(
+        ticket,
+        node,
+        {"approvers": ["a"], "roles": ["role-1"]},
+        connection,
+    )
+
+    assert filters[0]["roles__tenant_id"] == ticket.tenant_id
+    assert {account.id for account in node.approvers.added} == {"a", "b"}
+    assert node.approvers.added_using_db == [connection]
+
+
+def test_node_deadline_accepts_playbook_style_expire_time():
+    now = datetime(2026, 8, 27, 12, 0, 0)
+
+    assert engine._node_deadline({"expire_time": 3600}, now) == datetime(
+        2026, 8, 27, 13, 0, 0
+    )
+    assert engine._node_deadline({"expire_time": 0}, now) is None
 
 
 @pytest.mark.asyncio
@@ -543,6 +704,14 @@ def _install_engine_fakes(monkeypatch, ticket, nodes, flow=None, flow_version=No
             node.approvers = __import__(
                 "tests.ticket.conftest", fromlist=["FakeM2M"]
             ).FakeM2M()
+            node.saved = []
+            node.saved_using_db = []
+
+            async def _save(update_fields=None, using_db=None):
+                node.saved.append(tuple(update_fields or ()))
+                node.saved_using_db.append(using_db)
+
+            node.save = _save
             nodes.append(node)
             return node
 

@@ -14,8 +14,11 @@
    越过汇聚后回来推进一个已终态工单。
 """
 
-from datetime import datetime
 import inspect
+import ipaddress
+import json
+import re
+from datetime import datetime
 
 from tortoise.transactions import in_transaction
 
@@ -50,6 +53,8 @@ from services.ticket.sla_scheduler import calculate_sla
 from settings import TZ
 
 _REJECT_LIKE = (NODE_STATUS_REJECTED, NODE_STATUS_TIMEOUT)
+_MISSING = object()
+_TEMPLATE_PATTERN = re.compile(r"^(?:\$\{|\{\{)\s*([^{}]+?)\s*(?:\}|\}\})$")
 
 
 def can_transition_ticket(current: int, target: int) -> bool:
@@ -122,35 +127,159 @@ def _out_edges(flow_json, node_id) -> list[dict]:
     return [e for e in (flow_json or {}).get("edges", []) if e.get("source") == node_id]
 
 
-def _eval_condition(condition: dict, form_data: dict) -> bool:
-    """条件求值。字段缺失一律返回 False，让流程落到默认分支。"""
-    if not condition:
+def _definition_value(definition: dict, key: str, default=None):
+    value = definition.get(key)
+    if value is not None:
+        return value
+    properties = definition.get("properties")
+    if isinstance(properties, dict):
+        return properties.get(key, default)
+    return default
+
+
+def _lookup_form_value(form_data: dict, field) -> object:
+    if not isinstance(field, str) or not field:
+        return _MISSING
+    field = field.strip()
+    match = _TEMPLATE_PATTERN.fullmatch(field)
+    if match:
+        field = match.group(1).strip()
+    if field in form_data:
+        return form_data[field]
+    current: object = form_data
+    for part in field.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return _MISSING
+        current = current[part]
+    return current
+
+
+def _coerce_condition_value(value):
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    lower = stripped.lower()
+    if lower == "true":
+        return True
+    if lower == "false":
         return False
-    actual = (form_data or {}).get(condition.get("field"))
-    expected = condition.get("value")
-    op = condition.get("op", "eq")
-    if actual is None:
-        return False
+    if lower in {"null", "none"}:
+        return None
     try:
-        if op == "eq":
-            return actual == expected
-        if op == "ne":
-            return actual != expected
-        if op == "gt":
-            return float(actual) > float(expected)
-        if op == "gte":
-            return float(actual) >= float(expected)
-        if op == "lt":
-            return float(actual) < float(expected)
-        if op == "lte":
-            return float(actual) <= float(expected)
-        if op == "in":
-            return actual in (expected or [])
-        if op == "contains":
-            return str(expected) in str(actual)
+        return json.loads(stripped)
     except (TypeError, ValueError):
+        if "," in stripped:
+            return [
+                _coerce_condition_value(item)
+                for item in stripped.split(",")
+                if item.strip()
+            ]
+        return stripped.strip('"').strip("'")
+
+
+def _condition_expected(value, form_data: dict):
+    if isinstance(value, str) and _TEMPLATE_PATTERN.fullmatch(value.strip()):
+        resolved = _lookup_form_value(form_data, value)
+        return None if resolved is _MISSING else resolved
+    return _coerce_condition_value(value)
+
+
+def _eval_condition(condition: dict, form_data: dict) -> bool:
+    """Evaluate both legacy ticket conditions and playbook-style rules."""
+    if not isinstance(condition, dict) or not condition:
+        return False
+    field = condition.get("field")
+    if field is None:
+        field = condition.get("name")
+    actual = _lookup_form_value(form_data or {}, field)
+    expected = _condition_expected(condition.get("value"), form_data or {})
+    op = str(condition.get("op") or condition.get("type") or "==").lower()
+    op = {
+        "eq": "==",
+        "ne": "!=",
+        "gt": ">",
+        "gte": ">=",
+        "lt": "<",
+        "lte": "<=",
+    }.get(op, op)
+    if op == "exists":
+        return actual is not _MISSING
+    if op == "!exists":
+        return actual is _MISSING
+    if op == "is null":
+        return actual is _MISSING or actual is None or actual == ""
+    if op == "is not null":
+        return actual is not _MISSING and actual is not None and actual != ""
+    if actual is _MISSING:
+        return False
+    actual = _coerce_condition_value(actual)
+    try:
+        if op == "==":
+            return actual == expected
+        if op == "!=":
+            return actual != expected
+        if op in {">", ">=", "<", "<="}:
+            left, right = actual, expected
+            try:
+                left, right = float(actual), float(expected)
+            except (TypeError, ValueError):
+                pass
+            if op == ">":
+                return left > right
+            if op == ">=":
+                return left >= right
+            if op == "<":
+                return left < right
+            return left <= right
+        if op == "in":
+            return actual in expected
+        if op == "not in":
+            return actual not in expected
+        if op == "contains":
+            return expected in actual
+        if op == "not contains":
+            return expected not in actual
+        if op == "starts with":
+            return str(actual).startswith(str(expected))
+        if op == "ends with":
+            return str(actual).endswith(str(expected))
+        if op == "matches":
+            return re.match(str(expected), str(actual)) is not None
+        if op == "in cidr":
+            networks = expected if isinstance(expected, list) else [expected]
+            return any(
+                ipaddress.ip_address(actual) in ipaddress.ip_network(network)
+                for network in networks
+            )
+        if op == "not in cidr":
+            networks = expected if isinstance(expected, list) else [expected]
+            return all(
+                ipaddress.ip_address(actual) not in ipaddress.ip_network(network)
+                for network in networks
+            )
+    except (TypeError, ValueError, re.error):
         return False
     return False
+
+
+def _eval_conditions(conditions, form_data: dict) -> bool:
+    if not isinstance(conditions, list) or not conditions:
+        return False
+    result = _eval_condition(conditions[0], form_data)
+    for condition in conditions[1:]:
+        current = _eval_condition(condition, form_data)
+        if condition.get("connect_type") == "||":
+            result = result or current
+        else:
+            result = result and current
+    return result
+
+
+def _edge_value(edge: dict, key: str):
+    if edge.get(key) is not None:
+        return edge.get(key)
+    properties = edge.get("properties")
+    return properties.get(key) if isinstance(properties, dict) else None
 
 
 def next_node_ids(flow_json, node_id, outcome, form_data) -> list[str]:
@@ -162,19 +291,40 @@ def next_node_ids(flow_json, node_id, outcome, form_data) -> list[str]:
     if not edges:
         return []
     if node.get("type") == NODE_TYPE_CONDITION:
+        conditions = _definition_value(node, "conditions", [])
+        if conditions:
+            wanted = "yes" if _eval_conditions(conditions, form_data) else "no"
+            for edge in edges:
+                if _edge_value(edge, "branch") == wanted:
+                    return [edge["target"]]
+            if wanted == "yes":
+                for edge in edges:
+                    if not _edge_value(edge, "default"):
+                        return [edge["target"]]
+            else:
+                for edge in edges:
+                    if _edge_value(edge, "default"):
+                        return [edge["target"]]
+            return []
         for edge in edges:
-            if edge.get("condition") and _eval_condition(edge["condition"], form_data):
+            condition = _edge_value(edge, "condition")
+            matches = (
+                _eval_conditions(condition, form_data)
+                if isinstance(condition, list)
+                else _eval_condition(condition, form_data)
+            )
+            if condition and matches:
                 return [edge["target"]]
         for edge in edges:
-            if edge.get("default"):
+            if _edge_value(edge, "default"):
                 return [edge["target"]]
         return []
 
     wanted = "reject" if outcome in _REJECT_LIKE else "approve"
-    labelled = [e for e in edges if e.get("on")]
+    labelled = [e for e in edges if _edge_value(e, "on")]
     if labelled:
-        picked = [e["target"] for e in labelled if e.get("on") == wanted]
-        return picked or [e["target"] for e in edges if not e.get("on")]
+        picked = [e["target"] for e in labelled if _edge_value(e, "on") == wanted]
+        return picked or [e["target"] for e in edges if not _edge_value(e, "on")]
     return [e["target"] for e in edges]
 
 
@@ -241,17 +391,31 @@ async def mark_node_abnormal(node, ticket, reason, connection=None) -> None:
 def _node_deadline(definition, now):
     from datetime import timedelta
 
-    duration = ((definition.get("sla") or {}).get("duration"))
-    return now + timedelta(seconds=int(duration)) if duration else None
+    duration = (definition.get("sla") or {}).get("duration")
+    if duration is None:
+        duration = _definition_value(definition, "expire_time")
+    try:
+        seconds = int(duration)
+    except (TypeError, ValueError):
+        return None
+    return now + timedelta(seconds=seconds) if seconds > 0 else None
 
 
-async def activate_nodes(ticket, node_ids, flow_json, connection=None) -> list:
+async def activate_nodes(
+    ticket,
+    node_ids,
+    flow_json,
+    connection=None,
+    form_data=None,
+    condition_path=frozenset(),
+) -> list:
     now = datetime.now(TZ)
     activated = []
     for node_id in node_ids:
         definition = _node_def(flow_json, node_id) or {}
         node_type = definition.get("type") or "approve"
         is_auto = node_type == NODE_TYPE_AUTO
+        is_condition = node_type == NODE_TYPE_CONDITION
         instance = await TicketNodeInstance.create(
             using_db=connection,
             tenant_id=ticket.tenant_id,
@@ -271,11 +435,68 @@ async def activate_nodes(ticket, node_ids, flow_json, connection=None) -> list:
             payload={"node_id": node_id}, connection=connection,
         )
         activated.append(instance)
-        if is_auto:
+        if is_condition:
+            if node_id in condition_path:
+                await mark_node_abnormal(
+                    instance,
+                    ticket,
+                    "判断节点形成循环，流程无法继续",
+                    connection,
+                )
+                continue
+            condition_form_data = dict(ticket.form_data or {})
+            condition_form_data.update(form_data or {})
+            targets = next_node_ids(
+                flow_json,
+                node_id,
+                NODE_STATUS_APPROVED,
+                condition_form_data,
+            )
+            if not targets:
+                await mark_node_abnormal(
+                    instance,
+                    ticket,
+                    "判断节点无有效后继",
+                    connection,
+                )
+                continue
+            instance.status = NODE_STATUS_APPROVED
+            instance.completed_at = now
+            await instance.save(
+                update_fields=["status", "completed_at", "utime"],
+                using_db=connection,
+            )
+            await record_activity(
+                ticket,
+                "approve",
+                content=f"判断节点完成：{instance.node_name}",
+                node_instance=instance,
+                payload={"node_id": node_id, "targets": targets},
+                connection=connection,
+            )
+            terminal = _terminal_status_for(flow_json, targets)
+            if terminal is not None:
+                await _close_ticket(ticket, terminal, None, connection)
+            else:
+                activated.extend(
+                    await activate_nodes(
+                        ticket,
+                        targets,
+                        flow_json,
+                        connection=connection,
+                        form_data=condition_form_data,
+                        condition_path=condition_path | {node_id},
+                    )
+                )
+        elif is_auto:
             result = dispatch_auto_node(ticket, instance, definition, connection)
             if inspect.isawaitable(result):
                 await result
-        elif definition.get("approvers") or definition.get("approver_action"):
+        elif (
+            _definition_value(definition, "approvers", [])
+            or _definition_value(definition, "roles", [])
+            or _definition_value(definition, "approver_action")
+        ):
             await resolve_node_approvers(ticket, instance, definition, connection)
     return activated
 
@@ -283,30 +504,57 @@ async def activate_nodes(ticket, node_ids, flow_json, connection=None) -> list:
 async def resolve_node_approvers(ticket, node, definition, connection=None) -> None:
     from models import Account
 
-    static_ids = definition.get("approvers") or []
-    dynamic = definition.get("approver_action")
+    candidate_ids = list(
+        dict.fromkeys(_definition_value(definition, "approvers", []) or [])
+    )
+    candidate_id_set = set(candidate_ids)
+    role_ids = _definition_value(definition, "roles", []) or []
+    if role_ids:
+        role_accounts = await Account.filter(
+            roles__id__in=role_ids,
+            roles__tenant_id=ticket.tenant_id,
+            roles__deleted=False,
+            tenant_id=ticket.tenant_id,
+            deleted=False,
+        ).using_db(connection).all()
+        for account in role_accounts:
+            if account.id not in candidate_id_set:
+                candidate_ids.append(account.id)
+                candidate_id_set.add(account.id)
+    dynamic = _definition_value(definition, "approver_action")
     if dynamic:
         try:
-            candidate_ids = await resolve_dynamic_approvers(ticket, dynamic)
+            for account_id in await resolve_dynamic_approvers(ticket, dynamic):
+                if account_id not in candidate_id_set:
+                    candidate_ids.append(account_id)
+                    candidate_id_set.add(account_id)
         except Exception as exc:
             await mark_node_abnormal(node, ticket, f"动态审批人解析失败：{exc}", connection)
             return
-    else:
-        candidate_ids = static_ids
     if not candidate_ids:
         await mark_node_abnormal(node, ticket, "节点未解析出有效审批人", connection)
         return
     rows = await Account.filter(
         id__in=candidate_ids, tenant_id=ticket.tenant_id, deleted=False,
     ).using_db(connection).all()
+    rows_by_id = {account.id: account for account in rows}
+    ordered_rows = [
+        rows_by_id[account_id]
+        for account_id in candidate_ids
+        if account_id in rows_by_id
+    ]
     valid = validators.effective_approver_ids(
-        [(a.id, not getattr(a, "disabled", False)) for a in rows]
+        [
+            (account.id, not getattr(account, "disabled", False))
+            for account in ordered_rows
+        ]
     )
     if not valid:
         await mark_node_abnormal(node, ticket, "审批人均无效或不属于当前租户", connection)
         return
     await node.approvers.add(
-        *[a for a in rows if a.id in valid], using_db=connection,
+        *[account for account in ordered_rows if account.id in valid],
+        using_db=connection,
     )
     await record_activity(
         ticket, "assign", content="审批人已绑定", node_instance=node,
@@ -461,7 +709,13 @@ async def advance_ticket(
         if terminal is not None:
             await _close_ticket(ticket, terminal, actor_id, conn)
         elif targets:
-            await activate_nodes(ticket, targets, flow_json, conn)
+            await activate_nodes(
+                ticket,
+                targets,
+                flow_json,
+                connection=conn,
+                form_data=form_data,
+            )
         elif node is not None:
             await mark_node_abnormal(ticket=ticket, node=node,
                                      reason="节点无有效后继", connection=conn)
@@ -602,7 +856,13 @@ async def return_to_node(ticket, return_target, actor_id, connection):
         target_node_ids = [return_target]
 
     # 4. 激活目标节点
-    await activate_nodes(ticket, target_node_ids, flow_json, connection=connection)
+    await activate_nodes(
+        ticket,
+        target_node_ids,
+        flow_json,
+        connection=connection,
+        form_data=dict(ticket.form_data or {}),
+    )
 
     # 5. 记录活动
     await record_activity(

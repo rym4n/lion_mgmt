@@ -386,8 +386,13 @@ def validate_flow_structure(flow_json: dict) -> list[dict]:
                     "message": "自动节点未配置动作",
                 })
         elif node.get("type") == "approve":
-            approvers = node.get("approvers") or []
-            if not approvers and not node.get("approver_action"):
+            properties = node.get("properties") or {}
+            approvers = node.get("approvers") or properties.get("approvers") or []
+            roles = node.get("roles") or properties.get("roles") or []
+            approver_action = (
+                node.get("approver_action") or properties.get("approver_action")
+            )
+            if not approvers and not roles and not approver_action:
                 errors.append({
                     "level": "warning",
                     "node_id": node["id"],

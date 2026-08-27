@@ -189,6 +189,24 @@ def test_flow_structure_rejects_edges_into_start_or_out_of_end():
     assert "开始节点不能作为连线终点" in messages
 
 
+def test_flow_structure_accepts_approval_role_without_static_user():
+    flow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "approve", "type": "approve", "roles": ["role-1"]},
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [
+            {"source": "start", "target": "approve"},
+            {"source": "approve", "target": "end"},
+        ],
+    }
+
+    messages = [error["message"] for error in validate_flow_structure(flow)]
+
+    assert "审批节点未配置审批人" not in messages
+
+
 def test_node_form_fields_extend_the_flow_field_namespace():
     flow = _flow(
         {
