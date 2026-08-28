@@ -470,6 +470,62 @@ def test_metrics_detail_filters_to_requested_middleware(monkeypatch):
     assert "connected_clients" not in result["data"][0]
 
 
+def test_metrics_detail_falls_back_to_health_check_resource_metrics(monkeypatch):
+    calls = []
+
+    async def fake_query_vlog(query, **kwargs):
+        calls.append((query, kwargs))
+        if 'log_type:"middleware_metrics"' in query:
+            return []
+        return [
+            {
+                "log_ip": "192.0.2.10",
+                "ctime": "2026-08-25T07:05:00+0000",
+                "data.lion-db.cpu_percent": "1.25%",
+                "data.lion-db.mem_percent": "26.50%",
+            },
+            {
+                "log_ip": "192.0.2.10",
+                "_msg": (
+                    '{"log_ip":"192.0.2.10","ctime":"2026-08-25T15:00:00+0800",'
+                    '"log_type":"health_check","data":{"lion-db":'
+                    '{"cpu_percent":"0.75%","mem_percent":"25.00%"}}}'
+                ),
+            },
+        ]
+
+    monkeypatch.setattr(system_views, "query_vlog", fake_query_vlog)
+    monkeypatch.setattr(system_views, "response_ok", lambda data: {"data": data})
+
+    result = _run(
+        system_views.get_metrics_detail,
+        SimpleNamespace(
+            json={
+                "host": "192.0.2.10",
+                "middleware": "lion-db",
+                "start_time": "2026-08-25T07:00:00Z",
+                "end_time": "2026-08-25T07:30:00Z",
+            }
+        ),
+    )
+
+    assert len(calls) == 2
+    assert 'log_type:"health_check"' in calls[1][0]
+    assert calls[1][1]["limit"] == 115
+    assert result["data"] == [
+        {
+            "timestamp": "2026-08-25 15:00:00",
+            "cpu_percent": 0.75,
+            "mem_percent": 25.0,
+        },
+        {
+            "timestamp": "2026-08-25 15:05:00",
+            "cpu_percent": 1.25,
+            "mem_percent": 26.5,
+        },
+    ]
+
+
 def test_metrics_detail_returns_empty_for_unknown_middleware(monkeypatch):
     async def fake_query_vlog(query, **kwargs):
         return [
