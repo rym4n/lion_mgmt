@@ -893,20 +893,7 @@ _MIDDLEWARE_CONTAINERS = ("lion-redis", "lion-db", "lion-mq", "lion-vl", "lion-f
 # Middleware metrics are collected every five minutes. Keep enough rows for
 # the requested range while bounding an accidentally huge query.
 _METRICS_POINTS_PER_HOUR = 12
-_HEALTH_POINTS_PER_HOUR = 30
 _METRICS_QUERY_LIMIT_MAX = 20000
-
-
-def _parse_percent_metric(value):
-    """Return a numeric percentage from health-check strings such as ``1.25%``."""
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return value
-    if not isinstance(value, str):
-        return None
-    try:
-        return float(value.strip().removesuffix("%"))
-    except ValueError:
-        return None
 
 
 @system_bp.post("/metrics/overview")
@@ -981,8 +968,8 @@ async def get_metrics_overview(request):
 
 @system_bp.post("/metrics/detail")
 @openapi.definition(
-    summary="查询服务性能指标历史",
-    description="返回指定主机与服务的指标时间序列，需要系统状态查看权限",
+    summary="查询中间件性能指标历史",
+    description="返回指定主机与中间件的指标时间序列，需要系统状态查看权限",
     body={
         "application/json": {
             "schema": {
@@ -990,7 +977,7 @@ async def get_metrics_overview(request):
                 "required": ["host", "middleware", "start_time", "end_time"],
                 "properties": {
                     "host": {"type": "string", "description": "主机IP地址"},
-                    "middleware": {"type": "string", "description": "服务容器名"},
+                    "middleware": {"type": "string", "description": "中间件容器名"},
                     "start_time": {"type": "string"},
                     "end_time": {"type": "string"},
                 },
@@ -1063,42 +1050,6 @@ async def get_metrics_detail(request):
         point = {"timestamp": _format_check_time(ctime)}
         point.update(metrics)
         points.append(point)
-
-    # aioe_package installs the detailed host collector. Health checks provide
-    # CPU/memory history when an older installation does not have it yet.
-    if not points:
-        health_required_points = int(span_hours * _HEALTH_POINTS_PER_HOUR + 0.999999)
-        health_limit = min(
-            max(health_required_points + 100, 100),
-            _METRICS_QUERY_LIMIT_MAX,
-        )
-        health_query = f'log_type:"health_check" AND log_ip:"{host}" | first {health_limit} by (_time desc)'
-        health_data = await query_vlog(
-            health_query,
-            project_id=0,
-            start=start_iso,
-            end=end_iso,
-            limit=health_limit,
-        )
-        for log_data in health_data or []:
-            data, ctime = _health_log_data(log_data)
-            service_data = data.get(middleware)
-            if not isinstance(service_data, dict):
-                continue
-
-            cpu_percent = _parse_percent_metric(service_data.get("cpu_percent"))
-            mem_percent = _parse_percent_metric(service_data.get("mem_percent"))
-            if cpu_percent is None and mem_percent is None:
-                continue
-
-            if not ctime:
-                ctime = log_data.get("timestamp", log_data.get("_time", ""))
-            point = {"timestamp": _format_check_time(ctime)}
-            if cpu_percent is not None:
-                point["cpu_percent"] = cpu_percent
-            if mem_percent is not None:
-                point["mem_percent"] = mem_percent
-            points.append(point)
 
     if not points:
         return response_ok([])
