@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 from asyncio.base_events import BaseEventLoop
+from time import perf_counter
 import traceback
 
 from sanic import Sanic
@@ -10,26 +11,39 @@ from .base import BaseListener
 
 
 class CommandCenterListener(BaseListener):
-    async def before_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
-        from services.command_center.run_manager import recover_stale_runs
-
-        try:
-            recovered = await recover_stale_runs()
-            if recovered:
-                logger.info(f"指挥中心过期运行恢复完成: count={len(recovered)}")
-        except Exception as exc:
-            logger.warning(f"指挥中心过期运行恢复失败: {exc} | {traceback.format_exc()}")
-
-        try:
-            from services.command_center.manager import reconcile_agent_workloads
-
-            reconciled = await reconcile_agent_workloads()
-            if reconciled:
-                logger.info(f"指挥中心员工负载对账完成: count={reconciled}")
-        except Exception as exc:
-            logger.warning(f"指挥中心员工负载对账失败: {exc} | {traceback.format_exc()}")
-
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
+        async def _run_startup_recovery() -> None:
+            from services.command_center.manager import reconcile_agent_workloads
+            from services.command_center.run_manager import recover_stale_runs
+
+            started_at = perf_counter()
+            try:
+                recovered = await recover_stale_runs()
+                if recovered:
+                    logger.info(f"指挥中心过期运行恢复完成: count={len(recovered)}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    f"指挥中心过期运行恢复失败: {exc} | {traceback.format_exc()}"
+                )
+
+            try:
+                reconciled = await reconcile_agent_workloads()
+                if reconciled:
+                    logger.info(f"指挥中心员工负载对账完成: count={reconciled}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    f"指挥中心员工负载对账失败: {exc} | {traceback.format_exc()}"
+                )
+            finally:
+                logger.info(
+                    "指挥中心启动恢复任务结束: duration=%.3fs",
+                    perf_counter() - started_at,
+                )
+
         async def _recover_approval_resumes() -> None:
             from settings import COMMAND_TASK_SWEEP_INTERVAL_SECONDS
             from services.command_center.approval_service import recover_pending_approval_resumes
@@ -93,11 +107,13 @@ class CommandCenterListener(BaseListener):
                 except Exception as exc:
                     logger.warning(f"指挥中心派单超时清扫异常: {exc} | {traceback.format_exc()}")
 
+        app.add_task(_run_startup_recovery(), name="command_center_startup_recovery")
         app.add_task(_recover_approval_resumes(), name="command_center_approval_resume_recovery")
         app.add_task(_sweep_stale_dispatch_tasks(), name="command_center_dispatch_timeout_sweeper")
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
         for task_name in (
+            "command_center_startup_recovery",
             "command_center_approval_resume_recovery",
             "command_center_dispatch_timeout_sweeper",
         ):

@@ -49,7 +49,12 @@ async def aconsume(topic, group_id, callback_func=None, consume_records=500):
     ) as consumer:
         while True:
             try:
-                msg_set = await consumer.getmany(max_records=int(consume_records))
+                msg_set = await consumer.getmany(
+                    timeout_ms=1000,
+                    max_records=int(consume_records),
+                )
+                if not any(msgs for msgs in msg_set.values()):
+                    continue
                 for _, msgs in msg_set.items():
                     if callback_func:
                         await callback_func(msgs)
@@ -66,4 +71,3 @@ async def aconsume(topic, group_id, callback_func=None, consume_records=500):
                 await consumer.start()
             except Exception as err2:
                 logger.error(f"{err2} | {traceback.format_exc()}")
-                await consumer.commit()

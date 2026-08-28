@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional, Union
 import orjson
 from croniter import croniter
 from docxtpl import DocxTemplate
-from litellm import acompletion
 from sanic.log import logger
 from tortoise.expressions import Q
 
@@ -55,6 +54,12 @@ _INSPECTION_SAMPLE_PROFILES = (
     (5, 10, 2, 160),
     (4, 8, 1, 100),
 )
+
+
+async def _acompletion(**kwargs):
+    from litellm import acompletion
+
+    return await acompletion(**kwargs)
 
 
 def is_valid_schedule_cron(value: Any) -> bool:
@@ -1107,7 +1112,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
 
     for attempt in range(max_retries):
         try:
-            response = await acompletion(**completion_params)
+            response = await _acompletion(**completion_params)
 
             # 解析AI返回的JSON
             ai_response = response.choices[0].message.content

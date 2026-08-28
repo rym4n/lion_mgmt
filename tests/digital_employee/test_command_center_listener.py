@@ -138,8 +138,10 @@ def test_command_center_listener_runs_startup_resume_recovery():
 
     async def scenario():
         app = App()
-        await module.CommandCenterListener().before_server_start(app, asyncio.get_running_loop())
-        await module.CommandCenterListener().after_server_start(app, asyncio.get_running_loop())
+        listener = module.CommandCenterListener()
+        assert not hasattr(listener, "before_server_start")
+        await listener.after_server_start(app, asyncio.get_running_loop())
+        await app.tasks["command_center_startup_recovery"]
         await app.tasks["command_center_approval_resume_recovery"]
         await app.tasks["command_center_dispatch_timeout_sweeper"]
 
@@ -170,10 +172,16 @@ def test_startup_reconciles_workloads_when_stale_recovery_fails():
     run_manager.recover_stale_runs = fail_stale_recovery
 
     async def scenario():
-        await module.CommandCenterListener().before_server_start(App(), asyncio.get_running_loop())
+        app = App()
+        await module.CommandCenterListener().after_server_start(
+            app, asyncio.get_running_loop()
+        )
+        await app.tasks["command_center_startup_recovery"]
+        await app.cancel_task("command_center_approval_resume_recovery")
+        await app.cancel_task("command_center_dispatch_timeout_sweeper")
 
     asyncio.run(scenario())
 
-    assert manager.recovery_order == ["stale_runs_failed", "workload"]
+    assert manager.recovery_order[:2] == ["stale_runs_failed", "workload"]
     assert manager.workload_calls == [None]
     assert manager.orphan_calls == []

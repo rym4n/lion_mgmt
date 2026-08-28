@@ -1,4 +1,7 @@
 # coding=utf-8
+from types import SimpleNamespace
+import subprocess
+import sys
 import time
 
 from libs.security.license_modules import is_licensed_module_active
@@ -186,3 +189,56 @@ def test_workflow_license_also_registers_legacy_approval_compatibility_routes():
         "workflow",
         "approve",
     ]
+
+
+def test_only_active_licensed_blueprints_are_resolved(monkeypatch):
+    from services import app_factory
+
+    resolved_specs = []
+    registered_blueprints = []
+
+    def resolve(specs):
+        resolved_specs.extend(specs)
+        return tuple(SimpleNamespace(name=attribute) for _, attribute in specs)
+
+    app = SimpleNamespace(blueprint=registered_blueprints.append)
+    monkeypatch.setattr(app_factory, "_resolve_blueprints", resolve)
+    license_data = {
+        "moduleList": [
+            {
+                "module": "digital_employee_bp",
+                "auth": True,
+                "expireTime": int(time.time() * 1000) + 60_000,
+            },
+            {
+                "module": "ai_bp",
+                "auth": False,
+                "expireTime": int(time.time() * 1000) + 60_000,
+            },
+        ]
+    }
+
+    registered = app_factory._register_licensed_blueprints(app, license_data)
+
+    assert registered == {"digital_employee_bp"}
+    assert resolved_specs == [
+        ("services.digital_employee.views", "digital_employee_bp")
+    ]
+    assert [blueprint.name for blueprint in registered_blueprints] == [
+        "digital_employee_bp"
+    ]
+
+
+def test_app_factory_import_does_not_eagerly_import_litellm():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import services.app_factory; print('litellm' in sys.modules)",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip().splitlines()[-1] == "False"

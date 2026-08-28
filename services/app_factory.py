@@ -1,5 +1,8 @@
 # coding=utf-8
 
+import functools
+from importlib import import_module
+from time import perf_counter
 import traceback
 
 import orjson
@@ -8,46 +11,24 @@ from sanic.log import logger
 from sanic_ext import openapi  # noqa: F401
 from tortoise.contrib.sanic import register_tortoise
 
-import services.large_screen.views  # noqa: F401
 from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
 from core.listeners import LISTENER_TUPLE, BaseListener
 from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
 from core.openapi import configure_openapi_responses
-from libs.security.authorization import load_license
+from libs.security.authorization import get_license_sha256, load_license
 from libs.security.license_modules import is_licensed_module_active
-from services.agent.views import agent_bp
-from services.ai.views import ai_bp
-from services.asset_management.views import asset_management_bp
-from services.command_center.views import command_bp
 from services.dashboard.views import dashboard_bp
-from services.digital_employee.views import digital_employee_bp
-from services.event.views import event_bp
-from services.event_ingestion.views import event_ingestion_bp
 from services.inspection.views import inspection_bp
 from services.knowledge.views import knowledge_bp
 from services.knowledge.agent_views import knowledge_agent_bp
-from services.knowledge.embedding_views import knowledge_embedding_bp
 from services.license.views import license_bp
-from services.llm_config.views import llm_config_bp
-from services.log_view.views import logs_bp
-from services.mcp.views import mcp_bp
-from services.network_topology.views import topology_bp
-from services.network_access_control.views import network_access_control_bp
 from services.others.views import activity, all_apps, playbook_list
-from services.approvement.views import approve_bp
-from services.role.views import role_bp
 from services.scene.views import scene_bp
 from services.secure.views import secure_bp
 from services.system_config.views import system_bp
 from services.tenant.views import tenant_bp
-from services.ticket.views import ticket_bp
-from services.ticket.websocket import ticket_ws_bp
-from services.timed.views import timed_bp
-from services.tools.views import tools_bp
 from services.user.views import user_bp
-from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
-from services.workflow.views import workflow_bp
 from settings import (
     BASE_LOGGING,
     HEALTH_MAX_MISSES,
@@ -57,10 +38,55 @@ from settings import (
 )
 
 
-def create_app() -> Sanic:
+BlueprintSpec = tuple[str, str]
+
+LICENSED_BLUEPRINT_SPECS: dict[str, tuple[BlueprintSpec, ...]] = {
+    "event_bp": (("services.event.views", "event_bp"),),
+    "event_ingestion_bp": (("services.event_ingestion.views", "event_ingestion_bp"),),
+    "role_bp": (("services.role.views", "role_bp"),),
+    "timed_bp": (("services.timed.views", "timed_bp"),),
+    "tool_management_bp": (("services.tools.views", "tools_bp"),),
+    "var_bp": (("services.variables.views", "var_bp"),),
+    "workflow_bp": (
+        ("services.workflow.views", "workflow_bp"),
+        ("services.approvement.views", "approve_bp"),
+    ),
+    "logs_bp": (("services.log_view.views", "logs_bp"),),
+    "ai_bp": (
+        ("services.ai.views", "ai_bp"),
+        ("services.llm_config.views", "llm_config_bp"),
+    ),
+    "agent_bp": (("services.agent.views", "agent_bp"),),
+    "mcp_bp": (("services.mcp.views", "mcp_bp"),),
+    "command_bp": (("services.command_center.views", "command_bp"),),
+    "digital_employee_bp": (
+        ("services.digital_employee.views", "digital_employee_bp"),
+    ),
+    "knowledge_bp": (
+        ("services.knowledge.views", "knowledge_bp"),
+        ("services.knowledge.embedding_views", "knowledge_embedding_bp"),
+    ),
+    "asset_management_bp": (
+        ("services.asset_management.views", "asset_management_bp"),
+    ),
+    "network_access_control_bp": (
+        ("services.network_access_control.views", "network_access_control_bp"),
+    ),
+    "topology_bp": (("services.network_topology.views", "topology_bp"),),
+    "ticket_bp": (("services.ticket.views", "ticket_bp"),),
+}
+
+
+def create_app(process_started_at: float | None = None) -> Sanic:
+    process_started_at = (
+        process_started_at if process_started_at is not None else perf_counter()
+    )
+    create_started_at = perf_counter()
     app: Sanic = Sanic(
         "services", dumps=orjson.dumps, loads=orjson.loads, log_config=BASE_LOGGING
     )
+    app.ctx.process_started_at = process_started_at
+    app.ctx.worker_ready = False
     app.config.update_config("settings/__init__.py")
     app.extend(
         config={
@@ -75,46 +101,52 @@ def create_app() -> Sanic:
     register_exception_handler(app)
     register_blueprints(app)
     configure_openapi_responses()
+    logger.info(
+        "应用构建完成: create_app=%.3fs process_elapsed=%.3fs routes=%s",
+        perf_counter() - create_started_at,
+        perf_counter() - process_started_at,
+        len(app.router.routes),
+    )
     return app
 
 
+def _resolve_blueprints(specs: tuple[BlueprintSpec, ...]) -> tuple:
+    blueprints = []
+    for module_path, attribute in specs:
+        started_at = perf_counter()
+        module = import_module(module_path)
+        blueprints.append(getattr(module, attribute))
+        logger.info(
+            "蓝图模块导入完成: module=%s duration=%.3fs",
+            module_path,
+            perf_counter() - started_at,
+        )
+    return tuple(blueprints)
+
+
 def _licensed_blueprints() -> dict:
-    return {
-        "event_bp": event_bp,
-        "event_ingestion_bp": event_ingestion_bp,
-        "role_bp": role_bp,
-        "timed_bp": timed_bp,
-        "tool_management_bp": tools_bp,
-        "var_bp": var_bp,
-        "workflow_bp": (workflow_bp, approve_bp),
-        "logs_bp": logs_bp,
-        "ai_bp": (ai_bp, llm_config_bp),
-        "agent_bp": agent_bp,
-        "mcp_bp": mcp_bp,
-        "command_bp": command_bp,
-        "digital_employee_bp": digital_employee_bp,
-        "knowledge_bp": (knowledge_bp, knowledge_embedding_bp),
-        "asset_management_bp": asset_management_bp,
-        "network_access_control_bp": network_access_control_bp,
-        "topology_bp": topology_bp,
-        "ticket_bp": ticket_bp,
-    }
+    """Resolve every licensed blueprint for compatibility and contract tests."""
+    result = {}
+    for module, specs in LICENSED_BLUEPRINT_SPECS.items():
+        blueprints = _resolve_blueprints(specs)
+        result[module] = blueprints[0] if len(blueprints) == 1 else blueprints
+    return result
 
 
 def _register_licensed_blueprints(app: Sanic, license_data: dict) -> set[str]:
-    bp_dict = _licensed_blueprints()
     registered_modules = set()
     registered_blueprint_names = set()
     for item in license_data["moduleList"]:
         module = item.get("module")
-        if not module or module not in bp_dict or module in registered_modules:
+        if (
+            not module
+            or module not in LICENSED_BLUEPRINT_SPECS
+            or module in registered_modules
+        ):
             continue
         if not is_licensed_module_active(license_data, item):
             continue
-        blueprints = bp_dict[module]
-        if not isinstance(blueprints, tuple):
-            blueprints = (blueprints,)
-        for blueprint in blueprints:
+        for blueprint in _resolve_blueprints(LICENSED_BLUEPRINT_SPECS[module]):
             blueprint_name = getattr(blueprint, "name", None) or id(blueprint)
             if blueprint_name in registered_blueprint_names:
                 continue
@@ -128,6 +160,8 @@ def register_blueprints(app: Sanic):
     app.add_route(activity, "/activity/<activityId>")
     app.add_route(playbook_list, "/playbooks", methods=["POST"])
     app.add_route(all_apps, "/apps", methods=["POST"])
+    # Large-screen routes are attached to dashboard_bp as an import side effect.
+    _resolve_blueprints((("services.large_screen.views", "dashboard_bp"),))
     for blueprint in (
         license_bp,
         user_bp,
@@ -142,6 +176,7 @@ def register_blueprints(app: Sanic):
         knowledge_agent_bp,
     ):
         app.blueprint(blueprint)
+    license_data = None
     registered_modules = set()
     try:
         license_data = load_license()
@@ -152,7 +187,14 @@ def register_blueprints(app: Sanic):
     if "ticket_bp" not in registered_modules:
         logger.warning("ticket 模块未授权，跳过加载")
     else:
+        ticket_ws_bp = _resolve_blueprints(
+            (("services.ticket.websocket", "ticket_ws_bp"),)
+        )[0]
         app.blueprint(ticket_ws_bp)
+    app.ctx.license_data = license_data
+    app.ctx.active_license_sha256 = get_license_sha256() if license_data else None
+    app.ctx.registered_license_modules = frozenset(registered_modules)
+    app.ctx.supported_license_modules = frozenset(LICENSED_BLUEPRINT_SPECS)
 
 
 def register_listener(app: Sanic):
@@ -165,7 +207,39 @@ def register_listener(app: Sanic):
             "after_server_stop",
         ):
             if hasattr(listener, event):
-                app.register_listener(getattr(listener, event), event)
+                callback = getattr(listener, event)
+                if event in {"before_server_start", "after_server_start"}:
+                    callback = _timed_listener(listener_cls.__name__, event, callback)
+                app.register_listener(callback, event)
+
+    async def mark_worker_ready(app: Sanic, _loop) -> None:
+        app.ctx.worker_ready = True
+        logger.info(
+            "工作进程启动就绪: duration=%.3fs license_sha256=%s modules=%s",
+            perf_counter() - app.ctx.process_started_at,
+            app.ctx.active_license_sha256,
+            sorted(app.ctx.registered_license_modules),
+        )
+
+    app.register_listener(mark_worker_ready, "after_server_start")
+
+
+def _timed_listener(listener_name: str, event: str, callback):
+    @functools.wraps(callback)
+    async def wrapped(app: Sanic, loop):
+        started_at = perf_counter()
+        try:
+            return await callback(app, loop)
+        finally:
+            logger.info(
+                "启动监听器完成: listener=%s event=%s duration=%.3fs",
+                listener_name,
+                event,
+                perf_counter() - started_at,
+            )
+
+    wrapped.__name__ = f"{listener_name}_{event}"
+    return wrapped
 
 
 def register_middleware(app: Sanic):

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import time
 from typing import Any, Awaitable, Callable
 
-from litellm import acompletion
 import orjson
 
 from services.network_topology.contracts import (
@@ -56,6 +55,12 @@ class LLMCandidateResult:
 
 
 Completion = Callable[..., Awaitable[Any]]
+
+
+async def _default_completion(**kwargs: Any) -> Any:
+    from litellm import acompletion
+
+    return await acompletion(**kwargs)
 
 
 def build_llm_chunk(parser_input: ParserInput) -> dict[str, Any]:
@@ -122,7 +127,7 @@ class LLMCandidateAdapter:
         self,
         provider: str,
         model: str,
-        completion: Completion = acompletion,
+        completion: Completion | None = None,
         *,
         allowed_models: tuple[str, ...] | None = None,
         max_attempts: int = 2,
@@ -132,7 +137,7 @@ class LLMCandidateAdapter:
     ) -> None:
         self.provider = provider
         self.model = model
-        self.completion = completion
+        self.completion = completion or _default_completion
         self.allowed_models = frozenset(allowed_models or (model,))
         self.max_attempts = max(1, min(max_attempts, 3))
         self.timeout_seconds = timeout_seconds

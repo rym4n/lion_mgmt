@@ -3,6 +3,7 @@
 import datetime
 import hashlib
 import os
+import tempfile
 import time
 
 from sanic import Blueprint, response
@@ -77,6 +78,20 @@ def _menu_is_licensed(menu: dict, valid_modules: set[str]) -> bool:
     return menu.get("description") in valid_modules or menu.get("bp") in valid_modules
 
 
+def _worker_license_data(request: Request):
+    app_ctx = getattr(getattr(request, "app", None), "ctx", None)
+    if app_ctx is not None and hasattr(app_ctx, "license_data"):
+        return app_ctx.license_data
+    return load_license()
+
+
+def _worker_license_sha256(request: Request):
+    app_ctx = getattr(getattr(request, "app", None), "ctx", None)
+    if app_ctx is not None and hasattr(app_ctx, "active_license_sha256"):
+        return app_ctx.active_license_sha256
+    return get_license_sha256()
+
+
 @license_bp.post("/machine-code")
 @openapi.definition(
     summary="获取当前机器码",
@@ -124,7 +139,17 @@ async def get_machine_code(request: Request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer", "example": 0},
-                            "data": {"type": "string", "example": "上传成功"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                    "license_sha256": {"type": "string"},
+                                    "required_modules": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                },
+                            },
                         },
                     }
                 }
@@ -145,22 +170,77 @@ async def verify_license_api(request: Request):
 
     license_file = request.files.get("file")
     file_content = license_file.body
-    verify_license(file_content)
+    license_data = verify_license(file_content)
     new_filename = hashlib.md5(file_content).hexdigest() + ".lic"
     new_file_path = os.path.join(LICENSE_DIR, new_filename)
 
-    for filename in os.listdir(LICENSE_DIR):
-        if filename.endswith(".lic"):
-            old_file_path = os.path.join(LICENSE_DIR, filename)
-            if os.path.isfile(old_file_path):
-                os.remove(old_file_path)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=LICENSE_DIR,
+            prefix=f".{new_filename}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            temporary_file.write(file_content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, new_file_path)
+        temporary_path = None
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
 
-    with open(new_file_path, "wb") as f:
-        f.write(file_content)
+    for filename in os.listdir(LICENSE_DIR):
+        if filename == new_filename or not filename.endswith(".lic"):
+            continue
+        old_file_path = os.path.join(LICENSE_DIR, filename)
+        if os.path.isfile(old_file_path):
+            os.remove(old_file_path)
+
+    license_sha256 = hashlib.sha256(file_content).hexdigest()
+    supported_modules = set(
+        getattr(request.app.ctx, "supported_license_modules", ())
+    )
+    required_modules = sorted(
+        {
+            item.get("module")
+            for item in license_data.get("moduleList", [])
+            if item.get("module") in supported_modules
+            and is_licensed_module_active(license_data, item)
+        }
+    )
 
     request.app.m.restart(zero_downtime=True, all_workers=True)
 
-    return response_ok("上传成功，正在加载配置文件，请稍后！")
+    return response_ok(
+        {
+            "message": "上传成功，正在加载配置文件，请稍后！",
+            "license_sha256": license_sha256,
+            "required_modules": required_modules,
+        }
+    )
+
+
+@license_bp.post("/reload-status")
+@openapi.definition(
+    summary="获取 License 重载状态",
+    description="返回当前工作进程加载的 License 和已注册模块，用于等待无损重载完成",
+)
+@requires_permission("lic:c", "lic:r")
+async def get_license_reload_status(request: Request):
+    app_ctx = request.app.ctx
+    return response_ok(
+        {
+            "ready": bool(getattr(app_ctx, "worker_ready", False)),
+            "license_sha256": getattr(app_ctx, "active_license_sha256", None),
+            "registered_modules": sorted(
+                getattr(app_ctx, "registered_license_modules", ())
+            ),
+        }
+    )
 
 
 @license_bp.post("/get")
@@ -214,7 +294,7 @@ async def get_license(request: Request):
         raise CustomError(ErrorCode.SESSION_INVALID)
 
     permissions = await PermissionsMenu.filter(deleted=False).values()
-    lic = load_license()
+    lic = _worker_license_data(request)
     if not lic:
         return response_ok([p["url"][language] for p in permissions if p["model"] == "lic"])
 
@@ -455,7 +535,7 @@ async def get_all_license(request: Request):
     }
 
     menu_dict = dict()
-    lic = load_license()
+    lic = _worker_license_data(request)
 
     if not lic:
         raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
@@ -484,7 +564,7 @@ async def get_all_license(request: Request):
         menu_entry["description"] = item.get("description")
         menu_entry["expireTime"] = fmt_time(int(item.get("expireTime")))
 
-    menu_dict["serial_number"] = get_license_sha256()
+    menu_dict["serial_number"] = _worker_license_sha256(request)
 
     return response_ok(menu_dict)
 

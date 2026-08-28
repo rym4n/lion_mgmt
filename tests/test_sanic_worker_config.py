@@ -1,6 +1,9 @@
+import asyncio
 import os
 import subprocess
 import sys
+from time import perf_counter
+from types import SimpleNamespace
 
 from libs.sanic_worker import (
     SANIC_WORKER_ACK_TIMEOUT_ENV,
@@ -64,7 +67,9 @@ def test_create_app_ext_uses_resolved_health_monitor_config(monkeypatch):
     class StubApp:
         def __init__(self):
             self.config = self
+            self.ctx = SimpleNamespace()
             self.ext_config = None
+            self.router = SimpleNamespace(routes=[])
 
         def update_config(self, *_):
             return None
@@ -88,6 +93,32 @@ def test_create_app_ext_uses_resolved_health_monitor_config(monkeypatch):
         "HEALTH_MISSED_THRESHHOLD": app_factory.HEALTH_MISSED_THRESHHOLD,
         "HEALTH_MONITOR": app_factory.HEALTH_MONITOR,
     }
+
+
+def test_register_listener_marks_worker_ready_after_startup(monkeypatch):
+    import services.app_factory as app_factory
+
+    registered = []
+    app = SimpleNamespace(
+        ctx=SimpleNamespace(
+            worker_ready=False,
+            process_started_at=perf_counter(),
+            active_license_sha256="license-sha",
+            registered_license_modules={"digital_employee_bp"},
+        ),
+        register_listener=lambda callback, event: registered.append(
+            (callback, event)
+        ),
+    )
+    monkeypatch.setattr(app_factory, "LISTENER_TUPLE", ())
+
+    app_factory.register_listener(app)
+
+    assert len(registered) == 1
+    callback, event = registered[0]
+    assert event == "after_server_start"
+    asyncio.run(callback(app, None))
+    assert app.ctx.worker_ready is True
 
 
 def test_sanic_worker_config_does_not_import_sanic_worker_modules_early():
