@@ -266,6 +266,8 @@ async def sweep_once(owner: str, now=None, last_sweep=None) -> dict:
             continue
 
     # 2) 未到期的 SLA 预警
+
+    # 2) 未到期的 SLA 预警
     warning_nodes = await TicketNodeInstance.filter(
         status__in=[NODE_STATUS_PENDING, NODE_STATUS_RUNNING],
         deleted=False,

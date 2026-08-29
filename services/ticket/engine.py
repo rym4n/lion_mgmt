@@ -498,6 +498,12 @@ async def activate_nodes(
             or _definition_value(definition, "approver_action")
         ):
             await resolve_node_approvers(ticket, instance, definition, connection)
+            # 审批节点激活后，按 polling 配置创建轮询定时任务
+            try:
+                from services.ticket.approval_polling import create_poll_timer
+                await create_poll_timer(ticket, instance, definition)
+            except Exception:
+                pass  # 轮询创建失败不影响审批主流程
     return activated
 
 
@@ -671,6 +677,8 @@ async def advance_ticket(
             )
             if outcome is None:
                 return True
+            # 审批节点完成，触发外发通知
+            await _fire_approval_callbacks(ticket, node, flow_json, outcome)
         else:
             outcome = NODE_STATUS_APPROVED
 
@@ -765,12 +773,70 @@ async def _apply_decision(ticket, node, actor_id, decision, conn, form_data=None
         node.status = outcome
         node.completed_at = datetime.now(TZ)
         update_fields += ["status", "completed_at"]
+        # 审批完成，停止轮询定时任务
+        try:
+            from services.ticket.approval_polling import remove_poll_timer
+            await remove_poll_timer(node)
+        except Exception:
+            pass
     await node.save(update_fields=update_fields, using_db=conn)
     await record_activity(
         ticket, decision or "approve", actor_id=actor_id, node_instance=node,
         payload={"node_id": node.node_id, "outcome": outcome}, connection=conn,
     )
     return outcome
+
+
+async def _fire_approval_callbacks(ticket, node, flow_json, outcome) -> None:
+    """审批节点完成后触发 callback_data 中的通知动作（投 Kafka）。
+
+    复用 auto_action._build_params 构建消息体，与剧本审批节点的
+    libs/chat.py:949-978 行为一致。
+    """
+    if outcome is None:
+        return
+    definition = _node_def(flow_json, node.node_id) or {}
+    props = definition.get("properties") or {}
+    if props.get("callback") != "on":
+        return
+    callback_data_list = props.get("callback_data") or []
+    if not callback_data_list:
+        return
+
+    from libs.kafka import aproduce
+    from libs.utils import gen_run_id
+    from settings import TASK_TOPIC
+
+    decision_label = "approved" if outcome == NODE_STATUS_APPROVED else "rejected"
+    for cb in callback_data_list:
+        action_input = {}
+        for inp in cb.get("input") or []:
+            value = inp.get("value", "")
+            if isinstance(value, str):
+                value = value.replace("{{content}}", str(props.get("content") or ""))
+                value = value.replace("{{decision}}", decision_label)
+                value = value.replace("{{node_name}}", node.node_name or "")
+                value = value.replace("{{ticket_no}}", getattr(ticket, "ticket_no", "") or "")
+            action_input[inp.get("key", "")] = value
+
+        run_id = gen_run_id()
+        await aproduce(TASK_TOPIC, {
+            "run_type": "action",
+            "run_id": run_id,
+            "run_args": {
+                "resource": cb.get("resource", ""),
+                "node_name": cb.get("description") or cb.get("name", ""),
+                "action": cb.get("func", ""),
+                "action_name": cb.get("name", ""),
+                "app_name": cb.get("tool_name", ""),
+                "app_ver": cb.get("version", ""),
+                "main": cb.get("tool_main", ""),
+                "action_input": action_input,
+                "retry_times": int(cb.get("retry_times", 0)),
+                "timeout": int(cb.get("timeout", 300)),
+            },
+            "tenant_id": ticket.tenant_id,
+        })
 
 
 async def _close_ticket(ticket, terminal_status, actor_id, conn) -> None:
