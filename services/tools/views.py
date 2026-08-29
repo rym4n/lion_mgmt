@@ -1618,9 +1618,11 @@ async def tool_actions(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["classify"],
                 "properties": {
-                    "classify": {"type": "string", "description": "动作类型"},
+                    "classify": {
+                        "type": "string",
+                        "description": "动作类型（可选，不传则返回全部动作）",
+                    },
                 },
             }
         }
@@ -1685,7 +1687,8 @@ async def tool_actions(request):
 )
 @requires_permission("tool:r")
 async def tool_actions_filter(request):
-    classify = request.json.get("classify")
+    request_json = request.json or {}
+    classify = request_json.get("classify")
 
     tenant_id = request.ctx.session.get("tenant_id")
     maintenance_mode = await _current_maintenance_mode(request)
@@ -1693,29 +1696,61 @@ async def tool_actions_filter(request):
         tenant_id,
         maintenance_mode,
     )
+    if not scoped_tool_pairs:
+        return response_ok({"actions": []})
 
-    actions = await ToolAction.filter(tenant_id=tenant_id, deleted=False).values("action", "id", "tool_name", "version_number")
+    tool_names = sorted(
+        {
+            name
+            for name, _version in scoped_tool_pairs
+            if isinstance(name, str) and name
+        }
+    )
+    if not tool_names:
+        return response_ok({"actions": []})
+
+    tool_rows = await Tool.filter(
+        name__in=tool_names,
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).values("name", "version", "description", "main")
+    tools_by_pair = {
+        (row.get("name"), row.get("version")): row for row in tool_rows
+    }
+
+    actions = await ToolAction.filter(
+        tenant_id=tenant_id,
+        deleted=False,
+    ).values("action", "id", "tool_name", "version_number")
     action_list = []
     for action in actions:
         tool_pair = (action.get("tool_name"), action.get("version_number"))
         if tool_pair not in scoped_tool_pairs:
             continue
         act_data = action.get("action")
+        if not isinstance(act_data, dict):
+            logger.warning(
+                "Skipping malformed tool action %s for %s/%s",
+                action.get("id"),
+                action.get("tool_name"),
+                action.get("version_number"),
+            )
+            continue
         if classify and act_data.get("classify") != classify:
             continue
 
+        tool = tools_by_pair.get(tool_pair)
+        if tool is None:
+            # The tool may have been deleted between the scope and action queries.
+            continue
+
+        act_data = act_data.copy()
         act_data["id"] = action.get("id")
         act_data["tool_name"] = action.get("tool_name")
         act_data["version"] = action.get("version_number")
-        tool = await Tool.get_or_none(
-            name=action.get("tool_name"),
-            version=action.get("version_number"),
-            deleted=False,
-            maintain=maintenance_mode,
-            tenant_id=tenant_id,
-        )
-        act_data["description"] = tool.description
-        act_data["tool_main"] = tool.main
+        act_data["description"] = tool.get("description")
+        act_data["tool_main"] = tool.get("main")
         action_list.append(act_data)
 
     return response_ok({"actions": action_list})
