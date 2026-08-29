@@ -275,6 +275,38 @@ async def _apply_tool_group_internal_flags(tools, tenant_id, maintenance_mode):
         tool["internal"] = tool["name"] in internal_tool_names
 
 
+async def _tool_resource_model_map(tool_names, tenant_id, maintenance_mode):
+    """Load resource templates for a page of tools with one query."""
+    if not tool_names:
+        return {}
+
+    filters = {
+        "tool_name__in": tool_names,
+        "deleted": False,
+        "internal": maintenance_mode,
+        "tenant_id": tenant_id,
+    }
+    resource_model_filter = getattr(ToolResourcesModel, "filter", None)
+    if resource_model_filter is None:
+        # Compatibility for lightweight test doubles that only implement get_or_none.
+        result = {}
+        single_filters = {
+            key: value for key, value in filters.items() if key != "tool_name__in"
+        }
+        for tool_name in tool_names:
+            model = await ToolResourcesModel.get_or_none(
+                **{**single_filters, "tool_name": tool_name}
+            )
+            if model:
+                result[tool_name] = model
+        return result
+
+    rows = await resource_model_filter(**filters).values(
+        "tool_name", "status", "health_check", "version"
+    )
+    return {row["tool_name"]: row for row in rows}
+
+
 async def _lock_tool_versions(tool_name, tenant_id, maintenance_mode):
     return await Tool.filter(
         name=tool_name,
@@ -1338,27 +1370,29 @@ async def all_tools(request):
         tenant_id,
         maintenance_mode,
     )
+    resource_model_map = await _tool_resource_model_map(
+        [tool["name"] for tool in latest_tools],
+        tenant_id,
+        maintenance_mode,
+    )
     for tool in latest_tools:
         if int(req_json.get("logo", 1)) == 1 and tool["logo_path"]:
             tool["logo"] = tool["logo_path"]
         tool.pop("path", None)
-        trm = await ToolResourcesModel.get_or_none(
-            deleted=False,
-            tool_name=tool["name"],
-            internal=maintenance_mode,
-            tenant_id=tenant_id,
-        )
+        trm = resource_model_map.get(tool["name"])
         if trm:
-            tool["required"] = trm.status
-            tool["health_check"] = trm.health_check
-            tool["health_check_version"] = trm.version
+            if isinstance(trm, dict):
+                tool["required"] = trm["status"]
+                tool["health_check"] = trm["health_check"]
+                tool["health_check_version"] = trm["version"]
+            else:
+                tool["required"] = trm.status
+                tool["health_check"] = trm.health_check
+                tool["health_check_version"] = trm.version
 
-    total_count = await Tool.filter(
-        condition,
-        deleted=False,
-        maintain=maintenance_mode,
-        tenant_id=tenant_id,
-    ).count()
+    # subquery_results already contains one row per matching tool after all filters;
+    # counting it avoids running the large latest-version OR condition a second time.
+    total_count = len(subquery_results)
 
     return response_ok(
         {
