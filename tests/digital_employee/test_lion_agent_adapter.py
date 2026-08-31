@@ -7,8 +7,6 @@ import types
 import uuid
 import pytest
 
-import pytest
-
 
 STUB_MODULES = [
     "services",
@@ -90,6 +88,22 @@ def test_execute_prompt_sends_model_override():
     assert result == "ok"
     assert client.payloads[-1]["model"] == "aioe-lite"
     assert client.payloads[-1]["system_prompt"] == "immutable coordinator rules"
+
+
+def test_execute_prompt_sends_response_format():
+    adapter, client = _load_adapter()
+
+    response_format = {"type": "json_object"}
+    asyncio.run(
+        adapter.execute_prompt(
+            workspace_id="tenant-1:command-center",
+            session_id="dispatch-1",
+            message="route task",
+            response_format=response_format,
+        )
+    )
+
+    assert client.payloads[-1]["response_format"] == response_format
 
 
 def test_execute_prompt_omits_model_without_override():
@@ -298,6 +312,13 @@ def test_identity_only_memory_disables_middleware_but_keeps_tenant_id():
     }
     # 确保 identity_only_memory 不发 provenance / mode / top_k：它们只为员工有意义
     assert set(memory) == {"enabled", "tenant_id", "employee_id"}
+
+    employee_memory = adapter.identity_only_memory("tenant-1", "employee-1")
+    assert employee_memory == {
+        "enabled": False,
+        "tenant_id": "tenant-1",
+        "employee_id": "employee-1",
+    }
 
 
 def test_every_execute_prompt_call_site_passes_tenant_identity():

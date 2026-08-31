@@ -53,6 +53,7 @@ class DispatchDecision:
 
 
 MAX_CLARIFICATION_QUESTION_LENGTH = 300
+DISPATCH_RESPONSE_FORMAT = {"type": "json_object"}
 
 
 def is_agent_available(agent: AgentCandidate) -> bool:
@@ -229,7 +230,7 @@ def _build_dispatch_system_prompt() -> str:
             "如果 requested_agent_id 存在、该智能体 available=true 且完整覆盖 required_capabilities，必须尊重用户指定。",
             "只有用户指定的智能体不存在、不可用或不能覆盖 required_capabilities 时，才可以选择其他合格智能体并返回 corrected。",
             "如果没有任何 available=true 的智能体，返回 agent_key=null 且 dispatch_status=no_candidate。",
-            "只返回完全符合 response_schema 的 JSON 对象，不要输出解释性正文或额外字段。",
+            "接口已设置 response_format={\"type\":\"json_object\"}；只返回完全符合 response_schema 的 JSON 对象，不要输出解释性正文、Markdown 代码围栏或额外字段。",
         ],
         "response_schema": {
             "type": "object",
@@ -298,6 +299,7 @@ async def choose_agent_with_lion_agent(
             system_prompt=system_prompt,
             timeout=COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS,
             memory=identity_only_memory(task.tenant_id),
+            response_format=DISPATCH_RESPONSE_FORMAT,
         )
         decision_payload = _extract_json_object(raw_response)
     except ValueError:
@@ -316,6 +318,7 @@ async def choose_agent_with_lion_agent(
                 system_prompt=system_prompt,
                 timeout=COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS,
                 memory=identity_only_memory(task.tenant_id),
+                response_format=DISPATCH_RESPONSE_FORMAT,
             )
             decision_payload = _extract_json_object(raw_response)
         except Exception as exc:

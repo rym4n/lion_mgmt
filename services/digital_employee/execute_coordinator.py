@@ -98,6 +98,12 @@ def _build_memory_payload(task: CommandTask, employee: CommandAgent, embedding=N
     }
 
 
+def _is_independent_task(task: CommandTask) -> bool:
+    """Only an explicit boolean opt-out disables employee memory for a task."""
+    payload = getattr(task, "payload", None)
+    return isinstance(payload, dict) and payload.get("independent_task") is True
+
+
 async def _publish_room_event(task: CommandTask, event_type: str, payload: dict, operator_id: str | None) -> bool:
     if not task.room_id:
         return False
@@ -209,18 +215,17 @@ async def run(
             employee_id=employee.id,
         )
         workspace_id = continuation_workspace["workspace_id"]
+    independent_task = _is_independent_task(task)
     embedding = None
-    if not (command_run is not None and continuation_workspace is None):
+    if not independent_task:
         try:
             embedding = await resolve_llm(task.tenant_id, purpose="embedding")
         except CustomError:
             embedding = None
-    # Command-center dispatches are independent task runs.  They still use the
-    # employee workspace and its role/skill snapshot, but must not recall or
-    # write employee-level long-term memory: a previous task's volatile report
-    # or download URL is not evidence for the current task.
-    if command_run is not None and continuation_workspace is None:
-        memory_section = identity_only_memory(task.tenant_id)
+    if independent_task:
+        # Independent tasks still use the employee workspace and owner identity,
+        # but explicitly opt out of long-term memory recall/write.
+        memory_section = identity_only_memory(task.tenant_id, employee.id)
     else:
         memory_section = _build_memory_payload(task, employee, embedding=embedding)
     aioe_token = await get_employee_api_token(employee)

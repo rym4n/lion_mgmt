@@ -13,11 +13,14 @@ def workspace_id_for(tenant_id: str, *parts: str) -> str:
     return ":".join([str(tenant_id), *safe_parts])
 
 
-def identity_only_memory(tenant_id: str) -> dict[str, Any]:
-    """给非员工链路用的 memory 段：只带租户身份，不启用记忆能力（D36 / D40）。
+def identity_only_memory(
+    tenant_id: str,
+    employee_id: str | None = None,
+) -> dict[str, Any]:
+    """构造不启用长期记忆但保留 owner 身份的 memory 段（D36 / D40）。
 
-    巡检、报告批注、Agent 后台任务、指挥中心派单这几条链路都不需要长期记忆，
-    但**仍必须表明自己是谁**——lion_agent 的 internal token 是当前唯一的横向
+    巡检、报告批注、Agent 后台任务、指挥中心调度协调器这些非员工链路都不需要
+    长期记忆，但**仍必须表明自己是谁**——lion_agent 的 internal token 是当前唯一的横向
     边界，不带身份等于「持 token 者可在任意 workspace 执行」。
 
     enabled=False 只决定「不挂载 middleware」，**不决定「不校验身份」**：
@@ -25,13 +28,13 @@ def identity_only_memory(tenant_id: str) -> dict[str, Any]:
     不要因为「反正没启用记忆」就把 tenant_id 省掉——那会让 P4 在 1B
     翻转 LION_AGENT_REQUIRE_WORKSPACE_IDENTITY=true 的门槛永远达不到。
 
-    employee_id 恒为 None：这些 workspace 不属于任何数字员工（D10 的
-    「None = 非员工 workspace，只校验 tenant」）。
+    非员工 workspace 默认 employee_id=None；独立数字员工任务仍传入员工身份，
+    只关闭记忆 middleware，不绕过 workspace owner 校验。
     """
     return {
         "enabled": False,
         "tenant_id": tenant_id,
-        "employee_id": None,
+        "employee_id": employee_id,
     }
 
 
@@ -50,6 +53,7 @@ async def execute_prompt(
     model: str | None = None,
     system_prompt: str | None = None,
     llm: Any | None = None,
+    response_format: dict[str, Any] | None = None,
     timeout: float | None = None,
 ) -> str:
     payload: dict[str, Any] = {
@@ -74,6 +78,8 @@ async def execute_prompt(
         payload["model"] = model
     if system_prompt is not None:
         payload["system_prompt"] = system_prompt
+    if response_format is not None:
+        payload["response_format"] = response_format
     client = LionAgentClient(timeout=timeout) if timeout else LionAgentClient()
     response = await client.execute(payload)
     if isinstance(response, dict):
@@ -120,6 +126,7 @@ async def stream_prompt_events(
     model: str | None = None,
     system_prompt: str | None = None,
     llm: Any | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     payload: dict[str, Any] = {
         "workspace_id": workspace_id,
@@ -143,6 +150,8 @@ async def stream_prompt_events(
         payload["model"] = model
     if system_prompt is not None:
         payload["system_prompt"] = system_prompt
+    if response_format is not None:
+        payload["response_format"] = response_format
     event_name = "message"
     async for line in LionAgentClient().stream_execute(payload):
         if line.startswith("event:"):

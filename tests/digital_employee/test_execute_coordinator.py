@@ -134,10 +134,10 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
 
     adapter = types.ModuleType("services.digital_employee.lion_agent_adapter")
     adapter.stream_prompt_events = _stream_prompt_events
-    adapter.identity_only_memory = lambda tenant_id: {
+    adapter.identity_only_memory = lambda tenant_id, employee_id=None: {
         "enabled": False,
         "tenant_id": tenant_id,
-        "employee_id": None,
+        "employee_id": employee_id,
     }
     sys.modules["services.digital_employee.lion_agent_adapter"] = adapter
 
@@ -381,15 +381,59 @@ def test_run_uses_command_run_session_and_emits_runtime_callbacks():
     assert result["usage"]["input_tokens"] == 100
     assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-1"
     assert RECORDED_STREAM_PAYLOADS[0]["memory"] == {
-        "enabled": False,
+        "enabled": True,
+        "mode": "both",
+        "top_k": 5,
         "tenant_id": "tenant-1",
-        "employee_id": None,
+        "employee_id": "employee-1",
+        "provenance": {
+            "role_key": "ops",
+            "task_id": "task-1",
+            "request_id": "task-1",
+            "source_kind": "manual",
+        },
+        "embedding": None,
     }
     assert [event_type for event_type, _ in runtime_events] == ["thinking", "tool_call", "delta", "delta", "end"]
     assert task.result is None
     assert task.saved_update_fields == []
     assert [call[0]["status"] for call in progress_calls] == ["running"]
     assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
+
+
+def test_run_disables_memory_only_for_explicit_independent_task():
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+
+    task = FakeTask(
+        id="task-independent",
+        tenant_id="tenant-1",
+        run_id=None,
+        room_id=None,
+        creator_id="creator-1",
+        source="manual",
+        progress=0,
+        status="pending",
+        title="独立任务",
+        description="检查磁盘",
+        payload={"independent_task": True},
+        result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+
+    asyncio.run(execute_coordinator.run(task, employee, command_run=SimpleNamespace(run_id="run-independent")))
+
+    assert RECORDED_STREAM_PAYLOADS[0]["memory"] == {
+        "enabled": False,
+        "tenant_id": "tenant-1",
+        "employee_id": "employee-1",
+    }
 
 
 def test_run_syncs_and_uses_continuation_read_only_workspace():

@@ -168,6 +168,7 @@ def test_available_requested_agent_still_requires_context_assessment():
     assert decision.dispatch_status == "user_specified"
     assert decision.requested_agent_id == "ops-1"
     assert "首先判断任务上下文是否足以" in captured["system_prompt"]
+    assert captured["response_format"] == {"type": "json_object"}
     assert "dispatch_contract" not in captured["message"]
 
 
