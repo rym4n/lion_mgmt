@@ -235,6 +235,42 @@ async def test_document_list_decorates_updater(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_documents_by_title_returns_space_name(monkeypatch):
+    from services.knowledge import manager
+
+    document = _FakeDoc(title="盐田港简介.pptx", space_key="test")
+    space = _FakeSpace(space_key="test")
+    space.name = "测试空间"
+
+    class Query(_FakeQuery):
+        def __init__(self, docs):
+            super().__init__(docs)
+            self.filters = []
+
+        def filter(self, **kwargs):
+            self.filters.append(kwargs)
+            return self
+
+    doc_query = Query([document])
+    space_query = Query([space])
+    initial_filter = {}
+
+    def document_filter(**kwargs):
+        initial_filter.update(kwargs)
+        return doc_query
+
+    monkeypatch.setattr(manager.KnowledgeDocument, "filter", document_filter)
+    monkeypatch.setattr(manager.KnowledgeSpace, "filter", lambda **kwargs: space_query)
+
+    result = await manager.search_documents_by_title("t1", "盐田港")
+
+    assert result["total"] == 1
+    assert result["items"][0]["title"] == "盐田港简介.pptx"
+    assert result["items"][0]["space_name"] == "测试空间"
+    assert initial_filter["title__icontains"] == "盐田港"
+
+
+@pytest.mark.asyncio
 async def test_retry_records_latest_operator(monkeypatch):
     document = _FakeDoc(status="failed", uploader_id="operator-1")
     manager = _patch_common(
@@ -256,6 +292,28 @@ async def test_delete_document_removes_vector_objects_and_soft_deletes(monkeypat
     assert doc.deleted is True
     assert doc.saved is True
     assert result["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_document_succeeds_when_remote_cleanup_fails(monkeypatch):
+    doc = _FakeDoc()
+    client = _FakeClient()
+    manager = _patch_common(monkeypatch, space=_FakeSpace(), client=client, existing=doc)
+
+    async def fail_vector(**kwargs):
+        raise RuntimeError("qdrant unavailable")
+
+    async def fail_objects(**kwargs):
+        raise RuntimeError("object store unavailable")
+
+    client.delete_document = fail_vector
+    monkeypatch.setattr(manager.object_store, "delete_objects", fail_objects)
+
+    result = await manager.delete_document("t1", "doc-1")
+
+    assert result == {"deleted": True, "document_id": "doc-1"}
+    assert doc.deleted is True
+    assert doc.saved is True
 
 
 @pytest.mark.asyncio

@@ -377,9 +377,24 @@ async def document_detail(tenant_id: str, document_id: str) -> dict:
 
 
 async def delete_document(tenant_id: str, document_id: str) -> dict:
-    """删向量记录 + 删对象 + 软删本地记录。"""
+    """软删本地记录，并尽力清理向量与原文对象。
+
+    本地删除是用户可见状态的唯一真相。远端清理短暂失败时不能阻塞
+    删除，否则文档会表现为「只能添加、不能删除」；孤儿向量会在重建
+    时清理，且检索装饰阶段会过滤掉已软删的文档。
+    """
     document = await get_document_or_404(tenant_id, document_id)
-    embedding = await get_embedding_payload(tenant_id)
+    document.deleted = True
+    await document.save()
+
+    try:
+        embedding = await get_embedding_payload(tenant_id)
+    except Exception as exc:
+        embedding = None
+        logger.warning(
+            "knowledge_embedding_for_delete_failed doc=%s error_type=%s",
+            document_id, type(exc).__name__,
+        )
     if embedding is not None:
         try:
             await get_knowledge_client().delete_document(
@@ -388,18 +403,76 @@ async def delete_document(tenant_id: str, document_id: str) -> dict:
                 document_id=str(document.id),
                 embedding=embedding,
             )
-        except CustomError:
+        except Exception as exc:
             # 向量侧删不掉不该阻塞元数据删除——留下的孤儿记录检索时
             # 会因为查不到对应文档行而被过滤掉，且 rebuild 会清干净。
-            logger.warning("knowledge_vector_delete_failed doc=%s", document_id)
-    await object_store.delete_objects(str(document.id))
-    document.deleted = True
-    await document.save()
+            logger.warning(
+                "knowledge_vector_delete_failed doc=%s error_type=%s",
+                document_id, type(exc).__name__,
+            )
+    try:
+        await object_store.delete_objects(str(document.id))
+    except Exception as exc:
+        logger.warning(
+            "knowledge_object_delete_failed doc=%s error_type=%s",
+            document_id, type(exc).__name__,
+        )
     logger.info(
         "knowledge_document_deleted tenant=%s space=%s doc=%s",
         tenant_id, document.space_key, document_id,
     )
     return {"deleted": True, "document_id": document_id}
+
+
+async def search_documents_by_title(
+    tenant_id: str,
+    keyword: str,
+    *,
+    page: int = 1,
+    size: int = 20,
+) -> dict:
+    """按文档标题模糊搜索，并返回文档所属空间名称。"""
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return {"total": 0, "page": page, "size": size, "items": []}
+
+    query = KnowledgeDocument.filter(
+        tenant_id=tenant_id,
+        deleted=False,
+        title__icontains=keyword,
+    )
+    total = await query.count()
+    documents = await query.offset((page - 1) * size).limit(size).all()
+
+    space_keys = {document.space_key for document in documents}
+    spaces = await KnowledgeSpace.filter(
+        tenant_id=tenant_id,
+        deleted=False,
+        space_key__in=list(space_keys),
+    ).all() if space_keys else []
+    space_names = {space.space_key: space.name for space in spaces}
+
+    updater_ids = {doc.uploader_id for doc in documents if doc.uploader_id}
+    updaters = {}
+    if updater_ids:
+        accounts = await Account.filter(
+            id__in=list(updater_ids), tenant_id=tenant_id
+        ).all()
+        updaters = {
+            str(account.id): {
+                "username": account.username,
+                "display_name": account.display_name,
+            }
+            for account in accounts
+        }
+
+    items = []
+    for document in documents:
+        payload = _mark_stale(document)
+        payload["space_name"] = space_names.get(document.space_key, document.space_key)
+        payload["updator"] = updaters.get(str(document.uploader_id))
+        items.append(payload)
+    return {"total": total, "page": page, "size": size, "items": items}
 
 
 async def retry_document(

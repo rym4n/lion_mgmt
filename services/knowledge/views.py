@@ -109,6 +109,19 @@ async def document_list(request: Request):
     )
 
 
+@knowledge_bp.post("/document/search")
+@requires_permission("knowledge:r")
+async def document_search(request: Request):
+    params = _json(request)
+    _require(params, "keyword")
+    page, size = _page(params)
+    return response_ok(
+        await manager.search_documents_by_title(
+            _tenant(request), str(params["keyword"]), page=page, size=size
+        )
+    )
+
+
 @knowledge_bp.post("/document/upload")
 @requires_permission("knowledge:c")
 async def document_upload(request: Request):
