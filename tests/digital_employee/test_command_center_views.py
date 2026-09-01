@@ -190,6 +190,46 @@ def test_task_detail_event_dto_exposes_metadata_summary_only():
     assert event_out["phrase"] == "等待人工审批"
 
 
+def test_task_stream_event_dto_exposes_one_bounded_render_item():
+    event_out = views._task_stream_event_json(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "ctime": None,
+            "utime": None,
+            "status": "completed",
+            "progress": 100,
+            "agent_key": "ops-agent",
+            "operator_id": "system",
+            "message": "finished",
+            "message_length": views.PROCESS_STREAM_MAX_LENGTH + 1,
+            "event_count": 23_151,
+        }
+    )
+
+    assert event_out["id"] == "runtime-stream:run-1"
+    assert event_out["event_type"] == "runtime_stream"
+    assert event_out["message"] == "finished"
+    assert event_out["event_count"] == 23_151
+    assert event_out["truncated"] is True
+    assert event_out["metadata_summary"] == {"run_id": "run-1"}
+
+
+def test_task_detail_defers_process_and_tool_history_to_lazy_endpoints():
+    detail_source = inspect.getsource(inspect.unwrap(views.task_detail))
+    process_source = inspect.getsource(inspect.unwrap(views.task_process))
+    process_query_source = inspect.getsource(views._task_process_events)
+
+    assert "CommandTaskEvent" not in detail_source
+    assert "_task_event_detail_json" not in detail_source
+    assert "_task_run_detail_json" not in detail_source
+    assert 'status=COMMAND_APPROVAL_STATUS_PENDING' in detail_source
+    assert "_task_process_events" in process_source
+    assert "STRING_AGG" in process_query_source
+    assert "PROCESS_STREAM_MAX_LENGTH" in process_query_source
+    assert "metadata->>'run_id'" in process_query_source
+
+
 def test_task_stats_aggregates_tenant_scoped_counts(monkeypatch):
     class Query:
         def __init__(self, value):

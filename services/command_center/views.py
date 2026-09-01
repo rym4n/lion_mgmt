@@ -18,6 +18,7 @@ from libs.runlog_pagination import (
     runlog_node_page,
 )
 from libs.security.authorization import account_has_permission, requires_permission
+from libs.utils import strip_timezone_to_seconds
 from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent, CommandApproval, CommandTask, CommandTaskEvent, CommandTaskRun
 from settings import TZ
 
@@ -60,6 +61,9 @@ RUNLOG_BATCH_MAX_LIMIT = 50
 RUNLOG_NODE_DEFAULT_LIMIT = 50
 RUNLOG_NODE_MAX_LIMIT = 200
 RUNLOG_CURSOR_VERSION = 1
+PROCESS_STREAM_MAX_LENGTH = 200_000
+PROCESS_HIDDEN_EVENT_TYPES = ("run_checked_out", "runtime_tool_call", "runtime_progress")
+PROCESS_STREAM_EVENT_TYPES = ("runtime_delta", "runtime_thinking")
 _RUNLOG_LOOP_RE = re.compile(r"【第(\d+)次循环】")
 _RUNLOG_RETRY_RE = re.compile(r"（(\d+)次重试）")
 
@@ -169,8 +173,11 @@ TASK_EVENT_SCHEMA = {
         "progress": {"type": "integer", "nullable": True, "description": "进度快照"},
         "agent_key": {"type": "string", "nullable": True, "description": "相关智能体"},
         "message": {"type": "string", "nullable": True, "description": "事件说明"},
-        "metadata": {"type": "object", "description": "事件元数据"},
+        "phrase": {"type": "string", "description": "可读事件名称"},
+        "metadata_summary": {"type": "object", "description": "事件元数据摘要"},
         "operator_id": {"type": "string", "nullable": True, "description": "操作者ID"},
+        "event_count": {"type": "integer", "description": "聚合的原始事件数"},
+        "truncated": {"type": "boolean", "description": "聚合文本是否达到展示上限"},
     },
 }
 
@@ -680,6 +687,63 @@ def _task_event_detail_json(event: CommandTaskEvent) -> dict:
     }
 
 
+def _task_stream_event_json(row: dict) -> dict:
+    run_id = row.get("run_id") or "unscoped"
+    return {
+        "id": f"runtime-stream:{run_id}",
+        "ctime": strip_timezone_to_seconds(row.get("ctime")),
+        "utime": strip_timezone_to_seconds(row.get("utime")),
+        "task_id": row.get("task_id"),
+        "event_type": "runtime_stream",
+        "phrase": humanize_event("runtime_thinking"),
+        "status": row.get("status"),
+        "progress": row.get("progress"),
+        "agent_key": row.get("agent_key"),
+        "message": row.get("message") or "",
+        "metadata_summary": {"run_id": row.get("run_id")} if row.get("run_id") else {},
+        "operator_id": row.get("operator_id"),
+        "event_count": int(row.get("event_count") or 0),
+        "truncated": int(row.get("message_length") or 0) > PROCESS_STREAM_MAX_LENGTH,
+    }
+
+
+async def _task_process_events(task_id: str, tenant_id: str) -> list[dict]:
+    from tortoise import connections
+
+    regular_events = (
+        await CommandTaskEvent.filter(task_id=task_id, tenant_id=tenant_id, deleted=False)
+        .exclude(event_type__in=(*PROCESS_HIDDEN_EVENT_TYPES, *PROCESS_STREAM_EVENT_TYPES))
+        .order_by("ctime", "id")
+        .all()
+    )
+    stream_rows = await connections.get("default").execute_query_dict(
+        """
+        SELECT
+            task_id,
+            NULLIF(metadata->>'run_id', '') AS run_id,
+            MIN(ctime) AS ctime,
+            MAX(utime) AS utime,
+            (ARRAY_AGG(status ORDER BY ctime DESC, id DESC))[1] AS status,
+            (ARRAY_AGG(progress ORDER BY ctime DESC, id DESC))[1] AS progress,
+            (ARRAY_AGG(agent_key ORDER BY ctime DESC, id DESC))[1] AS agent_key,
+            (ARRAY_AGG(operator_id ORDER BY ctime DESC, id DESC))[1] AS operator_id,
+            LEFT(STRING_AGG(COALESCE(message, ''), '' ORDER BY ctime, id), $5) AS message,
+            SUM(LENGTH(COALESCE(message, ''))) AS message_length,
+            COUNT(*) AS event_count
+        FROM command_center_task_event
+        WHERE task_id = $1
+            AND tenant_id = $2
+            AND deleted = FALSE
+            AND event_type IN ($3, $4)
+        GROUP BY task_id, NULLIF(metadata->>'run_id', '')
+        """,
+        [task_id, tenant_id, *PROCESS_STREAM_EVENT_TYPES, PROCESS_STREAM_MAX_LENGTH],
+    )
+    events = [_task_event_detail_json(event) for event in regular_events]
+    events.extend(_task_stream_event_json(row) for row in stream_rows)
+    return sorted(events, key=lambda event: (str(event.get("ctime") or ""), str(event.get("id") or "")))
+
+
 @command_bp.post("/agents/register")
 @openapi.definition(
     summary="登记或更新指挥部智能体画像",
@@ -924,8 +988,11 @@ async def query_tasks(request: Request):
 
 @command_bp.post("/tasks/detail")
 @openapi.definition(
-    summary="查看任务详情和事件流",
-    description="查询单个任务详情，并按创建时间返回任务事件流，用于展示调度历史和进度变化。需要command_center:r权限。",
+    summary="查看任务轻量详情",
+    description=(
+        "优先返回任务基本信息、结果、摘要和待审批项；不包含执行事件和工具调用明细。"
+        "执行过程通过/tasks/process按需查询。需要command_center:r权限。"
+    ),
     body=_json_body(
         {
             "type": "object",
@@ -941,7 +1008,9 @@ async def query_tasks(request: Request):
             "type": "object",
             "properties": {
                 "task": TASK_SCHEMA,
-                "events": {"type": "array", "description": "任务事件流", "items": TASK_EVENT_SCHEMA},
+                "result": {"type": "string", "nullable": True, "description": "任务结果"},
+                "summary": {"type": "object", "description": "任务进度、用量和风险摘要"},
+                "approvals": {"type": "array", "description": "当前待审批项", "items": APPROVAL_SCHEMA},
             },
         },
         {"400": "参数错误", "404": "任务不存在"},
@@ -957,20 +1026,58 @@ async def task_detail(request: Request):
     task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
     if not task:
         raise CustomError(ErrorCode.NOT_FOUND)
-    events = await CommandTaskEvent.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("ctime").all()
     runs = await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
-    approvals = await CommandApproval.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
+    approvals = await CommandApproval.filter(
+        task_id=task.id,
+        tenant_id=tenant_id,
+        deleted=False,
+        status=COMMAND_APPROVAL_STATUS_PENDING,
+    ).order_by("-ctime").all()
     actors = await _resolve_task_actors([task], tenant_id)
     return response_ok(
         {
             "task": _task_detail_json(task, actors.get(task.id)),
             "summary": build_task_summary(task, runs, approvals),
             "result": task.result,
-            "events": [_task_event_detail_json(event) for event in events],
-            "runs": [_task_run_detail_json(run) for run in runs],
             "approvals": [_task_approval_detail_json(approval) for approval in approvals],
         }
     )
+
+
+@command_bp.post("/tasks/process")
+@openapi.definition(
+    summary="按需查看任务执行过程",
+    description=(
+        "返回用户展开执行过程后才需要的事件。流式增量在数据库中按run_id聚合，"
+        "工具调用和运行日志由/tasks/runlogs系列接口独立按需加载。需要command_center:r权限。"
+    ),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["id"],
+            "properties": {"id": {"type": "string", "description": "任务ID"}},
+        }
+    ),
+    response=_response(
+        "查询成功",
+        {
+            "type": "object",
+            "properties": {
+                "events": {"type": "array", "description": "已压缩的执行过程", "items": TASK_EVENT_SCHEMA},
+            },
+        },
+        {"400": "参数错误", "404": "任务不存在"},
+    ),
+)
+@requires_permission("command_center:r")
+async def task_process(request: Request):
+    data = _require_json(request)
+    task_id = str(data.get("id") or "").strip()
+    if not task_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    task = await _require_command_task(task_id, tenant_id)
+    return response_ok({"events": await _task_process_events(task.id, tenant_id)})
 
 
 @command_bp.post("/tasks/runlogs")
