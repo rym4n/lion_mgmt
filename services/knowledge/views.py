@@ -1,13 +1,15 @@
 # coding=utf-8
 """知识库管理面 API（给人用）。"""
 
-from sanic import Blueprint, Request
+from sanic import Blueprint, Request, response
+from urllib.parse import quote
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from services.knowledge import manager
+from services.knowledge import object_store
 from services.digital_employee.views import _check_internal
 from services.knowledge.callbacks import apply_ingest_result
 
@@ -167,6 +169,26 @@ async def document_detail(request: Request):
     params = _json(request)
     _require(params, "document_id")
     return response_ok(await manager.document_detail(_tenant(request), str(params["document_id"])))
+
+
+@knowledge_bp.post("/document/download")
+@requires_permission("knowledge:r")
+async def document_download(request: Request):
+    """下载文档原始文件。"""
+    params = _json(request)
+    _require(params, "document_id")
+    doc = await manager.get_document_or_404(_tenant(request), str(params["document_id"]))
+    data = await object_store.get_raw(str(doc.id))
+    filename = doc.title or "document"
+    content_type = doc.mime_type or "application/octet-stream"
+    encoded = quote(filename, safe="")
+    return response.raw(
+        data,
+        content_type=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+        },
+    )
 
 
 @knowledge_bp.post("/document/delete")
