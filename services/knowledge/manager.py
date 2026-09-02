@@ -176,8 +176,15 @@ async def delete_space(tenant_id: str, space_key: str, *, dry_run: bool = False)
 
 
 async def list_spaces(tenant_id: str, page: int = 1, size: int = 20) -> dict:
-    """空间列表，带各空间的文档数与状态汇总。"""
-    query = KnowledgeSpace.filter(tenant_id=tenant_id, deleted=False)
+    """空间列表，带各空间的文档数与状态汇总。
+
+    只返回 source_type=manual 的空间：skill_package 空间由技能管理维护，
+    它是技能包的附属产物而非用户的知识空间，混在这里既不可编辑也无从理解
+    （知识空间页曾因此展示出一堆技能包）。需要技能包空间的调用方走技能侧接口。
+    """
+    query = KnowledgeSpace.filter(
+        tenant_id=tenant_id, deleted=False, source_type="manual"
+    )
     total = await query.count()
     spaces = await query.offset((page - 1) * size).limit(size).all()
 
@@ -431,26 +438,34 @@ async def search_documents_by_title(
     page: int = 1,
     size: int = 20,
 ) -> dict:
-    """按文档标题模糊搜索，并返回文档所属空间名称。"""
+    """按文档标题模糊搜索，并返回文档所属空间名称。
+
+    自动排除 skill_package 空间的文档——与 list_spaces 的过滤保持一致。
+    """
     keyword = (keyword or "").strip()
     if not keyword:
+        return {"total": 0, "page": page, "size": size, "items": []}
+
+    # 只在 manual 空间里搜。用「先取候选空间再按 space_key__in 限定」而非
+    # exclude(skill_package)：租户没有任何 manual 空间时结果必须为空，
+    # 而 exclude 在空集合下会退化成「搜全部」。
+    manual_spaces = await KnowledgeSpace.filter(
+        tenant_id=tenant_id, deleted=False, source_type="manual"
+    ).all()
+    manual_space_keys = [space.space_key for space in manual_spaces]
+    if not manual_space_keys:
         return {"total": 0, "page": page, "size": size, "items": []}
 
     query = KnowledgeDocument.filter(
         tenant_id=tenant_id,
         deleted=False,
         title__icontains=keyword,
+        space_key__in=manual_space_keys,
     )
     total = await query.count()
     documents = await query.offset((page - 1) * size).limit(size).all()
 
-    space_keys = {document.space_key for document in documents}
-    spaces = await KnowledgeSpace.filter(
-        tenant_id=tenant_id,
-        deleted=False,
-        space_key__in=list(space_keys),
-    ).all() if space_keys else []
-    space_names = {space.space_key: space.name for space in spaces}
+    space_names = {space.space_key: space.name for space in manual_spaces}
 
     updater_ids = {doc.uploader_id for doc in documents if doc.uploader_id}
     updaters = {}

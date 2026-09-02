@@ -199,3 +199,135 @@ def test_space_sync_route_removed():
 
     paths = {getattr(r, "path", "") for r in knowledge_bp.routes}
     assert not any("sync" in p for p in paths)
+
+
+# ---- list_spaces 应该排除 skill_package 空间 ----
+
+
+class _FakeSpaceQuery:
+    """轻量查询替身——支持 all/count 与 offset/limit 链。"""
+
+    def __init__(self, spaces):
+        self._spaces = spaces
+
+    async def all(self):
+        return self._spaces
+
+    async def count(self):
+        return len(self._spaces)
+
+    def offset(self, _n):
+        return self
+
+    def limit(self, _n):
+        return self
+
+
+def _space_filter(spaces):
+    """模拟 KnowledgeSpace.filter：真的按 source_type 收窄结果集。"""
+
+    def _filter(**kwargs):
+        subset = spaces
+        wanted = kwargs.get("source_type")
+        if wanted:
+            subset = [
+                s for s in subset if getattr(s, "source_type", "manual") == wanted
+            ]
+        return _FakeSpaceQuery(subset)
+
+    return _filter
+
+
+class _FakeDocQuery:
+    """文档计数替身。"""
+
+    def __init__(self, n=0):
+        self._n = n
+
+    def filter(self, **_kw):
+        return self
+
+    async def count(self):
+        return self._n
+
+
+@pytest.mark.asyncio
+async def test_list_spaces_excludes_skill_package(monkeypatch):
+    from services.knowledge import manager
+
+    manual = _FakeSpace(space_key="user-space", name="用户文档")
+    skill = _FakeSpace(
+        space_key="skill-vuln", name="漏洞扫描", source_type="skill_package"
+    )
+    monkeypatch.setattr(
+        manager.KnowledgeSpace, "filter", _space_filter([manual, skill])
+    )
+    monkeypatch.setattr(
+        manager.KnowledgeDocument, "filter", lambda **kw: _FakeDocQuery()
+    )
+
+    result = await manager.list_spaces("t1")
+
+    assert result["total"] == 1
+    names = [item["name"] for item in result["items"]]
+    assert "用户文档" in names
+    assert "漏洞扫描" not in names
+
+
+@pytest.mark.asyncio
+async def test_document_search_limited_to_manual_spaces(monkeypatch):
+    """全局文档搜索只在 manual 空间内进行——技能包文档不该被搜出来。"""
+    from services.knowledge import manager
+
+    manual = _FakeSpace(space_key="user-space", name="用户文档")
+    skill = _FakeSpace(
+        space_key="skill-vuln", name="漏洞扫描", source_type="skill_package"
+    )
+    monkeypatch.setattr(
+        manager.KnowledgeSpace, "filter", _space_filter([manual, skill])
+    )
+
+    captured = {}
+
+    class _DocQuery:
+        async def count(self):
+            return 0
+
+        def offset(self, _n):
+            return self
+
+        def limit(self, _n):
+            return self
+
+        async def all(self):
+            return []
+
+    def _doc_filter(**kwargs):
+        captured.update(kwargs)
+        return _DocQuery()
+
+    monkeypatch.setattr(manager.KnowledgeDocument, "filter", _doc_filter)
+
+    await manager.search_documents_by_title("t1", "盐田港")
+
+    assert captured["space_key__in"] == ["user-space"]
+
+
+@pytest.mark.asyncio
+async def test_document_search_returns_empty_without_manual_spaces(monkeypatch):
+    """租户只有技能包空间时必须返回空，不能退化成搜全部。"""
+    from services.knowledge import manager
+
+    skill = _FakeSpace(
+        space_key="skill-vuln", name="漏洞扫描", source_type="skill_package"
+    )
+    monkeypatch.setattr(manager.KnowledgeSpace, "filter", _space_filter([skill]))
+
+    def _boom(**_kw):
+        raise AssertionError("不该查询文档表")
+
+    monkeypatch.setattr(manager.KnowledgeDocument, "filter", _boom)
+
+    result = await manager.search_documents_by_title("t1", "盐田港")
+
+    assert result == {"total": 0, "page": 1, "size": 20, "items": []}
