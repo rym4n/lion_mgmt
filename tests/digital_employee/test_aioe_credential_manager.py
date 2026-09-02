@@ -136,7 +136,7 @@ def test_existing_employee_api_credential_syncs_current_rbac_role_and_reissues_t
     account = FakeAccount(
         id="account-1",
         username="digital-employee-employee-1",
-        display_name="数字员工 API 账号",
+        display_name="数字伙伴 API 账号",
         mfa_enable=False,
         tenant_id="tenant-1",
         password="password-hash",
@@ -168,7 +168,7 @@ def test_get_employee_api_token_uses_sync_path_for_existing_credential():
     account = FakeAccount(
         id="account-1",
         username="digital-employee-employee-1",
-        display_name="数字员工 API 账号",
+        display_name="数字伙伴 API 账号",
         mfa_enable=False,
         tenant_id="tenant-1",
         password="password-hash",

@@ -28,7 +28,7 @@ def identity_only_memory(
     不要因为「反正没启用记忆」就把 tenant_id 省掉——那会让 P4 在 1B
     翻转 LION_AGENT_REQUIRE_WORKSPACE_IDENTITY=true 的门槛永远达不到。
 
-    非员工 workspace 默认 employee_id=None；独立数字员工任务仍传入员工身份，
+    非员工 workspace 默认 employee_id=None；独立数字伙伴任务仍传入员工身份，
     只关闭记忆 middleware，不绕过 workspace owner 校验。
     """
     return {
@@ -98,7 +98,7 @@ async def chat_with_agent(
     tenant_id: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Send a short notification to a digital employee workspace.
+    """Send a short notification to a digital partner workspace.
 
     Ticket notifications do not need a new task/run record.  When a configured
     employee is available its workspace is used directly; otherwise the tenant

@@ -46,11 +46,11 @@ echo "[Entrypoint] Running database migrations..."
 echo "[Entrypoint] Database migrations completed successfully"
 
 if [ "${RY_DIGITAL_EMPLOYEE_BOOTSTRAP_PACKAGES:-false}" = "true" ]; then
-    echo "[Entrypoint] Bootstrapping digital employee builtin packages..."
+    echo "[Entrypoint] Bootstrapping digital partner builtin packages..."
     /app/.venv/bin/python -c "from services.digital_employee.bootstrap import main; raise SystemExit(main())"
-    echo "[Entrypoint] Digital employee builtin package bootstrap completed"
+    echo "[Entrypoint] Digital partner builtin package bootstrap completed"
 else
-    echo "[Entrypoint] Digital employee builtin package bootstrap disabled"
+    echo "[Entrypoint] Digital partner builtin package bootstrap disabled"
 fi
 
 # 启动应用：透传 compose CMD（默认回退到 python server.py）

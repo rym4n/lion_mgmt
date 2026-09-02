@@ -37,7 +37,7 @@ os.makedirs(REPORT_TEMPLATE_BASE, exist_ok=True)
 REPORT_USER_BASE = os.path.join(BASE_DIR, "data/user-reports")
 os.makedirs(REPORT_USER_BASE, exist_ok=True)
 
-# 数字员工资源目录
+# 数字伙伴资源目录
 DIGITAL_EMPLOYEE_RESOURCES = os.environ.get(
     "RY_DIGITAL_EMPLOYEE_RESOURCES"
 ) or os.path.join(BASE_DIR, "data/digital-employee")
@@ -324,7 +324,7 @@ CACHE = {
 # Agent Server 配置
 RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283")
 
-# 数字员工运行时服务
+# 数字伙伴运行时服务
 LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agent:8000")
 LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
 # 已弃用：运行时凭证改由 llm_model_config 表提供（见 services/llm_config/resolver.py）。
@@ -352,7 +352,7 @@ COMMAND_TASK_SWEEP_INTERVAL_SECONDS = int(
 # lion_agent 的 aioe-cli 工具回调 AIOE OpenAPI 的内部地址（容器网络内可达）
 AIOE_INTERNAL_URL = os.environ.get("RY_AIOE_INTERNAL_URL", "http://lion-mgmt:8000")
 
-# 数字员工长期记忆后端（SPEC §8 阶段一 1A 第 2 步）。
+# 数字伙伴长期记忆后端（SPEC §8 阶段一 1A 第 2 步）。
 # 这是**进程级全局开关，不是按租户灰度**——环境变量没有 tenant 维度，
 # execute_coordinator 对所有租户统一构造 payload。若将来确需按租户灰度，
 # 需另建 tenant-scoped 配置项并定义优先级/权限/缓存刷新，1A 不做。

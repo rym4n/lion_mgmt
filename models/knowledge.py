@@ -69,7 +69,7 @@ class KnowledgeDocument(BaseModel):
         description="来源: manual | api | skill_package | agent",
     )
     source_ref = fields.CharField(
-        max_length=255, null=True, description="skill_key / 剧本 run_id / 员工 id"
+        max_length=255, null=True, description="skill_key / 剧本 run_id / 伙伴 id"
     )
     uploader_id = fields.CharField(max_length=36, null=True, description="Account.id")
 

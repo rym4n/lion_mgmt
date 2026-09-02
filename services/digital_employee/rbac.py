@@ -19,8 +19,8 @@ def _default_platform_role_name(role_data: dict, role_id: str) -> str:
 def _default_platform_role_description(role_data: dict) -> str:
     description = str(role_data.get("description") or "").strip()
     if description:
-        return f"数字员工默认平台角色：{description}"
-    return "数字员工默认平台角色"
+        return f"数字伙伴默认平台角色：{description}"
+    return "数字伙伴默认平台角色"
 
 
 async def ensure_platform_role(role_id: str | None, role_data: dict, tenant_id: str) -> tuple[Role | None, bool]:

@@ -81,7 +81,7 @@ async def ai_question(request):
 
     await chat_manager.publish_ai_message(message_data)
 
-    # 优先派给内置「AI 运营助手」数字员工；找不到时回落到名为 AI 的剧本，
+    # 优先派给内置「AI 运营助手」数字伙伴；找不到时回落到名为 AI 的剧本，
     # 避免升级过程中作战室 AI 出现空档。
     assistant = await CommandAgent.filter(
         role_key="ai-ops-assistant",

@@ -187,7 +187,7 @@ APPROVAL_SCHEMA = {
         "id": {"type": "string", "description": "审批ID"},
         "task_id": {"type": "string", "description": "任务ID"},
         "run_id": {"type": "string", "nullable": True, "description": "运行ID"},
-        "employee_id": {"type": "string", "nullable": True, "description": "数字员工ID"},
+        "employee_id": {"type": "string", "nullable": True, "description": "数字伙伴ID"},
         "tenant_id": {"type": "string", "description": "租户ID"},
         "status": {"type": "string", "description": "审批状态"},
         "trigger_type": {"type": "string", "description": "触发类型"},
@@ -1084,7 +1084,7 @@ async def task_process(request: Request):
 @openapi.definition(
     summary="游标分页查看任务执行批次摘要",
     description=(
-        "按数字员工关联的 run_id 倒序返回有界批次摘要，只包含名称、状态、时间和计数，"
+        "按数字伙伴关联的 run_id 倒序返回有界批次摘要，只包含名称、状态、时间和计数，"
         "不返回节点 args/result。limit 默认10、最大50，cursor 绑定任务。需要command_center:r权限。"
     ),
     body=_json_body(
@@ -1443,7 +1443,7 @@ async def answer_clarification(request: Request):
 @command_bp.post("/tasks/cancel")
 @openapi.definition(
     summary="取消任务",
-    description="取消尚未结束的任务；会释放已分配数字员工的负载并记录事件。已结束的任务不可取消。需要command_center:u权限。",
+    description="取消尚未结束的任务；会释放已分配数字伙伴的负载并记录事件。已结束的任务不可取消。需要command_center:u权限。",
     body=_json_body(
         {
             "type": "object",

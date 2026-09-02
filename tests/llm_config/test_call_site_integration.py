@@ -61,7 +61,7 @@ def test_every_lion_agent_call_site_passes_llm():
 
 
 def test_execute_coordinator_honours_employee_binding():
-    """数字员工执行必须用员工绑定的配置（config_id），而非全局默认。"""
+    """数字伙伴执行必须用员工绑定的配置（config_id），而非全局默认。"""
     src = _read("services/digital_employee/execute_coordinator.py")
     assert "llm_config_id" in src
     assert "config_id=" in src

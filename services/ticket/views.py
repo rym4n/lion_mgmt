@@ -114,7 +114,7 @@ def _flow_json_for_ticket(ticket) -> dict:
 
 
 def _digital_employee_config(ticket) -> dict | None:
-    """Read the opt-in digital employee section from a flow definition.
+    """Read the opt-in digital partner section from a flow definition.
 
     Both the current nested shape and the early boolean/flat shape are accepted
     so published flows remain compatible while the editor evolves.
@@ -184,7 +184,7 @@ async def _notify_digital_employee(ticket, action: str, session: dict, comment: 
     except Exception as exc:
         # Approval state is already durable; a transient agent outage must not
         # turn a successful approval into an apparent failed request.
-        logger.warning("工单审批结果通知数字员工失败: ticket_id=%s, error=%s", ticket.id, exc)
+        logger.warning("工单审批结果通知数字伙伴失败: ticket_id=%s, error=%s", ticket.id, exc)
 
 
 async def _ticket_list_relation_names(records, tenant_id):
@@ -639,7 +639,7 @@ async def action_view(request: Request):
 
         await _notify_digital_employee(ticket, action, session, comment)
 
-        # 数字员工来源：调 decide_approval（SPEC §7.1 分流）
+        # 数字伙伴来源：调 decide_approval（SPEC §7.1 分流）
         if ticket.source == SOURCE_AGENT:
             from services.command_center.approval_service import decide_approval
             await decide_approval(

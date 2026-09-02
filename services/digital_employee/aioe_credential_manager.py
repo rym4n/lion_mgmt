@@ -1,7 +1,7 @@
 # coding=utf-8
-"""数字员工 ↔ AIOE 平台 API 账号 的凭证管理。
+"""数字伙伴 ↔ AIOE 平台 API 账号 的凭证管理。
 
-每个数字员工在创建时派生一个 type=api 的 Account，绑定员工的 RBAC 角色，
+每个数字伙伴在创建时派生一个 type=api 的 Account，绑定员工的 RBAC 角色，
 签发长期有效的 aioe-auth token（account_id:jwt）。token 由 lion_agent 的
 aioe-cli 工具持有，用来回调 AIOE OpenAPI（如 /playbook/debug 触发应用动作）。
 
@@ -45,7 +45,7 @@ async def _bind_rbac_role(account: Account, rbac_role_id: str | None, tenant_id:
     if role:
         await account.roles.add(role)
     else:
-        logger.warning(f"数字员工 API 账号未找到 RBAC 角色: rbac_role_id={rbac_role_id}, tenant_id={tenant_id}")
+        logger.warning(f"数字伙伴 API 账号未找到 RBAC 角色: rbac_role_id={rbac_role_id}, tenant_id={tenant_id}")
 
 
 async def _sync_rbac_role(account: Account, rbac_role_id: str | None, tenant_id: str) -> None:
@@ -77,11 +77,11 @@ async def _warm_account_cache(account: Account) -> None:
         await account.fetch_related("roles")
         await _cache_client().set(f"account_{account.id}", account, 7 * 24 * 3600)
     except Exception as exc:
-        logger.warning(f"数字员工 API 账号缓存预热失败(不影响建号): account_id={account.id}, error={exc}")
+        logger.warning(f"数字伙伴 API 账号缓存预热失败(不影响建号): account_id={account.id}, error={exc}")
 
 
 async def create_employee_api_account(employee) -> EmployeeApiCredential:
-    """为数字员工创建/复用一个 type=api 的 AIOE 账号，签发长期 token。
+    """为数字伙伴创建/复用一个 type=api 的 AIOE 账号，签发长期 token。
 
     幂等：已存在凭证则直接返回，不重复建号。
     """
@@ -104,7 +104,7 @@ async def create_employee_api_account(employee) -> EmployeeApiCredential:
                 username=username,
                 password=password_hasher.hash(str(uuid.uuid4())),
                 type="api",
-                display_name=f"数字员工 {employee.name} 的 API 账号",
+                display_name=f"数字伙伴 {employee.name} 的 API 账号",
                 expiration=datetime.fromtimestamp(int(time.time()) + API_TOKEN_EXPIRATION_SECONDS, TZ),
                 creator="digital_employee",
                 permit_ip=None,
@@ -144,7 +144,7 @@ async def delete_employee_api_account(employee) -> None:
             await account.save(update_fields=["deleted", "utime"])
         await _cache_client().delete(f"account_{credential.account_id}")
     except Exception as exc:
-        logger.warning(f"删除数字员工 API 账号失败: employee_id={employee.id}, error={exc}")
+        logger.warning(f"删除数字伙伴 API 账号失败: employee_id={employee.id}, error={exc}")
     finally:
         credential.deleted = True
         await credential.save(update_fields=["deleted", "utime"])

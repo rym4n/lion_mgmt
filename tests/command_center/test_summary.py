@@ -12,7 +12,7 @@ from services.command_center.summary import aggregate_usage, build_task_summary,
 
 
 def test_humanize_event_known_and_unknown():
-    assert humanize_event("runtime_tool_call") == "数字员工正在执行工具"
+    assert humanize_event("runtime_tool_call") == "数字伙伴正在执行工具"
     assert humanize_event("approval_required") == "等待人工审批"
     assert humanize_event("clarification_requested") == "等待用户补充任务信息"
     assert humanize_event("clarification_answered") == "用户已补充任务信息"

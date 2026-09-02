@@ -57,7 +57,7 @@ ACTION_LABEL_PREFIXES = {
 PERMISSION_RESOURCE_LABELS = {
     "agent_report_schedule": "汇报任务",
     "command_center": "作战室",
-    "digital_employee": "数字员工",
+    "digital_employee": "数字伙伴",
     "digital_employee_skill": "技能管理",
     "network_topology": "网络拓扑",
     "asset_management": "资产管理",

@@ -117,13 +117,13 @@ def _safe_runtime_error(exc: BaseException) -> dict:
         return {
             "layer": "runtime",
             "code": str(payload.get("code") or "runtime_internal_error"),
-            "message": str(payload.get("message") or "数字员工运行异常"),
+            "message": str(payload.get("message") or "数字伙伴运行异常"),
             "blocking": bool(payload.get("blocking", True)),
         }
     return {
         "layer": "runtime",
         "code": "runtime_internal_error",
-        "message": "数字员工运行异常，请查看运行详情",
+        "message": "数字伙伴运行异常，请查看运行详情",
         "blocking": True,
     }
 
@@ -217,7 +217,7 @@ async def _persist_failure_layers(run: CommandTaskRun, layers: dict[str, Any]) -
         error = {
             "layer": primary.get("layer") or "runtime",
             "code": primary.get("code") or "runtime_internal_error",
-            "message": primary.get("message") or "数字员工运行异常，请查看运行详情",
+            "message": primary.get("message") or "数字伙伴运行异常，请查看运行详情",
             "primary": primary,
             "secondary": [value for key, value in layers.items() if key != primary.get("layer")],
         }
@@ -255,7 +255,7 @@ def normalize_runtime_event(event_type: str, payload: Any) -> dict:
         requested_action = _runtime_control_action(data)
         return {
             "event_type": "approval_required",
-            "message": "数字员工请求人工审批",
+            "message": "数字伙伴请求人工审批",
             "run_status": COMMAND_RUN_STATUS_WAITING_APPROVAL,
             "task_status": COMMAND_TASK_STATUS_PENDING_APPROVAL,
             "requested_action": requested_action,
@@ -278,13 +278,13 @@ def normalize_runtime_event(event_type: str, payload: Any) -> dict:
         return {
             "event_type": "runtime_error" if blocking else "runtime_degraded",
             "code": code,
-            "message": data.get("message") or "数字员工运行异常",
+            "message": data.get("message") or "数字伙伴运行异常",
             "blocking": blocking,
             "run_status": COMMAND_RUN_STATUS_FAILED if blocking else None,
             "task_status": COMMAND_TASK_STATUS_FAILED if blocking else None,
             "error": {
                 "code": code,
-                "message": data.get("message") or "数字员工运行异常",
+                "message": data.get("message") or "数字伙伴运行异常",
                 "blocking": blocking,
                 "payload": data,
             } if blocking else None,
@@ -294,7 +294,7 @@ def normalize_runtime_event(event_type: str, payload: Any) -> dict:
         return {
             "event_type": "runtime_degraded",
             "code": data.get("code") or "runtime_degraded",
-            "message": data.get("message") or "数字员工运行已降级继续",
+            "message": data.get("message") or "数字伙伴运行已降级继续",
             "blocking": False,
             "metadata": {"runtime_event": event_type, "payload": data},
         }
@@ -312,7 +312,7 @@ def normalize_runtime_event(event_type: str, payload: Any) -> dict:
     if event_type == "end":
         return {
             "event_type": "runtime_completed",
-            "message": "数字员工运行完成",
+            "message": "数字伙伴运行完成",
             "metadata": {"runtime_event": event_type, "payload": data},
         }
     return {
@@ -386,7 +386,7 @@ async def checkout_run(
         await record_task_event(
             locked_task,
             "run_checked_out",
-            "数字员工运行已 checkout",
+            "数字伙伴运行已 checkout",
             operator_id,
             {"run_id": run.run_id, "lease_owner": run.lease_owner, "workspace_etag": run.workspace_etag},
             using_db=connection,
@@ -632,7 +632,7 @@ async def record_runtime_event(
                 requested_action=requested_action,
                 risk_level=requested_action.get("risk_level") or "medium",
                 operator_id=operator_id,
-                reason="数字员工请求人工审批",
+                reason="数字伙伴请求人工审批",
             )
 
     _sync_run(run, locked_run)
@@ -809,7 +809,7 @@ async def execute_task_run(
             await record_task_event(
                 task,
                 "continuation_started",
-                "审批已通过，重新启动数字员工运行",
+                "审批已通过，重新启动数字伙伴运行",
                 operator_id,
                 {
                     "approval_id": continuation_approval_id,
@@ -866,7 +866,7 @@ async def execute_task_run(
                 "status": COMMAND_TASK_STATUS_COMPLETED,
                 "progress": 100,
                 "result": result.get("content"),
-                "message": "数字员工执行完成",
+                "message": "数字伙伴执行完成",
                 "metadata": {"run_id": run.run_id},
             },
             operator_id=operator_id,
@@ -881,7 +881,7 @@ async def execute_task_run(
         except Exception as persist_exc:
             logger.warning("failure layer persistence skipped error_code=%s", type(persist_exc).__name__)
         primary = failure_layers.get("business") or failure_layers.get("runtime") or {}
-        primary_message = primary.get("message") or "数字员工执行失败，请查看运行详情"
+        primary_message = primary.get("message") or "数字伙伴执行失败，请查看运行详情"
         try:
             from services.command_center.manager import record_task_event
 
@@ -1008,7 +1008,7 @@ async def recover_stale_runs(tenant_id: str | None = None, now: datetime | None 
                     task,
                     {
                         "status": COMMAND_TASK_STATUS_FAILED,
-                        "message": "数字员工运行租约过期",
+                        "message": "数字伙伴运行租约过期",
                         "metadata": {"run_id": run.run_id},
                     },
                     None,

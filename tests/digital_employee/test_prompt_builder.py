@@ -159,7 +159,7 @@ def test_render_workspace_files_does_not_fallback_to_description_fields():
 
     files = render_workspace_files(employee, role, [])
 
-    assert "你是 AIOE 数字员工。" not in files["system_prompt.md"]
+    assert "你是 AIOE 数字伙伴。" not in files["system_prompt.md"]
     assert "旧岗位描述不应进入提示词" not in files["system_prompt.md"]
     assert "旧员工描述不应进入提示词" not in files["system_prompt.md"]
     manifest = json.loads(files["manifest.json"])

@@ -149,7 +149,7 @@ async def execute_memory_maintenance(tenant_id: str) -> dict:
     """执行一次记忆维护（由 lion_action 内置动作回调）。
 
     按租户循环：
-    1. 查询该租户所有启用的数字员工
+    1. 查询该租户所有启用的数字伙伴
     2. 解析每个员工的 LLM 配置
     3. 调用 lion_agent 的 /internal/v1/memory/maintain
     """

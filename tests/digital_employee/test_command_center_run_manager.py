@@ -769,7 +769,7 @@ def test_stale_recovery_skips_candidate_renewed_before_lock():
     assert run.status == "checked_out"
     assert task.status == "running"
     assert UPDATED_PROGRESS == []
-    assert RECORDED_EVENTS == [("run_checked_out", "数字员工运行已 checkout", None, {
+    assert RECORDED_EVENTS == [("run_checked_out", "数字伙伴运行已 checkout", None, {
         "run_id": run.run_id,
         "lease_owner": run.lease_owner,
         "workspace_etag": run.workspace_etag,

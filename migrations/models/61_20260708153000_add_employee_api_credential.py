@@ -20,10 +20,10 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         COMMENT ON COLUMN "employee_api_credential"."utime" IS '更新时间';
         COMMENT ON COLUMN "employee_api_credential"."deleted" IS '删除标识';
         COMMENT ON COLUMN "employee_api_credential"."tenant_id" IS '默认租户ID';
-        COMMENT ON COLUMN "employee_api_credential"."employee_id" IS '数字员工 CommandAgent ID';
+        COMMENT ON COLUMN "employee_api_credential"."employee_id" IS '数字伙伴 CommandAgent ID';
         COMMENT ON COLUMN "employee_api_credential"."account_id" IS 'AIOE API 账号 Account ID';
         COMMENT ON COLUMN "employee_api_credential"."api_token" IS 'aioe-auth token（account_id:jwt）';
-        COMMENT ON TABLE "employee_api_credential" IS '数字员工到 AIOE 平台 API 账号的映射。';
+        COMMENT ON TABLE "employee_api_credential" IS '数字伙伴到 AIOE 平台 API 账号的映射。';
     """
 
 

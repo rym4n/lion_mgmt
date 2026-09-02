@@ -326,7 +326,7 @@ async def _cleanup_imported_action_artifacts(actions: list[dict]) -> None:
             if isinstance(logo_path, str) and logo_path.startswith("/files/user/tools/"):
                 await utils.delete_from_s3("user", logo_path.removeprefix("/files/user/tools/"), "tools")
         except Exception as exc:
-            logger.warning("cleanup digital employee action artifact failed name=%s version=%s error=%s", name, version, exc)
+            logger.warning("cleanup digital partner action artifact failed name=%s version=%s error=%s", name, version, exc)
 
 
 def _unwrap_route_handler(func):
@@ -600,7 +600,7 @@ async def _ingest_package_docs_if_enabled(
 
 
 async def _auto_create_employees(role_keys: list[str], tenant_id: str) -> tuple[list[dict], list[dict]]:
-    """为导入的岗位自动创建完整数字员工。
+    """为导入的岗位自动创建完整数字伙伴。
 
     符合「导入即得到一名可用员工」的产品设计：同岗位尚无员工时直接新建，
     已存在员工时自动追加序号重命名后再建，避免界面上出现重名。
@@ -633,7 +633,7 @@ async def _auto_create_employees(role_keys: list[str], tenant_id: str) -> tuple[
         try:
             employee = await create_employee(tenant_id=tenant_id, role_key=role_key, name=name)
         except Exception as exc:
-            logger.warning("auto create digital employee failed role_key=%s error=%s", role_key, exc)
+            logger.warning("auto create digital partner failed role_key=%s error=%s", role_key, exc)
             skipped.append({"type": "employee", "role_key": role_key, "reason": str(exc)})
             continue
         created.append(
@@ -746,7 +746,7 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
 
 async def import_builtin_packages(operator_id: str = "system") -> ImportResult:
     logger.warning(
-        "digital employee builtin package bootstrap is deprecated; "
+        "digital partner builtin package bootstrap is deprecated; "
         "builtin role and skill packages are managed by aioe_package"
     )
     return ImportResult(

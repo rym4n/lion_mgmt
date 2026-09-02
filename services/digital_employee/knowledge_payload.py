@@ -39,7 +39,7 @@ async def build_knowledge_payload(employee) -> dict | None:
             ],
         }
     except Exception as exc:
-        # 知识库故障绝不能让数字员工无法执行。
+        # 知识库故障绝不能让数字伙伴无法执行。
         logger.warning(
             "knowledge_payload_failed employee=%s error_type=%s",
             getattr(employee, "id", None),

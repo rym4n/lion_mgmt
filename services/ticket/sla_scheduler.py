@@ -489,7 +489,7 @@ async def _handle_node_timeout(node, owner, moment) -> bool:
 
 
 async def _handle_ticket_timeout(ticket, owner, moment) -> bool:
-    """工单级 resolve 到期：置 3已超时，并传播数字员工过期。"""
+    """工单级 resolve 到期：置 3已超时，并传播数字伙伴过期。"""
     from services.ticket import callbacks
     from services.ticket.engine import can_transition_ticket, record_activity
 

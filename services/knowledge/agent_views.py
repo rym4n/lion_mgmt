@@ -1,5 +1,5 @@
 # coding=utf-8
-"""知识库 Agent 面 API（给数字员工用）。
+"""知识库 Agent 面 API（给数字伙伴用）。
 
 范围由服务端按员工身份注入，请求参数只能收窄不能放大。
 员工只能通过 document_id 接触文档，空间键是唯一的过滤坐标。
@@ -36,7 +36,7 @@ MAX_TOP_K = 20
 
 
 async def resolve_employee(request: Request) -> CommandAgent:
-    """从请求身份反查当前数字员工。"""
+    """从请求身份反查当前数字伙伴。"""
     account = getattr(request.ctx, "session", {}).get("account_info")
     account_id = (
         account.get("id") if isinstance(account, dict) else getattr(account, "id", None)

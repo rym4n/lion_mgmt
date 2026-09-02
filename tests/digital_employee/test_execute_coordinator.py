@@ -529,7 +529,7 @@ def test_run_returns_control_event_without_marking_task_completed():
     command_run = SimpleNamespace(run_id="run-1")
 
     async def on_runtime_event(event_type, event):
-        return {"event_type": event_type, "message": "数字员工请求人工审批"}
+        return {"event_type": event_type, "message": "数字伙伴请求人工审批"}
 
     result = asyncio.run(
         execute_coordinator.run(

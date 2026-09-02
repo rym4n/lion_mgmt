@@ -615,7 +615,7 @@ def test_command_center_migration_splits_expert_team_license_modules():
     assert "agent_bp" in upgrade_sql
     assert "command_center_bp" not in upgrade_sql
     assert "'指挥中心'" in upgrade_sql
-    assert "'数字员工'" in upgrade_sql
+    assert "'数字伙伴'" in upgrade_sql
     assert "'汇报助手'" in upgrade_sql
     assert "command_center:r" in upgrade_sql
     assert "digital_employee:r" in upgrade_sql

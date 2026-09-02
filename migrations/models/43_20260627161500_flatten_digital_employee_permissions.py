@@ -7,10 +7,10 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
         UPDATE "permissions_menu"
         SET "Permissions" = '[
-            {"label": "新增数字员工权限", "value": "c"},
-            {"label": "删除数字员工权限", "value": "d"},
-            {"label": "修改数字员工权限", "value": "u"},
-            {"label": "查看数字员工权限", "value": "r"}
+            {"label": "新增数字伙伴权限", "value": "c"},
+            {"label": "删除数字伙伴权限", "value": "d"},
+            {"label": "修改数字伙伴权限", "value": "u"},
+            {"label": "查看数字伙伴权限", "value": "r"}
         ]'::jsonb
         WHERE "model" = 'digital_employee';
 

@@ -20,7 +20,7 @@ class RuntimeEventError(RuntimeError):
 
     def __init__(self, payload: dict):
         self.payload = dict(payload)
-        super().__init__(str(self.payload.get("message") or "数字员工运行异常"))
+        super().__init__(str(self.payload.get("message") or "数字伙伴运行异常"))
 
 
 def _stream_id(task: CommandTask) -> str:
@@ -155,7 +155,7 @@ async def _publish_room_event(task: CommandTask, event_type: str, payload: dict,
         await client.publish(WR_TOPIC, orjson.dumps(message).decode())
         return True
     except Exception as exc:
-        logger.warning(f"发布数字员工作战室流式消息失败: task_id={task.id}, error={exc}")
+        logger.warning(f"发布数字伙伴作战室流式消息失败: task_id={task.id}, error={exc}")
         return False
 
 
@@ -181,7 +181,7 @@ async def _publish_room_end(task: CommandTask, operator_id: str | None) -> None:
             ).decode(),
         )
     except Exception as exc:
-        logger.warning(f"发布数字员工作战室结束消息失败: task_id={task.id}, error={exc}")
+        logger.warning(f"发布数字伙伴作战室结束消息失败: task_id={task.id}, error={exc}")
 
 
 RuntimeEventHandler = Callable[[str, dict], Awaitable[dict | None]]
@@ -243,7 +243,7 @@ async def run(
             "base_url": AIOE_INTERNAL_URL,
             "token": aioe_token,
             "tenant_id": task.tenant_id,
-            # 本次数字员工运行的 run_id，随 aioe_cli 回传到 /playbook/debug，
+            # 本次数字伙伴运行的 run_id，随 aioe_cli 回传到 /playbook/debug，
             # 用于把动作/剧本产生的 runlog 关联到该 CommandTaskRun（见 execute_action）。
             "agent_run_id": getattr(command_run, "run_id", None) or task.run_id,
         },
@@ -254,7 +254,7 @@ async def run(
     content = []
     saw_delta = False
     usage = _zero_usage()
-    await update_task_progress(task, {"status": "running", "progress": max(task.progress or 0, 1), "message": "数字员工开始执行"}, operator_id)
+    await update_task_progress(task, {"status": "running", "progress": max(task.progress or 0, 1), "message": "数字伙伴开始执行"}, operator_id)
     async for event_type, event in stream_prompt_events(**payload):
         runtime_event: dict | None = None
         if on_runtime_event:
@@ -299,7 +299,7 @@ async def run(
         await task.save(update_fields=["result", "utime"])
         await update_task_progress(
             task,
-            {"status": "completed", "progress": 100, "message": "数字员工执行完成"},
+            {"status": "completed", "progress": 100, "message": "数字伙伴执行完成"},
             operator_id,
         )
     return {"content": result_content, "usage": usage}

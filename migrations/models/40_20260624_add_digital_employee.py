@@ -95,7 +95,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
             False,
             '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
             'digital_employee',
-            '数字员工',
+            '数字伙伴',
             '["digital_employee:c","digital_employee:r","digital_employee:u","digital_employee:d"]',
             '[]',
             'digital_employee_bp'

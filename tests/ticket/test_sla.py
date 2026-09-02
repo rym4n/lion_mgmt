@@ -381,7 +381,7 @@ async def test_running_auto_node_timeout_becomes_abnormal(monkeypatch):
     assert "exception" in activities
 
 
-# ---------- 数字员工过期传播 ----------
+# ---------- 数字伙伴过期传播 ----------
 
 @pytest.mark.asyncio
 async def test_agent_ticket_expiry_marks_command_approval_expired(monkeypatch):

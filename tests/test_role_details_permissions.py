@@ -56,10 +56,10 @@ PERMISSIONS_DATA = [
     },
     {
         "model": "digital_employee",
-        "description": "数字员工",
+        "description": "数字伙伴",
         "Permissions": [
-            {"label": "新增数字员工权限", "value": "c"},
-            {"label": "查看数字员工权限", "value": "r"},
+            {"label": "新增数字伙伴权限", "value": "c"},
+            {"label": "查看数字伙伴权限", "value": "r"},
         ],
     },
 ]
@@ -367,8 +367,8 @@ def test_role_details_normalizes_legacy_nested_permission_codes():
         {"r": "查看汇报任务权限"},
     ]
     assert _by_model(structured)["digital_employee"]["sp"] == [
-        {"c": "新增数字员工权限"},
-        {"r": "查看数字员工权限"},
+        {"c": "新增数字伙伴权限"},
+        {"r": "查看数字伙伴权限"},
     ]
 
 

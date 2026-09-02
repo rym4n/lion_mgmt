@@ -21,8 +21,8 @@ async def bootstrap_builtin_packages() -> dict:
 
 def main() -> int:
     if not builtin_package_bootstrap_enabled():
-        logger.info("digital employee builtin package bootstrap skipped")
+        logger.info("digital partner builtin package bootstrap skipped")
         return 0
     result = asyncio.run(bootstrap_builtin_packages())
-    logger.info("digital employee builtin package bootstrap completed: %s", result)
+    logger.info("digital partner builtin package bootstrap completed: %s", result)
     return 0

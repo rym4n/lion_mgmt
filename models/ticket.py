@@ -252,7 +252,7 @@ class Ticket(BaseModel):
         on_delete=fields.SET_NULL, description="提单人",
     )
     form_data = fields.JSONField(default=dict, description="提单表单填写值")
-    source = fields.IntField(default=SOURCE_MANUAL, index=True, description="0手动 1剧本 2数字员工 3事件")
+    source = fields.IntField(default=SOURCE_MANUAL, index=True, description="0手动 1剧本 2数字伙伴 3事件")
 
     # 剧本触发场景：终态时用这四个字段重建恢复消息（SPEC §2.1 恢复契约）
     origin_run_id = fields.CharField(max_length=64, null=True, index=True, description="剧本 run_id")

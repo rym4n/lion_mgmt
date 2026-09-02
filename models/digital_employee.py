@@ -5,7 +5,7 @@ from tortoise import fields
 
 
 class DigitalEmployeeRole(BaseModel):
-    """数字员工岗位索引。"""
+    """数字伙伴岗位索引。"""
 
     role_key = fields.CharField(max_length=64, description="岗位逻辑标识")
     name = fields.CharField(max_length=255, description="岗位名称")
@@ -48,7 +48,7 @@ class DigitalEmployeeRole(BaseModel):
 
 
 class DigitalEmployeeSkill(BaseModel):
-    """数字员工技能索引。权威内容在 skill_dir 下的 SKILL.md，本表仅供列表与调度查询。"""
+    """数字伙伴技能索引。权威内容在 skill_dir 下的 SKILL.md，本表仅供列表与调度查询。"""
 
     skill_key = fields.CharField(max_length=64, description="技能逻辑标识")
     name = fields.CharField(max_length=255, description="技能名称")
@@ -85,13 +85,13 @@ class DigitalEmployeeSkill(BaseModel):
 
 
 class EmployeeApiCredential(BaseModel):
-    """数字员工到 AIOE 平台 API 账号的映射。
+    """数字伙伴到 AIOE 平台 API 账号的映射。
 
-    每个数字员工在创建时派生一个 type=api 的 Account，绑定员工的 RBAC 角色，
+    每个数字伙伴在创建时派生一个 type=api 的 Account，绑定员工的 RBAC 角色，
     签发长期有效的 token 供 lion_agent 的 aioe-cli 工具回调 AIOE OpenAPI。
     """
 
-    employee_id = fields.CharField(max_length=36, description="数字员工 CommandAgent ID")
+    employee_id = fields.CharField(max_length=36, description="数字伙伴 CommandAgent ID")
     account_id = fields.CharField(max_length=36, description="AIOE API 账号 Account ID")
     api_token = EncryptedCharField(max_length=2048, description="aioe-auth token（account_id:jwt）")
 

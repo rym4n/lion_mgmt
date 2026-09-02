@@ -5,7 +5,7 @@ from tortoise import fields
 
 
 class EmployeeReport(BaseModel):
-    """数字员工任务级报告。"""
+    """数字伙伴任务级报告。"""
 
     task = fields.ForeignKeyField(
         "models.CommandTask",
@@ -17,7 +17,7 @@ class EmployeeReport(BaseModel):
         "models.CommandAgent",
         null=True,
         related_name="employee_reports",
-        description="产出员工",
+        description="产出伙伴",
         on_delete=fields.SET_NULL,
     )
     role_key = fields.CharField(max_length=64, description="产出岗位")

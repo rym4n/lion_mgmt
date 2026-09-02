@@ -214,7 +214,7 @@ RY_AGENT_MODEL=openai-proxy/gpt-4o
 RY_AGENT_CONTEXT_WINDOW=8000
 ```
 
-`RY_AI_LITE_MODEL` 仅用于指挥中心自动选择员工，未配置时默认使用 `aioe-lite`；数字员工正式执行仍使用 `RY_AI_MODEL`。
+`RY_AI_LITE_MODEL` 仅用于指挥中心自动选择员工，未配置时默认使用 `aioe-lite`；数字伙伴正式执行仍使用 `RY_AI_MODEL`。
 
 ### 数据库迁移
 

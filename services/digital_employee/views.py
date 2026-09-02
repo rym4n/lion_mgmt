@@ -282,7 +282,7 @@ async def employee_detail(request: Request):
 
 
 async def _employee_token_usage(employee: CommandAgent) -> dict:
-    """聚合该数字员工累计的大模型 token 消耗。"""
+    """聚合该数字伙伴累计的大模型 token 消耗。"""
     from services.command_center.summary import aggregate_usage
 
     runs = await CommandTaskRun.filter(tenant_id=employee.tenant_id, employee_id=employee.id, deleted=False).all()

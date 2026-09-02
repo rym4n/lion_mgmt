@@ -84,19 +84,19 @@ class CommandAgent(BaseModel):
         "models.DigitalEmployeeRole",
         null=True,
         related_name="employees",
-        description="数字员工岗位",
+        description="数字伙伴岗位",
         on_delete=fields.SET_NULL,
     )
-    role_key = fields.CharField(max_length=64, null=True, description="数字员工岗位逻辑标识")
-    skill_keys = fields.JSONField(default=list, description="启用的数字员工技能 key 列表")
+    role_key = fields.CharField(max_length=64, null=True, description="数字伙伴岗位逻辑标识")
+    skill_keys = fields.JSONField(default=list, description="启用的数字伙伴技能 key 列表")
     knowledge_space_keys = fields.JSONField(
         default=list, description="可见知识空间 key 列表"
     )
     knowledge_write_space = fields.CharField(
-        max_length=64, null=True, description="员工写入的目标空间 key，为空则不给写入工具"
+        max_length=64, null=True, description="伙伴写入的目标空间 key，为空则不给写入工具"
     )
-    rbac_role_id = fields.CharField(max_length=36, null=True, description="员工绑定的 RBAC 角色")
-    resource_scope = fields.JSONField(default=dict, description="员工资源访问范围")
+    rbac_role_id = fields.CharField(max_length=36, null=True, description="伙伴绑定的 RBAC 角色")
+    resource_scope = fields.JSONField(default=dict, description="伙伴资源访问范围")
     llm_config = fields.ForeignKeyField(
         "models.LlmModelConfig",
         null=True,
@@ -282,7 +282,7 @@ class CommandTaskRun(BaseModel):
         "models.CommandAgent",
         null=True,
         related_name="task_runs",
-        description="执行数字员工",
+        description="执行数字伙伴",
         on_delete=fields.SET_NULL,
     )
     run_id = fields.CharField(max_length=64, description="运行ID")
@@ -371,7 +371,7 @@ class CommandApproval(BaseModel):
         "models.CommandAgent",
         null=True,
         related_name="approvals",
-        description="执行数字员工",
+        description="执行数字伙伴",
         on_delete=fields.SET_NULL,
     )
     status = fields.CharField(max_length=30, default=COMMAND_APPROVAL_STATUS_PENDING, description="审批状态")

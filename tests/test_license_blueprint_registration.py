@@ -16,7 +16,7 @@ def test_licensed_module_active_uses_group_expiry_for_legacy_license_payload():
         }
     }
     item = {
-        "name": "数字员工",
+        "name": "数字伙伴",
         "module": "digital_employee_bp",
         "auth": True,
         "group": "全平台AI助手",
@@ -28,7 +28,7 @@ def test_licensed_module_active_uses_group_expiry_for_legacy_license_payload():
 def test_licensed_module_inactive_without_module_or_group_expiry():
     license_data = {"grouplist": {"全平台AI助手": {}}}
     item = {
-        "name": "数字员工",
+        "name": "数字伙伴",
         "module": "digital_employee_bp",
         "auth": True,
         "group": "全平台AI助手",
@@ -46,7 +46,7 @@ def test_licensed_module_active_prefers_module_expiry_when_present():
         }
     }
     item = {
-        "name": "数字员工",
+        "name": "数字伙伴",
         "module": "digital_employee_bp",
         "auth": True,
         "group": "全平台AI助手",

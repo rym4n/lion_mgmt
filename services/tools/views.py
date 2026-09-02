@@ -4363,7 +4363,7 @@ async def upload_browser_document(request):
                 "workspace_path": rel_path,
             }
         )
-    # 浏览器工作区不属于任何数字员工：employee_id 显式为 None，
+    # 浏览器工作区不属于任何数字伙伴：employee_id 显式为 None，
     # lion_agent 侧只校验 tenant（D10）。不要为了填满字段编一个 employee_id。
     await LionAgentClient().sync_workspace(
         workspace_id_for(tenant_id, "browser"),

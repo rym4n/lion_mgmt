@@ -335,7 +335,7 @@ def _schedule_lion_agent_execution(task: CommandTask, employee: CommandAgent, op
                     failed_task,
                     {
                         "status": "failed",
-                        "message": f"数字员工执行失败: {exc}",
+                        "message": f"数字伙伴执行失败: {exc}",
                         "metadata": {"error": str(exc)},
                     },
                     operator_id,
@@ -545,7 +545,7 @@ async def complete_task_progress_after_commit(task: CommandTask, transition, dat
 
             asyncio.create_task(compose(locked_task, (data.get("metadata") or {}).get("actions")))
         except Exception as exc:
-            logger.warning(f"调度数字员工报告生成失败: task_id={locked_task.id}, error={exc}")
+            logger.warning(f"调度数字伙伴报告生成失败: task_id={locked_task.id}, error={exc}")
 
     await publish_command_center_update(locked_task.tenant_id, "task_progress_updated", locked_task.id)
     return locked_task
@@ -649,7 +649,7 @@ async def sweep_stale_dispatch_tasks(operator_id: str | None = None) -> int:
         try:
             data = {
                 "status": "failed",
-                "message": "长时间没有可用的数字员工接单，任务已自动超时",
+                "message": "长时间没有可用的数字伙伴接单，任务已自动超时",
                 "metadata": {"reason": "dispatch_timeout", "timeout_seconds": COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS},
             }
             async with in_transaction() as connection:
