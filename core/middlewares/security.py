@@ -271,6 +271,11 @@ class SecurityMiddleware(BaseMiddleware):
             "/agent/report/schedule/internal/",
             "/digital_employee/internal/",
             "/digital_employee/runtime/",
+            # lion_agent 的文档入库状态回调。它带的是服务间 internal token，
+            # 没有用户 session，被这里拦掉就会返回 4027，文档状态永远写不回来
+            # ——表现为「一直 processing，30 分钟后显示索引超时」。
+            # 路由自身用 _check_internal 校验 X-Internal-Token。
+            "/knowledge/internal/",
         ]
         request_method = getattr(request, "method", "GET").upper()
         if (

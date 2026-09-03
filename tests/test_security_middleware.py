@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+import re
 from types import SimpleNamespace
 
 import orjson
@@ -203,6 +204,125 @@ def test_digital_employee_bootstrap_route_requires_session_auth(monkeypatch):
     )
 
     assert called_paths == ["/system/bootstrap/digital-employee/package/import"]
+
+
+def test_knowledge_ingest_callback_skips_session_auth(monkeypatch):
+    """lion_agent 的入库状态回调必须免 session 鉴权。
+
+    回归：白名单曾漏掉 /knowledge/internal/，回调被中间件拦下返回 4027，
+    文档状态永远写不回来——用户看到的是「一直 processing，30 分钟后索引超时」，
+    而 lion_agent 侧其实解析、embedding、向量写入全部成功。
+    """
+    called_paths = []
+
+    async def fake_authenticate(request):
+        called_paths.append(request.path)
+
+    monkeypatch.setattr(security, "authenticate", fake_authenticate)
+
+    _run(
+        security.SecurityMiddleware().before_request(
+            SimpleNamespace(path="/knowledge/internal/documents/doc-1/status")
+        )
+    )
+
+    assert called_paths == []
+
+
+def test_regular_knowledge_routes_still_require_session_auth(monkeypatch):
+    called_paths = []
+
+    async def fake_authenticate(request):
+        called_paths.append(request.path)
+
+    monkeypatch.setattr(security, "authenticate", fake_authenticate)
+
+    _run(
+        security.SecurityMiddleware().before_request(
+            SimpleNamespace(path="/knowledge/document/list")
+        )
+    )
+
+    assert called_paths == ["/knowledge/document/list"]
+
+
+def _internal_token_routes():
+    """静态扫描各 views.py，列出所有靠 _check_internal 鉴权的路由完整路径。
+
+    刻意走 AST 而不是读蓝图的路由表：蓝图注册进 app 后 Sanic 会把
+    _future_routes 搬到 routes，扫哪个取决于同批次里有没有别的测试建过 app，
+    结果会随执行顺序漂移。源码是稳定的。
+    """
+    import ast
+    from pathlib import Path
+
+    services_dir = Path(security.__file__).resolve().parents[2] / "services"
+    routes = []
+    for views_file in sorted(services_dir.glob("*/views.py")):
+        tree = ast.parse(views_file.read_text(encoding="utf-8"))
+
+        # 先取本模块的蓝图前缀：Blueprint("x", url_prefix="/x")
+        prefix = ""
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", None) != "Blueprint":
+                continue
+            for kw in node.keywords:
+                if kw.arg == "url_prefix" and isinstance(kw.value, ast.Constant):
+                    prefix = str(kw.value.value).rstrip("/")
+            break
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body_src = ast.unparse(node)
+            if "_check_internal" not in body_src:
+                continue
+            for decorator in node.decorator_list:
+                if not isinstance(decorator, ast.Call):
+                    continue
+                attr = getattr(decorator.func, "attr", "")
+                if attr not in {"post", "get", "put", "patch", "delete"}:
+                    continue
+                if not decorator.args or not isinstance(
+                    decorator.args[0], ast.Constant
+                ):
+                    continue
+                uri = str(decorator.args[0].value)
+                # 把 <document_id> 这类占位换成具体值，白名单是前缀匹配、不受影响
+                uri = re.sub(r"<[^>]+>", "x", uri)
+                routes.append(f"{prefix}/{uri.lstrip('/')}")
+    return routes
+
+
+def test_every_internal_token_route_is_exempt_from_session_auth(monkeypatch):
+    """结构性护栏：凡是用 _check_internal 做服务间鉴权的路由，都必须在白名单里。
+
+    两者错配时故障是静默的——调用方收到 4027「会话无效」，而路由的
+    docstring 明写着「不走用户 session」，看代码根本发现不了。逐条比对，
+    以后新增内部路由漏加白名单会在这里直接失败。
+    """
+    authenticated = []
+
+    async def fake_authenticate(request):
+        authenticated.append(request.path)
+
+    monkeypatch.setattr(security, "authenticate", fake_authenticate)
+    middleware = security.SecurityMiddleware()
+
+    internal_paths = _internal_token_routes()
+
+    # 至少要扫到已知的那些内部路由，否则说明扫描逻辑本身失效了
+    assert len(internal_paths) >= 5, f"扫描到的内部路由过少: {internal_paths}"
+    assert any(
+        "/knowledge/internal/" in path for path in internal_paths
+    ), f"未扫到知识库回调路由: {internal_paths}"
+
+    for path in internal_paths:
+        _run(middleware.before_request(SimpleNamespace(path=path)))
+
+    assert authenticated == [], f"这些内部路由仍在要求 session 鉴权: {authenticated}"
 
 
 @pytest.mark.parametrize(
