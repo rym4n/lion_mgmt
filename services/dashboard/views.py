@@ -317,10 +317,13 @@ async def count_playbooks(request):
         await PlaybookVersion.filter(
             status=1,
             deleted=False,
-            playbook__internal=maintenance_mode,
             tenant_id=tenant_id,
+            playbook__deleted=False,
+            playbook__internal=maintenance_mode,
+            playbook__tenant_id=tenant_id,
         )
         .annotate(counts=Count("playbook_id", distinct=True))
+        .group_by("tenant_id")
         .values("counts")
     )
     counts = result[0].get("counts") if result else 0

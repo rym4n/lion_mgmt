@@ -67,6 +67,11 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
     assert "以当前任务和平台强制访问控制为准。" in files["system_prompt.md"]
     assert "执行剧本必须先调用 playbook-input" in files["system_prompt.md"]
     assert "不得用 '{}' 执行有入参的剧本" in files["system_prompt.md"]
+    assert "playbook-status --flow <剧本版本id> --run-id <run_id>" in files["system_prompt.md"]
+    assert "不得重新执行主剧本或拆分执行子剧本" in files["system_prompt.md"]
+    assert "非空 run_id 且 terminal=false" in files["system_prompt.md"]
+    assert "查询同一 run_id" in files["system_prompt.md"]
+    assert "state=unknown 或 retryable=false" in files["system_prompt.md"]
     assert "AgentScope Toolkit" not in files["system_prompt.md"]
     assert "内置 `aioe-cli` skill" not in files["system_prompt.md"]
     assert files["skills"] == {}

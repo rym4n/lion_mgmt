@@ -259,7 +259,10 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         "- `playbooks`：列出有权执行的已发布剧本；",
         "- `playbook-input --flow <剧本版本id>`：查询剧本入参 schema/default；",
         "- `playbook --flow <剧本版本id> --input '<JSON对象>'`：执行剧本。",
+        "- `playbook-status --flow <剧本版本id> --run-id <run_id>`：查询同一次剧本运行的状态。",
         "执行剧本必须先调用 playbook-input，严格按返回的 schema/default 组装 --input；不得用 '{}' 执行有入参的剧本，无入参时也必须显式传 --input '{}'。",
+        "playbook 返回 state=running 或非空 run_id 且 terminal=false 时，只能用 playbook-status 查询同一 run_id，直到 terminal=true。",
+        "同一 run_id 终态前不得重新执行主剧本或拆分执行子剧本；state=unknown 或 retryable=false 时也禁止自动重试。",
     ]
     system_prompt.extend(["## Runtime", "\n".join(runtime_lines), ""])
 

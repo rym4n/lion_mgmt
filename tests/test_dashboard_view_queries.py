@@ -58,30 +58,6 @@ CASES = {
 
 
 @pytest.mark.parametrize(
-    ("endpoint", "model_name", "expected_filters"),
-    [
-        (
-            count_playbooks,
-            "PlaybookVersion",
-            {
-                "status": 1,
-                "deleted": False,
-                "playbook__internal": False,
-                "tenant_id": "tenant-1",
-            },
-        ),
-        (
-            count_apps,
-            "ToolResources",
-            {
-                "deleted": False,
-                "internal": False,
-                "tenant_id": "tenant-1",
-            },
-        ),
-    ],
-)
-@pytest.mark.parametrize(
     ("rows", "expected"),
     [
         ([], 0),
@@ -89,11 +65,8 @@ CASES = {
         ([{"counts": 3}], 3),
     ],
 )
-def test_dashboard_count_aggregates_handle_empty_scopes(
+def test_dashboard_app_count_aggregate_handles_empty_scope(
     monkeypatch,
-    endpoint,
-    model_name,
-    expected_filters,
     rows,
     expected,
 ):
@@ -126,16 +99,99 @@ def test_dashboard_count_aggregates_handle_empty_scopes(
     )
     monkeypatch.setattr(
         dashboard_views,
-        model_name,
+        "ToolResources",
         SimpleNamespace(filter=filter_rows),
     )
     monkeypatch.setattr(dashboard_views, "response_ok", lambda data: data)
 
-    result = asyncio.run(inspect.unwrap(endpoint)(request))
+    result = asyncio.run(inspect.unwrap(count_apps)(request))
 
     assert result == expected
-    assert captured["filters"] == expected_filters
+    assert captured["filters"] == {
+        "deleted": False,
+        "internal": False,
+        "tenant_id": "tenant-1",
+    }
     assert set(captured["annotations"]) == {"counts"}
+    assert captured["value_fields"] == ("counts",)
+
+
+@pytest.mark.parametrize(
+    ("maintenance_mode", "aggregate_rows", "expected"),
+    [(False, [], 0), (False, [{"counts": 2}], 2), (True, [{"counts": 3}], 3)],
+)
+def test_count_playbooks_counts_distinct_playbooks_with_published_versions(
+    monkeypatch, maintenance_mode, aggregate_rows, expected
+):
+    captured = {}
+
+    class FakeVersionAggregateQuery:
+        def annotate(self, **annotations):
+            captured["annotations"] = annotations
+            return self
+
+        def group_by(self, *fields):
+            captured["group_fields"] = fields
+            return self
+
+        async def values(self, *fields):
+            captured["value_fields"] = fields
+            return aggregate_rows
+
+    def filter_versions(**filters):
+        captured["filters"] = filters
+        return FakeVersionAggregateQuery()
+
+    class FakePlaybookQuery:
+        def distinct(self):
+            return self
+
+        async def count(self):
+            return 99
+
+    def filter_playbooks(**_filters):
+        return FakePlaybookQuery()
+
+    async def get_mode(session_id):
+        assert session_id == "session-1"
+        return maintenance_mode
+
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"id": "session-1", "tenant_id": "tenant-1"}),
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(cache_client=SimpleNamespace(get=get_mode))
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_views,
+        "PlaybookVersion",
+        SimpleNamespace(filter=filter_versions),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        dashboard_views,
+        "Playbook",
+        SimpleNamespace(filter=filter_playbooks),
+        raising=False,
+    )
+    monkeypatch.setattr(dashboard_views, "response_ok", lambda data: data)
+
+    result = asyncio.run(inspect.unwrap(count_playbooks)(request))
+
+    assert result == expected
+    assert captured["filters"] == {
+        "status": 1,
+        "deleted": False,
+        "tenant_id": "tenant-1",
+        "playbook__deleted": False,
+        "playbook__internal": maintenance_mode,
+        "playbook__tenant_id": "tenant-1",
+    }
+    assert set(captured["annotations"]) == {"counts"}
+    count_expression = captured["annotations"]["counts"]
+    assert count_expression.field == "playbook_id"
+    assert count_expression.distinct is True
+    assert captured["group_fields"] == ("tenant_id",)
     assert captured["value_fields"] == ("counts",)
 
 
