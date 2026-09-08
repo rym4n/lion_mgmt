@@ -66,6 +66,7 @@ LICENSED_BLUEPRINT_SPECS: dict[str, tuple[BlueprintSpec, ...]] = {
         ("services.knowledge.views", "knowledge_bp"),
         ("services.knowledge.embedding_views", "knowledge_embedding_bp"),
     ),
+    "large_screen_bp": (("services.large_screen.views", "large_screen_bp"),),
     "asset_management_bp": (
         ("services.asset_management.views", "asset_management_bp"),
     ),
@@ -74,6 +75,11 @@ LICENSED_BLUEPRINT_SPECS: dict[str, tuple[BlueprintSpec, ...]] = {
     ),
     "topology_bp": (("services.network_topology.views", "topology_bp"),),
     "ticket_bp": (("services.ticket.views", "ticket_bp"),),
+}
+
+# 老 license 中按名称识别的模块 → 新的 LICENSED_BLUEPRINT_SPECS key
+LEGACY_LICENSE_MODULE_ALIASES: dict[str, str] = {
+    "大屏管理": "large_screen_bp",
 }
 
 
@@ -133,16 +139,28 @@ def _licensed_blueprints() -> dict:
     return result
 
 
+def _resolve_licensed_module_key(item: dict) -> str | None:
+    """Map a license moduleList entry to a LICENSED_BLUEPRINT_SPECS key.
+
+    历史 license 把「大屏管理」和「仪表盘」都签成 module=dashboard_bp，二者无法单独
+    授权。大屏改用独立的 large_screen_bp 后，老 license 仍按名称识别，避免已签发的
+    授权在升级后出现「菜单可见但接口 404」的割裂状态。
+    """
+    module = item.get("module")
+    if module in LICENSED_BLUEPRINT_SPECS:
+        return module
+    name = item.get("name")
+    if not name:
+        return None
+    return LEGACY_LICENSE_MODULE_ALIASES.get(name)
+
+
 def _register_licensed_blueprints(app: Sanic, license_data: dict) -> set[str]:
     registered_modules = set()
     registered_blueprint_names = set()
     for item in license_data["moduleList"]:
-        module = item.get("module")
-        if (
-            not module
-            or module not in LICENSED_BLUEPRINT_SPECS
-            or module in registered_modules
-        ):
+        module = _resolve_licensed_module_key(item)
+        if not module or module in registered_modules:
             continue
         if not is_licensed_module_active(license_data, item):
             continue
@@ -160,8 +178,6 @@ def register_blueprints(app: Sanic):
     app.add_route(activity, "/activity/<activityId>")
     app.add_route(playbook_list, "/playbooks", methods=["POST"])
     app.add_route(all_apps, "/apps", methods=["POST"])
-    # Large-screen routes are attached to dashboard_bp as an import side effect.
-    _resolve_blueprints((("services.large_screen.views", "dashboard_bp"),))
     for blueprint in (
         license_bp,
         user_bp,

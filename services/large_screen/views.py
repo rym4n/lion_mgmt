@@ -1,6 +1,6 @@
 # coding=utf-8
 
-from sanic import Request
+from sanic import Blueprint, Request
 from sanic_ext import openapi
 from tortoise.expressions import Q
 
@@ -10,9 +10,12 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models.large_screen import LargeScreen
 from services.large_screen.action_executor import execute_action, extract_config_actions, get_action_value
-from services.dashboard.views import dashboard_bp
 
-__all__ = []
+# 大屏管理是独立授权模块，不能挂在无条件注册的 dashboard_bp 上，否则 license 形同虚设。
+# url_prefix 沿用 /dashboard 以保持 /dashboard/large_screen/* 路径不变，前端无需改动。
+large_screen_bp = Blueprint("large_screen", url_prefix="/dashboard")
+
+__all__ = ["large_screen_bp"]
 
 
 def _require_json(request: Request) -> dict:
@@ -40,7 +43,7 @@ async def _get_large_screen(screen_id, tenant_id):
     return large_screen
 
 
-@dashboard_bp.post("/large_screen/add")
+@large_screen_bp.post("/large_screen/add")
 @openapi.definition(
     summary="新增大屏",
     description="新增一个大屏配置，需要large_screen:c权限",
@@ -77,7 +80,7 @@ async def add_large_screen(request: Request):
     return response_ok(large_screen.json)
 
 
-@dashboard_bp.post("/large_screen/list")
+@large_screen_bp.post("/large_screen/list")
 @openapi.definition(
     summary="查询大屏列表",
     description="分页查询大屏配置，需要large_screen:r权限",
@@ -114,7 +117,7 @@ async def list_large_screens(request: Request):
     return response_ok({"total": total, "page": page, "size": size, "data": [item.json for item in records]})
 
 
-@dashboard_bp.post("/large_screen/detail")
+@large_screen_bp.post("/large_screen/detail")
 @openapi.definition(
     summary="查询大屏详情",
     description="查询指定大屏配置，需要large_screen:r权限",
@@ -141,7 +144,7 @@ async def large_screen_detail(request: Request):
     return response_ok(large_screen.json)
 
 
-@dashboard_bp.post("/large_screen/update")
+@large_screen_bp.post("/large_screen/update")
 @openapi.definition(
     summary="更新大屏",
     description="更新指定大屏配置，需要large_screen:u权限",
@@ -192,7 +195,7 @@ async def update_large_screen(request: Request):
     return response_ok(large_screen.json)
 
 
-@dashboard_bp.post("/large_screen/delete")
+@large_screen_bp.post("/large_screen/delete")
 @openapi.definition(
     summary="删除大屏",
     description="删除指定大屏配置，需要large_screen:d权限",
@@ -218,7 +221,7 @@ async def delete_large_screen(request: Request):
     return response_ok({"id": screen_id})
 
 
-@dashboard_bp.post("/large_screen/action_config/add")
+@large_screen_bp.post("/large_screen/action_config/add")
 @openapi.definition(
     summary="新增大屏动作配置",
     description="为指定大屏新增动作配置，需要large_screen:c权限；动作配置结构可参考巡检自定义报告配置",
@@ -251,7 +254,7 @@ async def add_large_screen_action_config(request: Request):
     return response_ok({"id": large_screen.id, "action_config": large_screen.action_config})
 
 
-@dashboard_bp.post("/large_screen/action_config/detail")
+@large_screen_bp.post("/large_screen/action_config/detail")
 @openapi.definition(
     summary="查询大屏动作配置",
     description="查询指定大屏的动作配置，需要large_screen:r权限",
@@ -273,7 +276,7 @@ async def large_screen_action_config_detail(request: Request):
     return response_ok({"id": large_screen.id, "action_config": large_screen.action_config})
 
 
-@dashboard_bp.post("/large_screen/action_config/update")
+@large_screen_bp.post("/large_screen/action_config/update")
 @openapi.definition(
     summary="更新大屏动作配置",
     description="覆盖更新指定大屏动作配置，需要large_screen:u权限",
@@ -303,7 +306,7 @@ async def update_large_screen_action_config(request: Request):
     return response_ok({"id": large_screen.id, "action_config": large_screen.action_config})
 
 
-@dashboard_bp.post("/large_screen/action_config/delete")
+@large_screen_bp.post("/large_screen/action_config/delete")
 @openapi.definition(
     summary="删除大屏动作配置",
     description="清空指定大屏动作配置，需要large_screen:d权限",
@@ -327,7 +330,7 @@ async def delete_large_screen_action_config(request: Request):
     return response_ok({"id": large_screen.id, "action_config": large_screen.action_config})
 
 
-@dashboard_bp.post("/large_screen/action/execute")
+@large_screen_bp.post("/large_screen/action/execute")
 @openapi.definition(
     summary="执行大屏动作",
     description="执行指定大屏已配置的动作并返回执行结果；不传action_index时执行全部动作，需要large_screen:u权限",

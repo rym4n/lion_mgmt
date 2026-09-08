@@ -599,7 +599,7 @@ def test_license_templates_use_asset_and_network_management_groups():
         assert "asset_management_bp" in text
         assert "network_access_control_bp" in text
         _assert_module_group(text, "网络拓扑", "topology_bp", "网络管理")
-        _assert_module_group(text, "大屏管理", "dashboard_bp", "基础功能")
+        _assert_module_group(text, "大屏管理", "large_screen_bp", "基础功能")
         _assert_module_group(text, "技能管理", "digital_employee_bp", "专家团队")
         _assert_module_not_in_group(text, "网络拓扑", "topology_bp", "基础功能")
 
@@ -679,7 +679,6 @@ def test_large_screen_menu_permission_contract_matches_backend_api():
 
     for text in (upgrade_sql, init_sql):
         assert "大屏管理" in text
-        assert "dashboard_bp" in text
         assert "large_screen" in text
         assert "large_screen:r" in text
         assert "large_screen:c,d,u,r" in text
@@ -693,3 +692,28 @@ def test_large_screen_menu_permission_contract_matches_backend_api():
     assert "jsonb_array_elements_text" in upgrade_sql
     assert "screen:c,d,u,r" in upgrade_sql
     assert "screen:r" in upgrade_sql
+
+
+def test_large_screen_menu_uses_an_independent_license_bp():
+    """大屏管理必须有独立的 license module key，不能复用仪表盘的 dashboard_bp。
+
+    共用 dashboard_bp 时，license 里只要授权了「仪表盘」，大屏菜单就会被一起放行
+    （_menu_is_licensed 按 bp 匹配），使大屏无法被单独授权。
+    """
+    independent_bp = importlib.import_module(
+        "migrations.models.124_20260908180000_large_screen_independent_license_bp"
+    )
+    upgrade_sql = asyncio.run(independent_bp.upgrade(None))
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
+
+    assert "large_screen_bp" in upgrade_sql
+    assert "'model' = 'large_screen'" in upgrade_sql or '"model" = \'large_screen\'' in upgrade_sql
+
+    # 全新安装必须直接落到独立 bp，不能再写 dashboard_bp
+    compact_init = _compact(init_sql)
+    assert "'large_screen','大屏管理'" in compact_init
+    large_screen_row = next(
+        line for line in init_sql.splitlines() if "'large_screen', '大屏管理'" in line
+    )
+    assert "large_screen_bp" in large_screen_row
+    assert "dashboard_bp" not in large_screen_row
