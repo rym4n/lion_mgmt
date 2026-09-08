@@ -314,22 +314,23 @@ async def get_license(request: Request):
     for role in user._roles_for_tenant(current_tenant_id):
         perm_models = set()
         if role.permissions:
-            # 超级权限处理
+            # License 检查优先：先过滤出已授权的菜单
+            licensed_permissions = [
+                p for p in permissions
+                if _menu_is_licensed(p, valid_modules) and p["description"] != "仪表盘"
+            ]
+
+            # 再根据角色权限过滤（超级权限 *:* 可以看到所有已授权的菜单）
             if "*:*" not in role.permissions:
                 role_permissions = [
                     permission
-                    for permission in permissions
+                    for permission in licensed_permissions
                     if _role_can_open_menu(role.permissions, permission)
                 ]
             else:
-                role_permissions = permissions
-            perm_models.update(
-                [
-                    p["model"]
-                    for p in role_permissions
-                    if _menu_is_licensed(p, valid_modules) and p["description"] != "仪表盘"
-                ]
-            )
+                role_permissions = licensed_permissions
+
+            perm_models.update([p["model"] for p in role_permissions])
 
         for model in perm_models:
             permission_data = next((p for p in permissions if p["model"] == model), None)
