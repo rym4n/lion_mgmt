@@ -1178,6 +1178,7 @@ async def task_runlogs(request: Request):
                 "cursor": {"type": "string", "nullable": True},
                 "limit": {"type": "integer", "minimum": 1, "maximum": RUNLOG_NODE_MAX_LIMIT},
                 "node_id": {"type": "string", "nullable": True},
+                "playbook_version_id": {"type": "string", "nullable": True},
                 "rows_cursor": {"type": "string", "nullable": True},
                 "loop_limit": {"type": "integer", "minimum": 1, "maximum": RUNLOG_LOOP_MAX_LIMIT},
             },
@@ -1218,6 +1219,7 @@ async def task_runlog_nodes(request: Request):
         cursor_kind="command-node",
         cursor_scope={"task_id": task.id},
         node_id=str(data.get("node_id") or "").strip() or None,
+        playbook_version_id=str(data.get("playbook_version_id") or "").strip() or None,
         rows_cursor=data.get("rows_cursor"),
         loop_limit=data.get("loop_limit"),
     )

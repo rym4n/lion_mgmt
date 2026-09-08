@@ -7,6 +7,9 @@ import asyncio
 import inspect
 import sys
 from types import ModuleType
+from types import SimpleNamespace
+
+import pytest
 
 from services.workflow.views import (
     _is_completed_flow_end_log,
@@ -138,3 +141,53 @@ def test_link_runlog_noop_when_run_missing(monkeypatch):
     _patch_command_task_run(monkeypatch, RunModel)
     # 找不到对应运行时应静默返回，不抛错
     asyncio.run(_link_runlog_to_command_run("missing", "debug-1", "t1"))
+
+
+@pytest.mark.asyncio
+async def test_edit_published_workflow_preserves_nondefault_flow_timeout(monkeypatch):
+    """发布版本被编辑时，新草稿必须沿用其 1800 秒的流程超时。"""
+    from services.workflow import views
+
+    class PublishedVersion:
+        status = 1
+        flow_json = {"nodes": []}
+        playbook = "playbook-1"
+        flow_timeout = 1800
+
+        async def prefetch_related(self, *_relations):
+            return self
+
+    published = PublishedVersion()
+    created = SimpleNamespace(id="draft-1", flow_json={"nodes": []}, json={"id": "draft-1"})
+
+    class VersionModel:
+        @classmethod
+        def get(cls, **kwargs):
+            assert kwargs == {"id": "published-1", "tenant_id": "tenant-1"}
+            return published
+
+        @classmethod
+        async def create(cls, **kwargs):
+            cls.create_kwargs = kwargs
+            return created
+
+    async def empty_statistics(*_args):
+        return []
+
+    async def noop_tool_action(*_args):
+        return None
+
+    request = SimpleNamespace(
+        json={"flow_id": "published-1", "flow_json": {"nodes": []}},
+        ctx=SimpleNamespace(
+            session={"account_info": "editor-1", "tenant_id": "tenant-1"}
+        ),
+    )
+    monkeypatch.setattr(views, "PlaybookVersion", VersionModel)
+    monkeypatch.setattr(views, "statistics_data", empty_statistics)
+    monkeypatch.setattr(views, "tool_action_playbook_delete", noop_tool_action)
+    monkeypatch.setattr(views, "tool_action_update", noop_tool_action)
+
+    await inspect.unwrap(views.edit_workflow_flow)(request)
+
+    assert VersionModel.create_kwargs["flow_timeout"] == 1800

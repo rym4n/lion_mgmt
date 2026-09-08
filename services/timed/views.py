@@ -1392,6 +1392,7 @@ async def get_run_log_nodes(request):
             cursor_kind="timed-node",
             cursor_scope={"timed_id": timed_id},
             node_id=str(data.get("node_id") or "").strip() or None,
+            playbook_version_id=str(data.get("playbook_version_id") or "").strip() or None,
             rows_cursor=data.get("rows_cursor"),
             loop_limit=data.get("loop_limit"),
         )

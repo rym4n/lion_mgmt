@@ -1034,6 +1034,7 @@ async def edit_workflow_flow(request):
             status=0,
             creator=request.ctx.session["account_info"],
             updator=request.ctx.session["account_info"],
+            flow_timeout=pv.flow_timeout,
             tenant_id=tenant_id,
         )
     else:
@@ -2649,6 +2650,23 @@ async def ai_chat(request):
         async def forward_ai_stream(streaming_response):
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=timeout) as ai_resp:
+                    if ai_resp.status >= 400:
+                        body = await ai_resp.read()
+                        message = "AI 服务请求失败"
+                        try:
+                            error_payload = orjson.loads(body)
+                            if isinstance(error_payload, dict):
+                                upstream_error = error_payload.get("error")
+                                if isinstance(upstream_error, dict) and isinstance(upstream_error.get("message"), str):
+                                    message = upstream_error["message"]
+                                elif isinstance(error_payload.get("message"), str):
+                                    message = error_payload["message"]
+                        except orjson.JSONDecodeError:
+                            if body:
+                                message = body.decode("utf-8", errors="replace").strip() or message
+                        payload_bytes = orjson.dumps({"error": {"message": message, "status": ai_resp.status}})
+                        await streaming_response.write(b"data: " + payload_bytes + b"\n\n")
+                        return
                     async for chunk in ai_resp.content.iter_any():
                         if chunk:
                             await streaming_response.write(chunk)

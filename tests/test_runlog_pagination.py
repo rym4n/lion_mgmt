@@ -1,10 +1,12 @@
 # coding=utf-8
 
 import inspect
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tortoise.expressions import Q
 
 import libs.utils as utils
 import models
@@ -13,6 +15,7 @@ from libs.runlog_pagination import (
     batch_status,
     enrich_subscript_runlogs,
     root_playbook_names,
+    runlog_node_page,
     runlog_batch_summaries,
 )
 
@@ -39,6 +42,137 @@ def test_batch_status_keeps_failures_authoritative_over_completed_end_node():
             "end_success_count": 1,
         }
     ) == -1
+
+
+@pytest.mark.asyncio
+async def test_node_page_keeps_same_node_id_in_root_and_child_versions_separate():
+    """A child end node must not collapse into the root end node."""
+
+    def query_version(conditions):
+        for condition in conditions:
+            if isinstance(condition, Q):
+                if version := condition.filters.get("playbook_version_id"):
+                    return version
+                if version := query_version(condition.children):
+                    return version
+        return None
+
+    class Query:
+        def __init__(self, model, version):
+            self.model = model
+            self.version = version
+            self.group_fields = ()
+            self.value_fields = ()
+
+        def annotate(self, **_kwargs):
+            return self
+
+        def group_by(self, *fields):
+            self.group_fields = fields
+            return self
+
+        def order_by(self, *_fields):
+            return self
+
+        def limit(self, *_args):
+            return self
+
+        def values(self, *fields):
+            self.value_fields = fields
+            return self
+
+        def __await__(self):
+            async def result():
+                if self.group_fields:
+                    if self.group_fields == ("node_id",):
+                        return [
+                            {
+                                "node_id": "end",
+                                "first_ctime": datetime(2026, 9, 8, 10, 0),
+                                "node_type_max": "end-node",
+                                "playbook_version_id_max": "root-v1",
+                                "log_count": 2,
+                                "failed_count": 0,
+                                "running_count": 0,
+                                "success_count": 2,
+                            }
+                        ]
+                    return [
+                        {
+                            "node_id": "end",
+                            "playbook_version_id": "root-v1",
+                            "first_ctime": datetime(2026, 9, 8, 10, 0),
+                            "node_type_max": "end-node",
+                            "log_count": 1,
+                            "failed_count": 0,
+                            "running_count": 0,
+                            "success_count": 1,
+                        },
+                        {
+                            "node_id": "end",
+                            "playbook_version_id": "child-v1",
+                            "first_ctime": datetime(2026, 9, 8, 10, 1),
+                            "node_type_max": "end-node",
+                            "log_count": 1,
+                            "failed_count": 0,
+                            "running_count": 0,
+                            "success_count": 1,
+                        },
+                    ]
+                return [
+                    {
+                        "id": f"log-{self.version}",
+                        "run_id": "run-1",
+                        "node_id": "end",
+                        "node_name": f"{self.version} 结束",
+                        "node_type": "end-node",
+                        "tool_name": None,
+                        "tool_version": None,
+                        "tool_display_name": None,
+                        "action_name": None,
+                        "action_display_name": None,
+                        "status": 0,
+                        "start_time": None,
+                        "end_time": datetime(2026, 9, 8, 10, 2),
+                        "ctime": datetime(2026, 9, 8, 10, 0),
+                        "utime": datetime(2026, 9, 8, 10, 2),
+                        "resource_name": None,
+                        "playbook_name": self.version,
+                        "playbook_version_id": self.version,
+                    }
+                ]
+
+            return result().__await__()
+
+    class Model:
+        requested_versions = []
+
+        @classmethod
+        def filter(cls, *conditions, **_kwargs):
+            version = query_version(conditions)
+            if version:
+                cls.requested_versions.append(version)
+            return Query(cls, version or "root-v1")
+
+    page = await runlog_node_page(
+        Model,
+        Q(),
+        run_id="run-1",
+        cursor=None,
+        limit=50,
+        cursor_kind="test-node",
+        cursor_scope={},
+    )
+
+    assert [node["playbook_version_id"] for node in page["nodes"]] == [
+        "root-v1",
+        "child-v1",
+    ]
+    assert [node["rows"][0]["playbook_version_id"] for node in page["nodes"]] == [
+        "root-v1",
+        "child-v1",
+    ]
+    assert Model.requested_versions == ["root-v1", "child-v1"]
 from services.command_center import views
 
 

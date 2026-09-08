@@ -70,7 +70,7 @@ class SharedRunlogQuery:
 
     async def values(self, *fields):
         rows = [row for row in self.rows if matches_q(row, self.condition)]
-        if self.grouped_by == ("node_id",):
+        if self.grouped_by in (("node_id",), ("node_id", "playbook_version_id")):
             return self._aggregate_by_node(rows)
         assert self.ordering == ("ctime", "id")
         rows.sort(key=lambda row: (row["ctime"], row["id"]))
@@ -85,15 +85,17 @@ class SharedRunlogQuery:
     def _aggregate_by_node(rows):
         grouped = {}
         for row in rows:
-            grouped.setdefault(row["node_id"], []).append(row)
+            key = (row["node_id"], row.get("playbook_version_id"))
+            grouped.setdefault(key, []).append(row)
         aggregated = []
-        for node_id, node_rows in grouped.items():
+        for (node_id, playbook_version_id), node_rows in grouped.items():
             statuses = [row.get("status") for row in node_rows]
             aggregated.append(
                 {
                     "node_id": node_id,
                     "first_ctime": min(row["ctime"] for row in node_rows),
                     "node_type_max": max(row["node_type"] for row in node_rows),
+                    "playbook_version_id": playbook_version_id,
                     "playbook_version_id_max": max(
                         (
                             row.get("playbook_version_id")
@@ -212,7 +214,10 @@ async def test_cursor_boundary_preserves_rank_order_without_duplicates():
     await create_node("0-end", "end-node", same_time)
 
     first_page = await shared_node_page(limit=2)
-    assert SharedRunlogNode.queries[0].grouped_by == ("node_id",)
+    assert SharedRunlogNode.queries[0].grouped_by == (
+        "node_id",
+        "playbook_version_id",
+    )
     assert SharedRunlogNode.queries[0].row_limit is None
     assert [
         query.row_limit

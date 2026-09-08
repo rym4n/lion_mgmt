@@ -13,7 +13,7 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 
 
-RUNLOG_CURSOR_VERSION = 5
+RUNLOG_CURSOR_VERSION = 6
 RUNLOG_NODE_DEFAULT_LIMIT = 50
 RUNLOG_NODE_MAX_LIMIT = 200
 RUNLOG_LOOP_DEFAULT_LIMIT = 20
@@ -122,6 +122,7 @@ def sort_node_keys(keys: list[dict]) -> list[dict]:
             item["first_ctime"],
             item["node_tie_rank"],
             item["node_id"],
+            str(item.get("playbook_version_id") or ""),
         ),
     )
 
@@ -141,6 +142,7 @@ def slice_node_keys(
                 datetime.fromisoformat(decoded["ctime"]),
                 int(decoded["node_tie_rank"]),
                 str(decoded["node_id"]),
+                str(decoded.get("playbook_version_id") or ""),
             )
         except (KeyError, TypeError, ValueError):
             raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from None
@@ -150,6 +152,7 @@ def slice_node_keys(
                 item["first_ctime"],
                 int(item.get("node_tie_rank", 2)),
                 item["node_id"],
+                str(item.get("playbook_version_id") or ""),
             )
             if current > anchor:
                 start = index
@@ -543,20 +546,31 @@ async def node_row_batch(
     *,
     run_id: str,
     node_id: str,
+    playbook_version_id=None,
     rows_cursor,
     loop_limit: int,
     cursor_kind: str,
     cursor_scope: dict,
 ) -> dict:
     """取单个节点的一批明细行。循环节点按 loop_index 对齐批次边界。"""
+    row_scope = {
+        **cursor_scope,
+        **(
+            {"playbook_version_id": str(playbook_version_id)}
+            if playbook_version_id
+            else {}
+        ),
+    }
     decoded = decode_cursor(
         rows_cursor,
         f"{cursor_kind}-rows",
         run_id=run_id,
         node_id=node_id,
-        **cursor_scope,
+        **row_scope,
     )
     row_condition = condition & Q(run_id=run_id, node_id=node_id)
+    if playbook_version_id:
+        row_condition &= Q(playbook_version_id=str(playbook_version_id))
     if decoded:
         try:
             cursor_time = datetime.fromisoformat(decoded["ctime"])
@@ -591,7 +605,7 @@ async def node_row_batch(
             node_id=node_id,
             ctime=cursor_time_json(anchor["ctime"]),
             id=anchor["id"],
-            **cursor_scope,
+            **row_scope,
         )
     return {
         "rows": kept,
@@ -610,6 +624,7 @@ async def runlog_node_page(
     cursor_kind: str,
     cursor_scope: dict,
     node_id=None,
+    playbook_version_id=None,
     rows_cursor=None,
     loop_limit=None,
 ) -> dict:
@@ -627,6 +642,7 @@ async def runlog_node_page(
             condition,
             run_id=run_id,
             node_id=str(node_id),
+            playbook_version_id=playbook_version_id,
             rows_cursor=rows_cursor,
             loop_limit=bounded_loop_limit,
             cursor_kind=cursor_kind,
@@ -649,18 +665,18 @@ async def runlog_node_page(
         .annotate(
             first_ctime=Min("ctime"),
             node_type_max=Max("node_type"),
-            playbook_version_id_max=Max("playbook_version_id"),
             log_count=Count("id"),
             failed_count=Count("id", _filter=Q(status__in=[-1, 3])),
             running_count=Count("id", _filter=Q(status__in=[1, 2])),
             success_count=Count("id", _filter=Q(status=0)),
         )
-        .group_by("node_id")
+        .group_by("node_id", "playbook_version_id")
+        .order_by("ctime", "id")
         .values(
             "node_id",
             "first_ctime",
             "node_type_max",
-            "playbook_version_id_max",
+            "playbook_version_id",
             "log_count",
             "failed_count",
             "running_count",
@@ -671,7 +687,7 @@ async def runlog_node_page(
         {
             **row,
             "node_type": row["node_type_max"],
-            "playbook_version_id": row["playbook_version_id_max"],
+            "playbook_version_id": row["playbook_version_id"],
         }
         for row in key_rows
     ]
@@ -684,6 +700,7 @@ async def runlog_node_page(
             condition,
             run_id=run_id,
             node_id=key["node_id"],
+            playbook_version_id=key.get("playbook_version_id"),
             rows_cursor=None,
             loop_limit=bounded_loop_limit,
             cursor_kind=cursor_kind,
@@ -711,6 +728,7 @@ async def runlog_node_page(
             node_tie_rank=int(last.get("node_tie_rank", 2)),
             ctime=cursor_time_json(last["first_ctime"]),
             node_id=last["node_id"],
+            playbook_version_id=last.get("playbook_version_id"),
             **cursor_scope,
         )
     return {"nodes": nodes, "next_cursor": next_cursor, "has_more": has_more}

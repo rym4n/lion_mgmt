@@ -752,6 +752,7 @@ async def get_event_runlog_nodes(request):
             cursor_kind="event-node",
             cursor_scope={"event_id": event_id},
             node_id=str(data.get("node_id") or "").strip() or None,
+            playbook_version_id=str(data.get("playbook_version_id") or "").strip() or None,
             rows_cursor=data.get("rows_cursor"),
             loop_limit=data.get("loop_limit"),
         )
