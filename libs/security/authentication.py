@@ -20,13 +20,20 @@ from settings import (
     SESSION_ENCODING_ALGORITHM,
 )
 
+SESSION_HIJACKING_PROTECTION_CACHE_KEY = "secure_session_hijacking_protection"
+
 
 async def authenticate(request: Request):
     """
     客户端身份验证会话和账户验证
     """
     payload = await token_decode(request)
-    validate_token(payload, request)
+    session_hijacking_protection = await get_session_hijacking_protection(request)
+    validate_token(
+        payload,
+        request,
+        session_hijacking_protection=session_hijacking_protection,
+    )
 
     if not hasattr(request.app.ctx, "cache_client"):
         logger.error("Cache client not initialized on app.ctx")
@@ -39,7 +46,21 @@ async def authenticate(request: Request):
     request.ctx.session["account_info"] = account
 
 
-def validate_token(payload, request):
+async def get_session_hijacking_protection(request: Request) -> bool:
+    cache_client = getattr(request.app.ctx, "cache_client", None)
+    if cache_client is not None:
+        cached_value = await cache_client.get(SESSION_HIJACKING_PROTECTION_CACHE_KEY)
+        if cached_value is not None:
+            return cached_value is True or str(cached_value).lower() == "true"
+
+    secure_config = await get_secure_config_dict()
+    enabled = secure_config.get("session_hijacking_protection", False)
+    if cache_client is not None:
+        await cache_client.set(SESSION_HIJACKING_PROTECTION_CACHE_KEY, enabled)
+    return enabled
+
+
+def validate_token(payload, request, *, session_hijacking_protection=False):
     if payload.get("exp", 0) < int(time.time()):
         raise CustomError(ErrorCode.SESSION_EXPIRED)
 
@@ -53,7 +74,7 @@ def validate_token(payload, request):
     client_ip = get_client_ip(request)
 
     if payload.get("ip"):
-        if payload.get("ip") != client_ip:
+        if session_hijacking_protection and payload["ip"] != client_ip:
             # 防止会话劫持
             raise CustomError(ErrorCode.SESSION_INVALID)
     else:

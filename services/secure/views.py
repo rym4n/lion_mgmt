@@ -8,6 +8,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from libs.security.authentication import SESSION_HIJACKING_PROTECTION_CACHE_KEY
 from models import Config
 from settings import SECURE_CONFIG_DEFAULT
 
@@ -49,6 +50,7 @@ secure_bp = Blueprint("secure", url_prefix="/secure")
                                     "account_auto_freeze_enabled": {"type": "boolean"},
                                     "force_change_password_first_login": {"type": "boolean"},
                                     "mfa_enabled": {"type": "boolean"},
+                                    "session_hijacking_protection": {"type": "boolean"},
                                 },
                             },
                         },
@@ -112,6 +114,7 @@ async def get_secure_config(request):
                     "account_auto_freeze_enabled": {"type": "boolean"},
                     "force_change_password_first_login": {"type": "boolean"},
                     "mfa_enabled": {"type": "boolean"},
+                    "session_hijacking_protection": {"type": "boolean"},
                 },
             }
         }
@@ -160,6 +163,7 @@ async def update_secure_config(request):
         "account_auto_freeze_enabled",
         "force_change_password_first_login",
         "mfa_enabled",
+        "session_hijacking_protection",
     }
 
     async with in_transaction():
@@ -168,5 +172,10 @@ async def update_secure_config(request):
                 # 统一转换为字符串存储
                 str_value = str(value).lower() if isinstance(value, bool) else str(value)
                 await Config.update_or_create(key=key, defaults={"value": str_value, "module": "secure"})
+                if key == "session_hijacking_protection":
+                    await request.app.ctx.cache_client.set(
+                        SESSION_HIJACKING_PROTECTION_CACHE_KEY,
+                        value is True or str(value).lower() == "true",
+                    )
 
     return response_ok("更新成功")

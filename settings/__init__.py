@@ -173,6 +173,7 @@ SECURE_CONFIG_DEFAULT = {
     "account_auto_freeze_enabled": False,
     "force_change_password_first_login": False,
     "mfa_enabled": False,
+    "session_hijacking_protection": False,
 }
 
 # 健康检查相关
