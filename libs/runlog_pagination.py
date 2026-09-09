@@ -671,7 +671,6 @@ async def runlog_node_page(
             success_count=Count("id", _filter=Q(status=0)),
         )
         .group_by("node_id", "playbook_version_id")
-        .order_by("ctime", "id")
         .values(
             "node_id",
             "first_ctime",

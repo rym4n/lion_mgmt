@@ -45,6 +45,45 @@ def test_batch_status_keeps_failures_authoritative_over_completed_end_node():
 
 
 @pytest.mark.asyncio
+async def test_node_page_does_not_order_grouped_keys_by_raw_runlog_columns():
+    class GroupedQuery:
+        def annotate(self, **_kwargs):
+            return self
+
+        def group_by(self, *_fields):
+            return self
+
+        def order_by(self, *fields):
+            raise AssertionError(f"grouped key query ordered by raw columns: {fields}")
+
+        def values(self, *_fields):
+            return self
+
+        def __await__(self):
+            async def result():
+                return []
+
+            return result().__await__()
+
+    class Model:
+        @classmethod
+        def filter(cls, *_conditions, **_filters):
+            return GroupedQuery()
+
+    page = await runlog_node_page(
+        Model,
+        Q(),
+        run_id="run-1",
+        cursor=None,
+        limit=50,
+        cursor_kind="test-node",
+        cursor_scope={},
+    )
+
+    assert page == {"nodes": [], "next_cursor": None, "has_more": False}
+
+
+@pytest.mark.asyncio
 async def test_node_page_keeps_same_node_id_in_root_and_child_versions_separate():
     """A child end node must not collapse into the root end node."""
 
