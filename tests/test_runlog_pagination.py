@@ -12,12 +12,31 @@ import libs.utils as utils
 import models
 from libs.error_code.exception import CustomError
 from libs.runlog_pagination import (
+    RUNLOG_NODE_FIELDS,
     batch_status,
     enrich_subscript_runlogs,
     root_playbook_names,
     runlog_node_page,
     runlog_batch_summaries,
 )
+from models.runlog import Runlog
+
+
+def test_node_summary_projects_end_node_output_params():
+    output_params = {"host": "h1", "detail": {"cpu": 92}}
+    runlog = Runlog(
+        tenant_id="tenant-1",
+        run_id="run-1",
+        node_id="end-1",
+        node_name="结束",
+        node_type="end-node",
+        output_params=output_params,
+    )
+    runlog.timer_id = None
+    runlog.playbook_version_id = None
+
+    assert "output_params" in RUNLOG_NODE_FIELDS
+    assert runlog.json["output_params"] == output_params
 
 
 def test_batch_status_uses_completed_end_node_as_flow_terminal_marker():

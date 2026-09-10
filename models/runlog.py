@@ -33,6 +33,10 @@ class Runlog(BaseModel):
 
     status = fields.IntField(default=0, description="执行状态")
     args = fields.JSONField(null=True, description="执行入参")
+    output_params = fields.JSONField(
+        null=True,
+        description="结束节点输出参数求值结果",
+    )
     result = fields.TextField(null=True, description="输出结果,啥格式都有可能")
 
     start_time = fields.DatetimeField(null=True, description="开始时间")
@@ -72,6 +76,7 @@ class Runlog(BaseModel):
             "action_display_name": self.action_display_name,
             "status": self.status,
             "args": self.args,
+            "output_params": self.output_params,
             "result": self.result,
             "start_time": strip_timezone_to_seconds(self.start_time),
             "end_time": strip_timezone_to_seconds(self.end_time),

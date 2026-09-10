@@ -790,6 +790,7 @@ class ChatManager:
             "action_display_name",
             "status",
             "args",
+            "output_params",
             "result",
             "start_time",
             "end_time",
@@ -818,6 +819,7 @@ class ChatManager:
                 item.action_display_name,
                 item.status,
                 self._jsonb_param(item.args),
+                self._jsonb_param(getattr(item, "output_params", None)),
                 item.result,
                 self._datetime_param(item.start_time),
                 self._datetime_param(item.end_time),
@@ -832,7 +834,7 @@ class ChatManager:
             for column, value in zip(columns, values):
                 params.append(value)
                 placeholder = f"${len(params)}"
-                if column == "args":
+                if column in ("args", "output_params"):
                     placeholder = f"CAST({placeholder} AS TEXT)::JSONB"
                 elif column in ("start_time", "end_time"):
                     placeholder = f"CAST({placeholder} AS TEXT)::TIMESTAMPTZ"
@@ -848,6 +850,7 @@ class ChatManager:
                 "status" = EXCLUDED."status",
                 "end_time" = EXCLUDED."end_time",
                 "result" = EXCLUDED."result",
+                "output_params" = EXCLUDED."output_params",
                 "utime" = CURRENT_TIMESTAMP
             WHERE "runlog"."status" != 0 OR EXCLUDED."status" = 0
         """

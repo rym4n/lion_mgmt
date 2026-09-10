@@ -37,6 +37,7 @@ RUNLOG_NODE_FIELDS = (
     "action_name",
     "action_display_name",
     "status",
+    "output_params",
     "start_time",
     "end_time",
     "ctime",
