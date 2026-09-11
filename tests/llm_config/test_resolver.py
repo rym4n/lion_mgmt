@@ -66,6 +66,8 @@ def _record(**kwargs):
         # tenant_id 查，所以 fixture 的默认值必须与之一致，否则永远查不到。
         "tenant_id": DEFAULT_TENANT_ID,
         "dimensions": None,
+        "context_size": 128000,
+        "trigger_ratio": 0.8,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -181,6 +183,8 @@ def test_to_payload_matches_lion_agent_contract():
         "base_url": "https://oapi.example.com/v1",
         "api_key": "sk-plain",
         "model": "aioe",
+        "context_size": 128000,
+        "trigger_ratio": 0.8,
     }
 
 
@@ -233,6 +237,8 @@ def test_chat_payload_shape_is_unchanged_by_dimensions_field():
         "base_url": "https://oapi.example.com/v1",
         "api_key": "sk-plain",
         "model": "aioe",
+        "context_size": 128000,
+        "trigger_ratio": 0.8,
     }
 
 
@@ -291,3 +297,11 @@ def test_repr_still_hides_api_key_after_adding_dimensions():
     assert "sk-super-secret-value" not in rendered
     assert "768" in rendered, "dimensions 不是凭证，应当可见以便排障"
 
+
+def test_chat_payload_carries_context_compression_configuration():
+    resolver = _load_resolver([
+        _record(purpose="chat", context_size=64000, trigger_ratio=0.85),
+    ])
+    payload = asyncio.run(resolver.resolve_llm("t1")).to_payload()
+    assert payload["context_size"] == 64000
+    assert payload["trigger_ratio"] == 0.85

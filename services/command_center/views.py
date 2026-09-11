@@ -37,6 +37,7 @@ from .manager import (
     update_task_progress,
 )
 from .realtime import publish_command_center_update
+from .run_manager import RunRetryConflict, prepare_run_retry, schedule_prepared_run_retry
 from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage, zero_usage
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
@@ -1383,6 +1384,46 @@ async def retry_dispatch(request: Request):
         await task.save(update_fields=["requested_agent_id"])
     operator = request.ctx.session["account_info"]
     task = await dispatch_task(task, operator.id)
+    return response_ok(_task_detail_json(task))
+
+
+@command_bp.post("/tasks/retry")
+@openapi.definition(
+    summary="重试失败任务",
+    description="为失败任务创建新的运行记录，并复用原运行会话上下文在后台继续执行。需要command_center:u权限。",
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["id"],
+            "properties": {"id": {"type": "string", "description": "失败任务ID"}},
+        }
+    ),
+    response=_response("已进入重试", TASK_SCHEMA, {"400": "参数错误", "404": "任务不存在", "409": "任务当前不可重试"}),
+)
+@requires_permission("command_center:u")
+async def retry_failed_task(request: Request):
+    data = _require_json(request)
+    task_id = data.get("id")
+    if not task_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
+    if not task:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    run = await CommandTaskRun.filter(
+        task_id=task.id,
+        tenant_id=tenant_id,
+        run_id=task.run_id,
+        deleted=False,
+    ).first()
+    if task.status != "failed" or not run or run.status != "failed":
+        raise CustomError(ErrorCode.COMMAND_TASK_NOT_DISPATCHABLE)
+    operator = request.ctx.session["account_info"]
+    try:
+        task, employee = await prepare_run_retry(run, operator.id)
+    except RunRetryConflict:
+        raise CustomError(ErrorCode.COMMAND_TASK_NOT_DISPATCHABLE) from None
+    schedule_prepared_run_retry(run, task, employee, operator.id)
     return response_ok(_task_detail_json(task))
 
 

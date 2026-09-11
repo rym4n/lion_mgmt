@@ -235,7 +235,12 @@ async def run(
     )
     payload = {
         "workspace_id": workspace_id,
-        "session_id": getattr(command_run, "run_id", None) or task.run_id or task.id,
+        "session_id": (
+            getattr(command_run, "session_id", None)
+            or getattr(command_run, "run_id", None)
+            or task.run_id
+            or task.id
+        ),
         "request_id": task.id,
         "message": build_runtime_prompt(task, employee),
         "memory": memory_section,

@@ -13,6 +13,7 @@ import pytest
 
 CREATED_RUNS = []
 CREATED_TASKS = []
+CREATED_AGENTS = []
 RECORDED_EVENTS = []
 UPDATED_PROGRESS = []
 FINALIZED_SAVES = []
@@ -27,6 +28,7 @@ STUB_MODULES = [
     "services.command_center.approval_contract",
     "services.command_center.approval_service",
     "services.command_center.run_manager",
+    "services.command_center.realtime",
     "services.digital_employee",
     "services.digital_employee.prompt_builder",
     "services.digital_employee.execute_coordinator",
@@ -50,6 +52,7 @@ def _restore_stubbed_modules():
 def _install_stubs():
     CREATED_RUNS.clear()
     CREATED_TASKS.clear()
+    CREATED_AGENTS.clear()
     RECORDED_EVENTS.clear()
     UPDATED_PROGRESS.clear()
     FINALIZED_SAVES.clear()
@@ -91,7 +94,31 @@ def _install_stubs():
     command_center.COMMAND_TASK_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "handed_off"}
 
     class CommandAgent(SimpleNamespace):
-        pass
+        class Query:
+            def __init__(self, filters):
+                self.filters = filters
+
+            def using_db(self, connection):
+                return self
+
+            def select_for_update(self, **kwargs):
+                return self
+
+            async def first(self):
+                return next(
+                    (
+                        agent for agent in CREATED_AGENTS
+                        if all(getattr(agent, key, None) == value for key, value in self.filters.items())
+                    ),
+                    None,
+                )
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return cls.Query(kwargs)
+
+        async def save(self, using_db=None, update_fields=None):
+            self.saved_update_fields.append(update_fields)
 
     class CommandTask(SimpleNamespace):
         class Query:
@@ -283,6 +310,13 @@ def _install_stubs():
     command_center_pkg = types.ModuleType("services.command_center")
     command_center_pkg.__path__ = []
     sys.modules["services.command_center"] = command_center_pkg
+    realtime = types.ModuleType("services.command_center.realtime")
+
+    async def publish_command_center_update(*_args, **_kwargs):
+        return None
+
+    realtime.publish_command_center_update = publish_command_center_update
+    sys.modules["services.command_center.realtime"] = realtime
     manager = types.ModuleType("services.command_center.manager")
 
     async def record_task_event(task, event_type, message=None, operator_id=None, metadata=None, using_db=None):
@@ -457,8 +491,18 @@ def _employee():
         tenant_id="tenant-1",
         role_key="ops",
         skill_keys=[],
+        agent_key="ops",
+        runtime="lion_agent",
+        deleted=False,
+        enabled=True,
+        status="idle",
+        load=0,
+        max_concurrent=1,
+        current_task_id=None,
+        saved_update_fields=[],
     )
     employee.role = _async_value(None)
+    CREATED_AGENTS.append(employee)
     return employee
 
 
@@ -1170,3 +1214,143 @@ def test_execute_task_run_records_real_continuation_start_on_new_run():
     assert CREATED_RUNS[-1].policy_snapshot["filesystem"]["write"] == "deny"
     assert CREATED_RUNS[-1].policy_snapshot["approval"]["default"] == "approval_required"
     assert any(event[0] == "continuation_started" and event[3]["continued_from_run_id"] == "run-1" for event in RECORDED_EVENTS)
+
+
+def test_retry_run_creates_new_run_and_reuses_previous_session():
+    run_manager = _load_run_manager()
+    task = _task()
+    task.status = "failed"
+    task.run_id = "old-run"
+    employee = _employee()
+    previous = sys.modules["models.command_center"].CommandTaskRun(
+        id="old-row",
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        run_id="old-run",
+        employee_id=employee.id,
+        session_id="stable-session",
+        status="failed",
+        deleted=False,
+    )
+    previous.task = _async_value(task)
+    previous.employee = _async_value(employee)
+    CREATED_RUNS.append(previous)
+    execute_coordinator = types.ModuleType("services.digital_employee.execute_coordinator")
+
+    async def run(task_arg, employee_arg, **kwargs):
+        assert kwargs["command_run"].session_id == "stable-session"
+        return {"content": "retried", "usage": {}}
+
+    execute_coordinator.run = run
+    sys.modules["services.digital_employee.execute_coordinator"] = execute_coordinator
+
+    result = asyncio.run(run_manager.retry_run(previous, operator_id="operator-1"))
+
+    assert result["content"] == "retried"
+    assert len(CREATED_RUNS) == 2
+    assert CREATED_RUNS[-1].run_id != previous.run_id
+    assert CREATED_RUNS[-1].session_id == "stable-session"
+    assert employee.load == 1
+    assert employee.current_task_id == task.id
+    assert employee.status == "busy"
+
+
+def test_prepare_run_retry_claims_once_and_restores_employee_workload():
+    run_manager = _load_run_manager()
+    task = _task()
+    task.status = "failed"
+    task.run_id = "old-run"
+    task.result = "old failure"
+    task.started_at = datetime.now(timezone.utc)
+    task.finished_at = datetime.now(timezone.utc)
+    employee = _employee()
+    previous = sys.modules["models.command_center"].CommandTaskRun(
+        id="old-row",
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        run_id="old-run",
+        session_id=None,
+        employee_id=employee.id,
+        status="failed",
+        deleted=False,
+    )
+    previous.task = _async_value(task)
+    previous.employee = _async_value(employee)
+    CREATED_RUNS.append(previous)
+
+    prepared_task, prepared_employee = asyncio.run(
+        run_manager.prepare_run_retry(previous, operator_id="operator-1")
+    )
+
+    assert prepared_task.status == "dispatched"
+    assert prepared_task.run_id is None
+    assert prepared_task.result is None
+    assert prepared_task.started_at is None
+    assert prepared_task.finished_at is None
+    assert prepared_employee.load == 1
+    assert prepared_employee.current_task_id == task.id
+    assert prepared_employee.status == "busy"
+    assert RECORDED_EVENTS[-1][0] == "task_retry_requested"
+    assert RECORDED_EVENTS[-1][3] == {
+        "retried_from_run_id": "old-run",
+        "session_id": "old-run",
+    }
+
+    with pytest.raises(run_manager.RunRetryConflict):
+        asyncio.run(run_manager.prepare_run_retry(previous, operator_id="operator-1"))
+
+
+def test_scheduled_retry_start_failure_restores_failed_state_and_employee_load(monkeypatch):
+    run_manager = _load_run_manager()
+    task = _task()
+    task.status = "dispatched"
+    task.assigned_agent_key = "ops"
+    employee = _employee()
+    employee.load = 1
+    employee.status = "busy"
+    employee.current_task_id = task.id
+    task.assigned_agent = employee
+    previous = sys.modules["models.command_center"].CommandTaskRun(
+        id="old-row",
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        run_id="old-run",
+        session_id="stable-session",
+        employee_id=employee.id,
+        status="failed",
+        deleted=False,
+    )
+
+    async def fail_retry(*_args, **_kwargs):
+        raise RuntimeError("workspace sync failed")
+
+    class TaskLookup:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            assert kwargs == {
+                "id": task.id,
+                "tenant_id": task.tenant_id,
+                "deleted": False,
+            }
+            return task
+
+    scheduled = []
+    monkeypatch.setattr(run_manager, "retry_run", fail_retry)
+    monkeypatch.setattr(run_manager, "CommandTask", TaskLookup)
+    monkeypatch.setattr(run_manager.asyncio, "create_task", scheduled.append)
+
+    run_manager.schedule_prepared_run_retry(
+        previous,
+        task,
+        employee,
+        operator_id="operator-1",
+    )
+    asyncio.run(scheduled.pop())
+
+    assert task.status == "failed"
+    assert employee.load == 0
+    assert employee.current_task_id is None
+    assert employee.status == "idle"
+    assert UPDATED_PROGRESS[-1][0]["metadata"] == {
+        "retried_from_run_id": "old-run",
+    }

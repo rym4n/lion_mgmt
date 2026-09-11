@@ -22,6 +22,9 @@ class ResolvedLlm:
     # 仅 embedding 用途非空（SPEC §5.6）。声明在 api_key 之后，
     # 既满足「有默认值的字段必须在后」，也不动 api_key 的 repr=False。
     dimensions: int | None = None
+    context_size: int = 128000
+    trigger_ratio: float = 0.8
+    purpose: str = "chat"
 
     def to_payload(self) -> dict:
         """序列化为 lion_agent ExecuteRequest.llm / memory.embedding 的结构。
@@ -37,6 +40,9 @@ class ResolvedLlm:
         }
         if self.dimensions is not None:
             payload["dimensions"] = self.dimensions
+        if self.purpose != "embedding":
+            payload["context_size"] = self.context_size
+            payload["trigger_ratio"] = self.trigger_ratio
         return payload
 
 
@@ -85,4 +91,7 @@ async def resolve_llm(
         model_name=record.model_name,
         config_id=record.id,
         dimensions=getattr(record, "dimensions", None),
+        context_size=getattr(record, "context_size", 128000),
+        trigger_ratio=getattr(record, "trigger_ratio", 0.8),
+        purpose=purpose,
     )

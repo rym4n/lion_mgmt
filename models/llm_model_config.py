@@ -30,6 +30,8 @@ class LlmModelConfig(BaseModel):
     # 仅 embedding 用途填写。ReMe 注入了 embedding model 时维度由模型自身传导，
     # 但 lion_agent 构造 OpenAIEmbeddingModel 需要显式维度（SPEC §5.6）。
     dimensions: int | None = fields.IntField(null=True, description="向量维度，仅 embedding 用途填写")
+    context_size: int = fields.IntField(default=128000, description="模型上下文窗口大小")
+    trigger_ratio: float = fields.FloatField(default=0.8, description="上下文压缩触发比例，最大0.9")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -48,6 +50,8 @@ class LlmModelConfig(BaseModel):
             "purpose": self.purpose,
             "enabled": self.enabled,
             "dimensions": self.dimensions,
+            "context_size": self.context_size,
+            "trigger_ratio": self.trigger_ratio,
         }
 
     class Meta:

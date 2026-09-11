@@ -80,6 +80,10 @@ class RunCheckoutConflict(ValueError):
     """The task was already claimed or left the dispatchable state."""
 
 
+class RunRetryConflict(ValueError):
+    """The failed run is no longer the current retryable task run."""
+
+
 def _now() -> datetime:
     return datetime.now(TZ)
 
@@ -341,6 +345,7 @@ async def checkout_run(
     metadata: dict | None = None,
     policy_snapshot_override: dict | None = None,
     workspace_etag_override: str | None = None,
+    session_id: str | None = None,
 ) -> CommandTaskRun:
     from services.command_center.manager import record_task_event
 
@@ -358,12 +363,14 @@ async def checkout_run(
         )
         if not locked_task or locked_task.status != COMMAND_TASK_STATUS_DISPATCHED:
             raise RunCheckoutConflict("task is not dispatchable")
+        next_run_id = uuid.uuid4().hex
         run = await CommandTaskRun.create(
             using_db=connection,
             tenant_id=locked_task.tenant_id,
             task=locked_task,
             employee=employee,
-            run_id=uuid.uuid4().hex,
+            run_id=next_run_id,
+            session_id=session_id or next_run_id,
             runtime=COMMAND_RUNTIME_LION_AGENT,
             status=COMMAND_RUN_STATUS_CHECKED_OUT,
             lease_owner=lease_owner or f"lion_mgmt:{locked_task.id}",
@@ -778,6 +785,8 @@ async def execute_task_run(
     skip_pre_run_policy: bool = False,
     approved_policy_mutation: str | None = None,
     on_run_checked_out: RunCheckedOutHandler | None = None,
+    session_id: str | None = None,
+    retried_from_run_id: str | None = None,
 ) -> dict:
     continuation_workspace = await _continuation_workspace(employee, approved_policy_mutation, continuation_approval_id)
     continuation_metadata = None
@@ -790,6 +799,11 @@ async def execute_task_run(
         }
         if continuation_workspace:
             continuation_metadata["workspace_id"] = continuation_workspace["workspace_id"]
+    if retried_from_run_id:
+        continuation_metadata = {
+            **(continuation_metadata or {}),
+            "retried_from_run_id": retried_from_run_id,
+        }
     run = await checkout_run(
         task,
         employee,
@@ -798,6 +812,7 @@ async def execute_task_run(
         metadata=continuation_metadata,
         policy_snapshot_override=continuation_workspace["policy_snapshot"] if continuation_workspace else None,
         workspace_etag_override=continuation_workspace["workspace_etag"] if continuation_workspace else None,
+        session_id=session_id,
     )
     lease_heartbeat_task = None
     try:
@@ -951,16 +966,156 @@ async def handoff_run(run: CommandTaskRun, operator_id: str | None = None, reaso
     return run
 
 
-async def retry_run(run: CommandTaskRun, operator_id: str | None = None) -> dict:
-    task = await run.task
-    employee = await run.employee
-    if employee is None:
-        raise ValueError("cannot retry run without employee")
-    task.status = COMMAND_TASK_STATUS_DISPATCHED
-    task.progress = 0
-    task.run_id = None
-    await task.save(update_fields=["status", "progress", "run_id", "utime"])
-    return await execute_task_run(task, employee, operator_id=operator_id)
+async def retry_run(
+    run: CommandTaskRun,
+    operator_id: str | None = None,
+    *,
+    task_override: CommandTask | None = None,
+    employee_override: CommandAgent | None = None,
+) -> dict:
+    if (task_override is None) != (employee_override is None):
+        raise ValueError("retry task and employee overrides must be supplied together")
+    if task_override is None:
+        task, employee = await prepare_run_retry(run, operator_id)
+    else:
+        task, employee = task_override, employee_override
+    if task.status != COMMAND_TASK_STATUS_DISPATCHED:
+        raise RunRetryConflict("run retry was not prepared")
+    retry_session_id = run.session_id or run.run_id
+    return await execute_task_run(
+        task,
+        employee,
+        operator_id=operator_id,
+        session_id=retry_session_id,
+        retried_from_run_id=run.run_id,
+    )
+
+
+async def prepare_run_retry(
+    run: CommandTaskRun,
+    operator_id: str | None = None,
+) -> tuple[CommandTask, CommandAgent]:
+    """Claim one failed task retry and restore its employee workload."""
+    from services.command_center.manager import record_task_event
+    from services.command_center.realtime import publish_command_center_update
+
+    async with in_transaction() as connection:
+        locked_task = (
+            await CommandTask.filter(id=run.task_id, tenant_id=run.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        locked_run = (
+            await CommandTaskRun.filter(id=run.id, tenant_id=run.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if (
+            not locked_task
+            or not locked_run
+            or locked_task.status != COMMAND_TASK_STATUS_FAILED
+            or locked_run.status != COMMAND_RUN_STATUS_FAILED
+            or locked_task.run_id != locked_run.run_id
+        ):
+            raise RunRetryConflict("run is not retryable")
+
+        employee = (
+            await CommandAgent.filter(
+                id=locked_run.employee_id,
+                tenant_id=locked_run.tenant_id,
+                deleted=False,
+                enabled=True,
+            )
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if (
+            employee is None
+            or employee.status in {"offline", "error"}
+            or employee.load >= employee.max_concurrent
+        ):
+            raise RunRetryConflict("run employee is unavailable")
+
+        locked_task.status = COMMAND_TASK_STATUS_DISPATCHED
+        locked_task.progress = 0
+        locked_task.run_id = None
+        locked_task.result = None
+        locked_task.started_at = None
+        locked_task.finished_at = None
+        await locked_task.save(
+            using_db=connection,
+            update_fields=[
+                "status", "progress", "run_id", "result",
+                "started_at", "finished_at", "utime",
+            ],
+        )
+        employee.load += 1
+        employee.current_task_id = locked_task.id
+        if employee.load >= employee.max_concurrent:
+            employee.status = "busy"
+        await employee.save(
+            using_db=connection,
+            update_fields=["load", "current_task_id", "status"],
+        )
+        await record_task_event(
+            locked_task,
+            "task_retry_requested",
+            "失败任务已进入重试",
+            operator_id,
+            {
+                "retried_from_run_id": locked_run.run_id,
+                "session_id": locked_run.session_id or locked_run.run_id,
+            },
+            using_db=connection,
+        )
+
+    original_task = await run.task
+    for field in ("status", "progress", "run_id", "result", "started_at", "finished_at"):
+        setattr(original_task, field, getattr(locked_task, field))
+    await publish_command_center_update(locked_task.tenant_id, "task_retry_requested", locked_task.id)
+    return locked_task, employee
+
+
+def schedule_prepared_run_retry(
+    run: CommandTaskRun,
+    task: CommandTask,
+    employee: CommandAgent,
+    operator_id: str | None = None,
+) -> None:
+    async def _runner() -> None:
+        try:
+            await retry_run(
+                run,
+                operator_id=operator_id,
+                task_override=task,
+                employee_override=employee,
+            )
+        except Exception as exc:
+            logger.warning(
+                "command-center retry failed run_id=%s error_code=%s",
+                run.run_id,
+                type(exc).__name__,
+            )
+            failed_task = await CommandTask.get_or_none(
+                id=task.id, tenant_id=task.tenant_id, deleted=False
+            )
+            if failed_task and failed_task.status == COMMAND_TASK_STATUS_DISPATCHED:
+                from services.command_center.manager import update_task_progress
+
+                await update_task_progress(
+                    failed_task,
+                    {
+                        "status": COMMAND_TASK_STATUS_FAILED,
+                        "message": "数字伙伴重试启动失败",
+                        "metadata": {"retried_from_run_id": run.run_id},
+                    },
+                    operator_id,
+                )
+
+    asyncio.create_task(_runner())
 
 
 async def recover_stale_runs(tenant_id: str | None = None, now: datetime | None = None) -> list[CommandTaskRun]:

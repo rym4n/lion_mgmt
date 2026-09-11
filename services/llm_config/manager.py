@@ -17,6 +17,17 @@ from libs.error_code.exception import CustomError
 VALID_PURPOSES = ("chat", "lite", "embedding")
 
 
+def _valid_context_settings(context_size, trigger_ratio) -> bool:
+    return (
+        isinstance(context_size, int)
+        and not isinstance(context_size, bool)
+        and context_size > 0
+        and isinstance(trigger_ratio, (int, float))
+        and not isinstance(trigger_ratio, bool)
+        and 0 < trigger_ratio <= 0.9
+    )
+
+
 async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]:
     from models import LlmModelConfig, mask_api_key
 
@@ -38,6 +49,8 @@ async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]
             # 都会以空维度提交，用户被迫重选，选错就换了向量空间。
             # list_catalog 是闭集（见其 docstring），那边不加。
             "dimensions": getattr(row, "dimensions", None),
+            "context_size": getattr(row, "context_size", 128000),
+            "trigger_ratio": getattr(row, "trigger_ratio", 0.8),
             "enabled": row.enabled,
             "ctime": row.ctime,
             "utime": row.utime,
@@ -127,10 +140,14 @@ async def create_config(
     model_name: str,
     purpose: str | None = None,
     dimensions: int | None = None,
+    context_size: int = 128000,
+    trigger_ratio: float = 0.8,
 ) -> dict:
     from models import LlmModelConfig
 
     if dimensions is not None and not (1 <= dimensions <= 65536):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if not _valid_context_settings(context_size, trigger_ratio):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     await _assert_name_available(tenant_id, name)
@@ -144,6 +161,8 @@ async def create_config(
         model_name=model_name,
         purpose=purpose,
         dimensions=dimensions,
+        context_size=context_size,
+        trigger_ratio=trigger_ratio,
     )
     return {"id": row.id}
 
@@ -161,6 +180,14 @@ async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
     dimensions = changes.get("dimensions")
     if dimensions is not None and not (1 <= dimensions <= 65536):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    context_size = changes.get("context_size")
+    if context_size is None:
+        context_size = getattr(row, "context_size", 128000)
+    trigger_ratio = changes.get("trigger_ratio")
+    if trigger_ratio is None:
+        trigger_ratio = getattr(row, "trigger_ratio", 0.8)
+    if not _valid_context_settings(context_size, trigger_ratio):
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     new_name = changes.get("name")
     if new_name and new_name != row.name:
@@ -177,6 +204,8 @@ async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
         "model_name",
         "enabled",
         "dimensions",
+        "context_size",
+        "trigger_ratio",
     ):
         if key in changes and changes[key] is not None:
             setattr(row, key, changes[key])

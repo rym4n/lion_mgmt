@@ -78,7 +78,7 @@ class _FakeTable:
         return await self.filter(**conditions).first()
 
     async def create(self, **fields):
-        row = _FakeRow(deleted=False, enabled=True, purpose=None, **fields)
+        row = _FakeRow(**{"deleted": False, "enabled": True, "purpose": None, **fields})
         if not hasattr(row, "id"):
             row.id = f"generated-{len(self.rows)}"
         self.rows.append(row)
@@ -240,3 +240,76 @@ def test_create_rejects_duplicate_name_including_soft_deleted(fake_db):
             api_key="sk-1", model_name="aioe",
         ))
     assert exc.value.enum.code == 4181
+
+
+@pytest.mark.parametrize(
+    ("context_size", "trigger_ratio"),
+    [
+        (0, 0.8),
+        (-1, 0.8),
+        (True, 0.8),
+        (64000.5, 0.8),
+        (64000, 0),
+        (64000, -0.1),
+        (64000, 0.9001),
+        (64000, True),
+    ],
+)
+def test_create_rejects_invalid_context_settings(
+    fake_db, context_size, trigger_ratio,
+):
+    manager = fake_db.load_manager()
+    from libs.error_code.exception import CustomError
+
+    with pytest.raises(CustomError):
+        asyncio.run(manager.create_config(
+            "t1", name="invalid", base_url="https://x/v1",
+            api_key="sk-1", model_name="aioe",
+            context_size=context_size, trigger_ratio=trigger_ratio,
+        ))
+
+
+def test_update_preserves_context_settings_when_optional_fields_are_none(fake_db):
+    manager = fake_db.load_manager()
+    record = fake_db.add(
+        id="cfg-1",
+        name="配置",
+        context_size=64000,
+        trigger_ratio=0.85,
+    )
+
+    asyncio.run(manager.update_config(
+        "t1",
+        "cfg-1",
+        name="改名",
+        context_size=None,
+        trigger_ratio=None,
+    ))
+
+    assert record.name == "改名"
+    assert record.context_size == 64000
+    assert record.trigger_ratio == 0.85
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected_context_size", "expected_trigger_ratio"),
+    [
+        ({"context_size": 96000}, 96000, 0.85),
+        ({"trigger_ratio": 0.75}, 64000, 0.75),
+    ],
+)
+def test_update_changes_one_context_setting_without_resetting_the_other(
+    fake_db, changes, expected_context_size, expected_trigger_ratio,
+):
+    manager = fake_db.load_manager()
+    record = fake_db.add(
+        id="cfg-1",
+        name="配置",
+        context_size=64000,
+        trigger_ratio=0.85,
+    )
+
+    asyncio.run(manager.update_config("t1", "cfg-1", **changes))
+
+    assert record.context_size == expected_context_size
+    assert record.trigger_ratio == expected_trigger_ratio

@@ -399,3 +399,74 @@ def test_task_progress_rejects_pending_clarification_before_loading_or_updating_
 
     assert exc_info.value.enum is views.ErrorCode.PARAM_VALUE_ERROR
     assert calls == []
+
+
+def test_retry_failed_task_scopes_claim_and_schedules_background_run(monkeypatch):
+    calls = []
+    task = SimpleNamespace(
+        id="task-1",
+        status="failed",
+        run_id="run-1",
+        json={"id": "task-1", "status": "failed", "run_id": "run-1"},
+    )
+    run = SimpleNamespace(id="row-1", run_id="run-1", status="failed")
+    employee = SimpleNamespace(id="employee-1")
+
+    class TaskModel:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            calls.append(("task", kwargs))
+            return task
+
+    class RunQuery:
+        async def first(self):
+            return run
+
+    class RunModel:
+        @classmethod
+        def filter(cls, **kwargs):
+            calls.append(("run", kwargs))
+            return RunQuery()
+
+    async def prepare(run_arg, operator_id):
+        calls.append(("prepare", run_arg, operator_id))
+        task.status = "dispatched"
+        task.run_id = None
+        task.json = {"id": task.id, "status": task.status, "run_id": task.run_id}
+        return task, employee
+
+    def schedule(run_arg, task_arg, employee_arg, operator_id):
+        calls.append(("schedule", run_arg, task_arg, employee_arg, operator_id))
+
+    request = SimpleNamespace(
+        json={"id": "task-1"},
+        ctx=SimpleNamespace(
+            session={
+                "tenant_id": "tenant-1",
+                "account_info": SimpleNamespace(id="operator-1"),
+            }
+        ),
+    )
+    monkeypatch.setattr(views, "CommandTask", TaskModel)
+    monkeypatch.setattr(views, "CommandTaskRun", RunModel)
+    monkeypatch.setattr(views, "prepare_run_retry", prepare)
+    monkeypatch.setattr(views, "schedule_prepared_run_retry", schedule)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    out = asyncio.run(inspect.unwrap(views.retry_failed_task)(request))
+
+    assert out["status"] == "dispatched"
+    assert calls == [
+        ("task", {"id": "task-1", "tenant_id": "tenant-1", "deleted": False}),
+        (
+            "run",
+            {
+                "task_id": "task-1",
+                "tenant_id": "tenant-1",
+                "run_id": "run-1",
+                "deleted": False,
+            },
+        ),
+        ("prepare", run, "operator-1"),
+        ("schedule", run, task, employee, "operator-1"),
+    ]

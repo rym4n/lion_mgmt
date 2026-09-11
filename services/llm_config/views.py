@@ -87,6 +87,8 @@ async def create_view(request: Request):
             model_name=params["model_name"],
             purpose=params.get("purpose"),
             dimensions=params.get("dimensions"),
+            context_size=params.get("context_size", 128000),
+            trigger_ratio=params.get("trigger_ratio", 0.8),
         )
     )
 
@@ -108,6 +110,8 @@ async def update_view(request: Request):
             model_name=params.get("model_name"),
             enabled=params.get("enabled"),
             dimensions=params.get("dimensions"),
+            context_size=params.get("context_size"),
+            trigger_ratio=params.get("trigger_ratio"),
         )
     )
 
