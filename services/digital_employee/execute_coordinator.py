@@ -1,3 +1,4 @@
+import base64
 import orjson
 from aiocache import caches
 from sanic.log import logger
@@ -102,6 +103,36 @@ def _is_independent_task(task: CommandTask) -> bool:
     """Only an explicit boolean opt-out disables employee memory for a task."""
     payload = getattr(task, "payload", None)
     return isinstance(payload, dict) and payload.get("independent_task") is True
+
+
+async def load_task_attachments(task: CommandTask) -> list[dict]:
+    """Read task attachment bytes using only the current tenant's storage prefix."""
+    payload = getattr(task, "payload", None)
+    refs = payload.get("attachments") if isinstance(payload, dict) else None
+    if not isinstance(refs, list):
+        return []
+    from libs.utils import get_from_s3
+
+    loaded = []
+    prefix = f"command_center/{task.tenant_id}"
+    for ref in refs[:20]:
+        if not isinstance(ref, dict):
+            continue
+        file_id = ref.get("file_id")
+        if not isinstance(file_id, str) or not file_id or file_id != file_id.rsplit("/", 1)[-1] or file_id != file_id.rsplit("\\", 1)[-1]:
+            continue
+        content = await get_from_s3("user", file_id, prefix)
+        if content is None:
+            raise RuntimeError("任务附件读取失败")
+        loaded.append(
+            {
+                "filename": str(ref.get("filename") or file_id)[:255],
+                "mime_type": str(ref.get("mime_type") or "application/octet-stream")[:128],
+                "kind": str(ref.get("kind") or "file"),
+                "data": base64.b64encode(content).decode("ascii"),
+            }
+        )
+    return loaded
 
 
 async def _publish_room_event(task: CommandTask, event_type: str, payload: dict, operator_id: str | None) -> bool:
@@ -233,6 +264,7 @@ async def run(
     llm = await resolve_llm(
         task.tenant_id, config_id=getattr(employee, "llm_config_id", None)
     )
+    runtime_attachments = await load_task_attachments(task)
     payload = {
         "workspace_id": workspace_id,
         "session_id": (
@@ -243,6 +275,7 @@ async def run(
         ),
         "request_id": task.id,
         "message": build_runtime_prompt(task, employee),
+        "attachments": runtime_attachments,
         "memory": memory_section,
         "aioe": {
             "base_url": AIOE_INTERNAL_URL,

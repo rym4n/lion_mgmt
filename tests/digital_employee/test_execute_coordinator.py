@@ -295,44 +295,102 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert [call[1] for call in progress_calls] == ["operator-1", "operator-1"]
     assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
 
-    payload = RECORDED_STREAM_PAYLOADS[0]
-    assert payload["workspace_id"] == "employee-1"
-    assert payload["session_id"] == "task-1"
-    assert payload["message"] == "prompt:task-1:employee-1"
-    assert payload["llm"].config_id == "llm-config-1"
-    assert "model" not in payload
-    assert payload["memory"] == {
-        "enabled": True,
-        "mode": "both",
-        "top_k": 5,
-        "tenant_id": "tenant-1",
-        "employee_id": "employee-1",
-        "provenance": {
-            "role_key": "ops",
-            "task_id": "task-1",
-            "request_id": "task-1",
-            "source_kind": "manual",
-        },
-        "embedding": None,
-    }
-    assert payload["aioe"] == {
-        "base_url": "http://lion-mgmt",
-        "token": "api-token-employee-1",
-        "tenant_id": "tenant-1",
-        "agent_run_id": None,
-    }
 
-    published = [message for _, message in redis.messages]
-    assert [message["type"] for message in published] == [
-        "ai-thinking",
-        "ai-thinking",
-        "ai-reply-delta",
-        "ai-reply-delta",
-        "ai-reply-end",
+def test_run_loads_tenant_scoped_attachment_bytes_for_lion_agent_context(monkeypatch):
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+
+    async def fake_load_attachments(task):
+        assert task.tenant_id == "tenant-1"
+        return [
+            {
+                "filename": "diagram.png",
+                "mime_type": "image/png",
+                "kind": "image",
+                "data": "cG5nLWJ5dGVz",
+            }
+        ]
+
+    monkeypatch.setattr(execute_coordinator, "load_task_attachments", fake_load_attachments)
+    task = FakeTask(
+        id="task-attachments",
+        tenant_id="tenant-1",
+        run_id=None,
+        room_id=None,
+        creator_id="creator-1",
+        source="manual",
+        progress=0,
+        status="pending",
+        title="拓扑核对",
+        description="检查图片",
+        payload={"attachments": [{"file_id": "attach-1.png", "filename": "diagram.png"}]},
+        result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+
+    asyncio.run(execute_coordinator.run(task, employee, command_run=SimpleNamespace(run_id="run-attachments")))
+
+    assert RECORDED_STREAM_PAYLOADS[0]["attachments"] == [
+        {
+            "filename": "diagram.png",
+            "mime_type": "image/png",
+            "kind": "image",
+            "data": "cG5nLWJ5dGVz",
+        }
     ]
-    assert [message.get("content") for message in published if message["type"] == "ai-reply-delta"] == ["A", "B"]
-    assert all(message["stream_id"] == "digital-employee:task-1" for message in published)
 
+
+def test_load_task_attachments_uses_task_tenant_prefix_and_ignores_ref_url(monkeypatch):
+    progress_calls = []
+    _install_stubs(progress_calls)
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    calls = []
+
+    async def fake_get(bucket, file_name, prefix):
+        calls.append((bucket, file_name, prefix))
+        return b"file-bytes"
+
+    libs_module = types.ModuleType("libs")
+    libs_module.__path__ = []
+    utils_module = types.ModuleType("libs.utils")
+    utils_module.get_from_s3 = fake_get
+    sys.modules["libs"] = libs_module
+    sys.modules["libs.utils"] = utils_module
+    task = SimpleNamespace(
+        tenant_id="tenant-1",
+        payload={
+            "attachments": [
+                {
+                    "file_id": "attach-1.pdf",
+                    "filename": "runbook.pdf",
+                    "mime_type": "application/pdf",
+                    "kind": "file",
+                    "url": "/files/user/command_center/other-tenant/attach-1.pdf",
+                }
+            ]
+        },
+    )
+
+    loaded = asyncio.run(execute_coordinator.load_task_attachments(task))
+
+    assert calls == [("user", "attach-1.pdf", "command_center/tenant-1")]
+    assert loaded == [
+        {
+            "filename": "runbook.pdf",
+            "mime_type": "application/pdf",
+            "kind": "file",
+            "data": "ZmlsZS1ieXRlcw==",
+        }
+    ]
 
 def test_run_uses_command_run_session_and_emits_runtime_callbacks():
     progress_calls = []

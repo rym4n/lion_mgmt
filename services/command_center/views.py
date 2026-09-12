@@ -3,9 +3,13 @@ import base64
 import binascii
 from datetime import datetime, time
 import json
+import mimetypes
+import os
 import re
+import uuid
+from urllib.parse import quote
 
-from sanic import Blueprint, Request
+from sanic import Blueprint, Request, response
 from sanic_ext import openapi
 
 from core.error_code import ErrorCode
@@ -18,7 +22,7 @@ from libs.runlog_pagination import (
     runlog_node_page,
 )
 from libs.security.authorization import account_has_permission, requires_permission
-from libs.utils import strip_timezone_to_seconds
+from libs.utils import get_from_s3, strip_timezone_to_seconds, upload_to_s3
 from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent, CommandApproval, CommandTask, CommandTaskEvent, CommandTaskRun
 from settings import TZ
 
@@ -35,6 +39,7 @@ from .manager import (
     has_task_content,
     list_tasks,
     update_task_progress,
+    normalize_task_attachments,
 )
 from .realtime import publish_command_center_update
 from .run_manager import RunRetryConflict, prepare_run_retry, schedule_prepared_run_retry
@@ -57,6 +62,7 @@ TASK_STATUS_ENUM = [
 DISPATCH_STATUS_ENUM = ["pending", "needs_clarification", "user_specified", "corrected", "auto_assigned", "no_candidate"]
 TASK_PROGRESS_WRITE_STATUS_ENUM = ["running", "completed", "failed", "cancelled"]
 TASK_PROGRESS_WRITE_STATUSES = frozenset(TASK_PROGRESS_WRITE_STATUS_ENUM)
+TASK_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
 RUNLOG_BATCH_DEFAULT_LIMIT = 10
 RUNLOG_BATCH_MAX_LIMIT = 50
 RUNLOG_NODE_DEFAULT_LIMIT = 50
@@ -128,6 +134,8 @@ TASK_SCHEMA = {
             "description": "任务所需能力标签",
             "items": {"type": "string"},
         },
+        "content_html": {"type": "string", "description": "任务富文本 HTML 内容"},
+        "attachments": {"type": "array", "description": "任务附件安全引用", "items": {"type": "object"}},
         "payload_summary": {"type": "object", "description": "任务载荷结构摘要，不包含原始值"},
         "result_summary": {
             "type": "object",
@@ -463,6 +471,7 @@ async def _runlog_batch_summaries(
 
 def _task_detail_json(task: CommandTask, actor: dict | None = None) -> dict:
     raw = task.json
+    payload = raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
     allowed = [
         "id",
         "ctime",
@@ -495,7 +504,73 @@ def _task_detail_json(task: CommandTask, actor: dict | None = None) -> dict:
         "assigned_agent_deleted": actor.get("assigned_agent_deleted", False),
         "creator_display_name": actor.get("creator_display_name"),
         "token_usage": actor.get("token_usage") or zero_usage(),
+        "content_html": payload.get("content_html") or "",
+        "attachments": normalize_task_attachments(payload.get("attachments")),
     }
+
+
+def _task_attachment_filename(value) -> str:
+    if not isinstance(value, str):
+        return "attachment"
+    filename = os.path.basename(value.replace("\\", "/")).strip()
+    return filename[:255] or "attachment"
+
+
+@command_bp.post("/tasks/attachments/upload")
+@openapi.exclude()
+@requires_permission("command_center:c")
+async def upload_task_attachments(request: Request):
+    tenant_id = (getattr(request.ctx, "session", {}) or {}).get("tenant_id")
+    if not tenant_id or not request.files:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    files = request.files.getlist("file") if hasattr(request.files, "getlist") else []
+    if not files:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    saved_files = []
+    prefix = f"command_center/{tenant_id}"
+    for uploaded in files:
+        body = uploaded.body or b""
+        if not body:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if len(body) > TASK_ATTACHMENT_MAX_BYTES:
+            raise CustomError(ErrorCode.FILE_TOO_LARGE)
+        filename = _task_attachment_filename(getattr(uploaded, "name", None) or getattr(uploaded, "filename", None))
+        extension = os.path.splitext(filename)[1].lower()
+        file_id = f"{uuid.uuid4()}{extension}"
+        mime_type = str(getattr(uploaded, "type", None) or "application/octet-stream")[:128]
+        await upload_to_s3(body, "user", file_id, prefix, mime_type)
+        saved_files.append(
+            {
+                "file_id": file_id,
+                "filename": filename,
+                "size": len(body),
+                "mime_type": mime_type,
+                "kind": "image" if mime_type.startswith("image/") else "file",
+                "url": f"/command_center/tasks/attachments/{file_id}",
+            }
+        )
+    return response_ok({"files": saved_files})
+
+
+@command_bp.get("/tasks/attachments/<file_id:str>")
+@openapi.exclude()
+@requires_permission("command_center:r")
+async def download_task_attachment(request: Request, file_id: str):
+    tenant_id = (getattr(request.ctx, "session", {}) or {}).get("tenant_id")
+    if not tenant_id or not file_id or file_id != os.path.basename(file_id):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    content = await get_from_s3("user", file_id, f"command_center/{tenant_id}")
+    if content is None:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    download_name = _task_attachment_filename(request.args.get("download_name") or file_id)
+    content_type = mimetypes.guess_type(download_name)[0] or mimetypes.guess_type(file_id)[0] or "application/octet-stream"
+    force_download = str(request.args.get("download") or "").lower() in {"1", "true", "yes"}
+    disposition = "attachment" if force_download or not content_type.startswith("image/") else "inline"
+    headers = {
+        "Content-Disposition": f"{disposition}; filename=\"{download_name}\";filename*=UTF-8''{quote(download_name)}",
+        "Content-Type": content_type,
+    }
+    return response.raw(content, headers=headers)
 
 
 async def _resolve_task_actors(tasks: list[CommandTask], tenant_id: str) -> dict[str, dict]:
@@ -911,6 +986,12 @@ async def update_agent_status(request: Request):
             "properties": {
                 "title": {"type": "string", "description": "兼容字段；新调用仅需传description"},
                 "description": {"type": "string", "description": "完整任务内容"},
+                "content_html": {"type": "string", "description": "任务富文本 HTML 内容"},
+                "attachments": {
+                    "type": "array",
+                    "description": "任务附件安全引用",
+                    "items": {"type": "object"},
+                },
                 "source": {"type": "string", "description": "任务来源", "default": "manual"},
                 "priority": {"type": "integer", "description": "优先级，数值越小优先级越高", "default": 3},
                 "required_capabilities": {

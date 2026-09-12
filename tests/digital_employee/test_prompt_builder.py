@@ -309,6 +309,34 @@ def test_build_runtime_prompt_contains_payload():
     assert "_dispatch_scope" not in prompt
 
 
+def test_build_runtime_prompt_exposes_rich_content_and_attachment_references():
+    task = SimpleNamespace(
+        title="旧兼容标题",
+        source="manual",
+        description="请核对图片中的拓扑",
+        payload={
+            "content_html": "<p>请核对 <strong>图片</strong> 中的拓扑</p>",
+            "attachments": [
+                {
+                    "file_id": "command_center/tenant-1/diagram.png",
+                    "filename": "diagram.png",
+                    "size": 128,
+                    "mime_type": "image/png",
+                    "kind": "image",
+                    "url": "/command_center/tasks/attachments/command_center%2Ftenant-1%2Fdiagram.png",
+                }
+            ],
+        },
+    )
+    employee = SimpleNamespace(name="网络工程师", agent_key="network-1")
+
+    prompt = build_runtime_prompt(task, employee)
+
+    assert "任务富文本（HTML）：\n<p>请核对 <strong>图片</strong> 中的拓扑</p>" in prompt
+    assert '"file_id": "command_center/tenant-1/diagram.png"' in prompt
+    assert '"filename": "diagram.png"' in prompt
+
+
 def test_workspace_skills_are_verbatim_files(tmp_path, monkeypatch):
     monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
     skill_dir = tmp_path / "tenant-1" / "db_backup_check"

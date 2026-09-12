@@ -197,6 +197,43 @@ def test_dispatch_payload_uses_task_content_without_separate_title():
     assert "description" not in payload
 
 
+def test_dispatch_payload_exposes_rich_content_and_attachment_references():
+    dispatcher = _load_dispatcher()
+    attachments = [
+        {
+            "file_id": "command_center/tenant-1/diagram.png",
+            "filename": "diagram.png",
+            "size": 128,
+            "mime_type": "image/png",
+            "kind": "image",
+            "url": "/command_center/tasks/attachments/command_center%2Ftenant-1%2Fdiagram.png",
+        }
+    ]
+    task = SimpleNamespace(
+        id="task-1",
+        tenant_id="tenant-1",
+        title="旧兼容标题",
+        description="请核对图片中的拓扑",
+        source="manual",
+        priority=3,
+        status="pending_dispatch",
+        progress=0,
+        required_capabilities=[],
+        payload={
+            "content_html": "<p>请核对 <strong>图片</strong> 中的拓扑</p>",
+            "attachments": attachments,
+        },
+        requested_agent_id=None,
+        room_id=None,
+        creator_id=None,
+    )
+
+    payload = dispatcher._task_payload(task)
+
+    assert payload["content_html"] == "<p>请核对 <strong>图片</strong> 中的拓扑</p>"
+    assert payload["attachments"] == attachments
+
+
 def test_automatic_dispatch_uses_configured_lite_model():
     dispatcher = _load_dispatcher(lite_model="custom-lite")
     selected = _agent("ops-1")

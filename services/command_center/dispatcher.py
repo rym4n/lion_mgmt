@@ -89,6 +89,7 @@ def _agent_payload(agent: AgentCandidate) -> dict:
 
 
 def _task_payload(task: DispatchTask) -> dict:
+    task_payload = task.payload or {}
     return {
         "id": task.id,
         "tenant_id": task.tenant_id,
@@ -98,7 +99,9 @@ def _task_payload(task: DispatchTask) -> dict:
         "status": task.status,
         "progress": task.progress,
         "required_capabilities": task.required_capabilities or [],
-        "payload": task.payload or {},
+        "payload": task_payload,
+        "content_html": task_payload.get("content_html"),
+        "attachments": task_payload.get("attachments") or [],
         "requested_agent_id": task.requested_agent_id,
         "room_id": task.room_id,
         "creator_id": task.creator_id,

@@ -394,6 +394,10 @@ async def _dispatch_employee_task(request: Request, tenant_id: str, account_info
     if employee_key:
         employee = await _employee_or_404(tenant_id, employee_key)
     task_payload = dict(data.get("payload") or {})
+    if "content_html" in data:
+        task_payload["content_html"] = data.get("content_html")
+    if "attachments" in data:
+        task_payload["attachments"] = data.get("attachments")
     task_payload["_dispatch_scope"] = "digital_employee"
     command_task_data = {
         "description": data.get("description"),

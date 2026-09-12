@@ -83,6 +83,39 @@ def _request(tenant_id="tenant-1", body=None):
     return SimpleNamespace(json=body or {}, ctx=SimpleNamespace(session={"tenant_id": tenant_id}))
 
 
+def test_employee_dispatch_normalizes_rich_content_and_attachments_into_payload(monkeypatch):
+    employee = SimpleNamespace(
+        agent_key="ops-1",
+        capabilities=["ops"],
+    )
+    captured = []
+
+    async def fake_employee_or_404(tenant_id, employee_id):
+        assert (tenant_id, employee_id) == ("tenant-1", "ops-1")
+        return employee
+
+    async def fake_create_command_task(tenant_id, account_info, data):
+        captured.append((tenant_id, account_info, data))
+        return SimpleNamespace(json={"id": "task-1"})
+
+    monkeypatch.setattr(views, "_employee_or_404", fake_employee_or_404)
+    monkeypatch.setattr(views, "create_command_task", fake_create_command_task)
+    request = _request(
+        body={
+            "employee_id": "ops-1",
+            "description": "检查图片",
+            "content_html": "<p>检查 <strong>图片</strong></p>",
+            "attachments": [{"file_id": "attach-1.png", "kind": "image"}],
+        }
+    )
+
+    task = asyncio.run(views._dispatch_employee_task(request, "tenant-1", "operator-1"))
+
+    assert task.json == {"id": "task-1"}
+    assert captured[0][2]["payload"]["content_html"] == "<p>检查 <strong>图片</strong></p>"
+    assert captured[0][2]["payload"]["attachments"] == [{"file_id": "attach-1.png", "kind": "image"}]
+
+
 def test_employee_list_payload_attaches_visible_role_meta(monkeypatch):
     employee = FakeEmployee(
         id="employee-1",

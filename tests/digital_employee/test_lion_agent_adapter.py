@@ -278,6 +278,31 @@ def test_stream_prompt_events_carries_memory():
     assert client.payloads[-1]["cognee"] is None
 
 
+def test_stream_prompt_events_carries_runtime_attachments():
+    adapter, client = _load_adapter()
+    attachments = [
+        {
+            "filename": "diagram.png",
+            "mime_type": "image/png",
+            "kind": "image",
+            "data": "cG5nLWJ5dGVz",
+        }
+    ]
+
+    async def _drain():
+        async for _ in adapter.stream_prompt_events(
+            workspace_id="employee-1",
+            session_id="run-1",
+            message="check image",
+            attachments=attachments,
+        ):
+            pass
+
+    asyncio.run(_drain())
+
+    assert client.payloads[-1]["attachments"] == attachments
+
+
 def test_adapter_never_names_memory_workspace_id():
     """契约 §4.3：全文禁止 memory.workspace_id。adapter 不得替 payload 补这个键。"""
     adapter, client = _load_adapter()

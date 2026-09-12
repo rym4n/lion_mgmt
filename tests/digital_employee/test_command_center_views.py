@@ -162,6 +162,122 @@ def test_command_center_read_approval_dto_allowlists_operator_fields():
     assert "approve" in approval_out["available_decisions"]
 
 
+def test_task_detail_dto_exposes_rich_content_and_safe_attachment_refs_only():
+    task = SimpleNamespace(
+        json={
+            "id": "task-1",
+            "ctime": "2026-06-29 13:00:00",
+            "utime": "2026-06-29 13:01:00",
+            "title": "拓扑核对",
+            "description": "请核对图片中的拓扑",
+            "source": "manual",
+            "priority": 3,
+            "status": "pending_dispatch",
+            "progress": 0,
+            "required_capabilities": [],
+            "payload": {
+                "content_html": "<p>请核对 <strong>图片</strong> 中的拓扑</p>",
+                "attachments": [
+                    {
+                        "file_id": "attach-1.png",
+                        "filename": "attach-1.png",
+                        "size": 128,
+                        "mime_type": "image/png",
+                        "kind": "image",
+                        "url": "/command_center/tasks/attachments/attach-1.png",
+                    }
+                ],
+                "secret": "must-not-leak",
+            },
+            "requested_agent_id": None,
+            "assigned_agent_id": None,
+            "assigned_agent_key": None,
+            "dispatch_status": "pending",
+            "dispatch_reason": None,
+            "run_id": None,
+            "result": None,
+            "room_id": None,
+            "creator_id": "user-1",
+            "started_at": None,
+            "finished_at": None,
+        }
+    )
+
+    out = views._task_detail_json(task)
+
+    assert out["content_html"] == "<p>请核对 <strong>图片</strong> 中的拓扑</p>"
+    assert out["attachments"] == task.json["payload"]["attachments"]
+    assert "must-not-leak" not in str(out)
+    assert "payload" not in out
+
+
+def test_task_attachment_upload_scopes_storage_to_tenant_and_returns_safe_ref(monkeypatch):
+    uploaded = SimpleNamespace(
+        name="../../diagram.png",
+        filename="../../diagram.png",
+        body=b"png-bytes",
+        type="image/png",
+    )
+    calls = []
+
+    class Files:
+        def getlist(self, key):
+            assert key == "file"
+            return [uploaded]
+
+    async def fake_upload(content, bucket, file_name, prefix, content_type=None):
+        calls.append((content, bucket, file_name, prefix, content_type))
+        return f"/files/{bucket}/{prefix}/{file_name}"
+
+    monkeypatch.setattr(views.uuid, "uuid4", lambda: "attach-1")
+    monkeypatch.setattr(views, "upload_to_s3", fake_upload)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+    request = SimpleNamespace(
+        files=Files(),
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+
+    out = asyncio.run(inspect.unwrap(views.upload_task_attachments)(request))
+
+    assert calls == [(b"png-bytes", "user", "attach-1.png", "command_center/tenant-1", "image/png")]
+    assert out["files"] == [
+        {
+            "file_id": "attach-1.png",
+            "filename": "diagram.png",
+            "size": 9,
+            "mime_type": "image/png",
+            "kind": "image",
+            "url": "/command_center/tasks/attachments/attach-1.png",
+        }
+    ]
+
+
+def test_task_attachment_download_scopes_lookup_to_current_tenant(monkeypatch):
+    calls = []
+
+    async def fake_get(bucket, file_name, prefix):
+        calls.append((bucket, file_name, prefix))
+        return b"file-bytes"
+
+    monkeypatch.setattr(views, "get_from_s3", fake_get)
+    monkeypatch.setattr(
+        views.response,
+        "raw",
+        lambda content, **kwargs: {"content": content, **kwargs},
+    )
+    request = SimpleNamespace(
+        args={"download_name": "diagram.png"},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+
+    out = asyncio.run(inspect.unwrap(views.download_task_attachment)(request, "attach-1.png"))
+
+    assert calls == [("user", "attach-1.png", "command_center/tenant-1")]
+    assert out["content"] == b"file-bytes"
+    assert out["headers"]["Content-Type"] == "image/png"
+    assert out["headers"]["Content-Disposition"].startswith("inline;")
+
+
 def test_task_detail_event_dto_exposes_metadata_summary_only():
     event = SimpleNamespace(
         id="event-1",

@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 from datetime import datetime
+from html.parser import HTMLParser
 
 from sanic.log import logger
 from tortoise.expressions import Q
@@ -23,6 +24,9 @@ MAX_COMPAT_TASK_TITLE_LENGTH = 255
 TASK_CONTENT_FIELDS = ("description", "content", "prompt", "message", "query", "question", "task")
 MAX_CLARIFICATION_ANSWER_LENGTH = 4000
 MAX_CLARIFICATION_HISTORY = 10
+MAX_TASK_CONTENT_HTML_LENGTH = 200_000
+MAX_TASK_ATTACHMENTS = 20
+MAX_TASK_ATTACHMENT_FILENAME_LENGTH = 255
 
 
 class InvalidClarificationAnswer(ValueError):
@@ -35,6 +39,29 @@ class TaskClarificationConflict(ValueError):
 
 class TaskClarificationForbidden(PermissionError):
     pass
+
+
+class _TaskHTMLTextParser(HTMLParser):
+    """Extract visible text for legacy title/description compatibility fields."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def _html_text(value) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    parser = _TaskHTMLTextParser()
+    try:
+        parser.feed(value)
+        parser.close()
+    except Exception:
+        return ""
+    return " ".join("".join(parser.parts).split())
 
 
 def _normalize_clarifications(value) -> list[dict]:
@@ -76,7 +103,68 @@ def task_content_from_data(data: dict) -> str:
             value = source.get(key)
             if value is not None and str(value).strip():
                 return str(value).strip()
+        rich_text = _html_text(source.get("content_html"))
+        if rich_text:
+            return rich_text
+    for source in (data, data.get("payload")):
+        if isinstance(source, dict) and normalize_task_attachments(source.get("attachments")):
+            return "请查看附件"
     return str(data.get("title") or "").strip()
+
+
+def _safe_attachment_filename(value) -> str:
+    if not isinstance(value, str):
+        return "attachment"
+    filename = value.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    return filename[:MAX_TASK_ATTACHMENT_FILENAME_LENGTH] or "attachment"
+
+
+def normalize_task_attachments(value) -> list[dict]:
+    """Normalize client-visible attachment references without accepting storage paths."""
+    if not isinstance(value, list):
+        return []
+    normalized = []
+    for item in value[:MAX_TASK_ATTACHMENTS]:
+        if not isinstance(item, dict):
+            continue
+        file_id = item.get("file_id")
+        if not isinstance(file_id, str) or not file_id or file_id != file_id.rsplit("/", 1)[-1] or file_id != file_id.rsplit("\\", 1)[-1]:
+            continue
+        filename = _safe_attachment_filename(item.get("filename") or file_id)
+        mime_type = item.get("mime_type") or item.get("file_type") or "application/octet-stream"
+        if not isinstance(mime_type, str):
+            mime_type = "application/octet-stream"
+        mime_type = mime_type[:128]
+        try:
+            size = max(0, int(item.get("size") or item.get("file_size") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        kind = "image" if mime_type.lower().startswith("image/") else "file"
+        normalized.append(
+            {
+                "file_id": file_id,
+                "filename": filename,
+                "size": size,
+                "mime_type": mime_type,
+                "kind": kind,
+                "url": f"/command_center/tasks/attachments/{file_id}",
+            }
+        )
+    return normalized
+
+
+def normalize_task_payload(data: dict) -> dict:
+    payload = dict(data.get("payload") or {}) if isinstance(data.get("payload"), dict) else {}
+    content_html = data.get("content_html", payload.get("content_html"))
+    if isinstance(content_html, str):
+        payload["content_html"] = content_html[:MAX_TASK_CONTENT_HTML_LENGTH]
+    elif "content_html" in payload:
+        payload.pop("content_html", None)
+    if "attachments" in data or "attachments" in payload:
+        attachments = data.get("attachments", payload.get("attachments"))
+        payload["attachments"] = normalize_task_attachments(attachments)
+    payload.pop("runtime_attachments", None)
+    return payload
 
 
 def has_task_content(data: dict) -> bool:
@@ -371,7 +459,7 @@ def _schedule_task_dispatch(task: CommandTask, operator_id: str | None = None) -
 async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTask:
     content = task_content_from_data(data)
     compatibility_title = content[:MAX_COMPAT_TASK_TITLE_LENGTH] or DEFAULT_TASK_TITLE
-    payload = dict(data.get("payload")) if isinstance(data.get("payload"), dict) else {}
+    payload = normalize_task_payload(data)
     payload.pop("clarifications", None)
     task = await CommandTask.create(
         tenant_id=tenant_id,

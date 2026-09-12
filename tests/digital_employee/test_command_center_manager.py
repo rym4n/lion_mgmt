@@ -754,6 +754,40 @@ def test_create_command_task_uses_payload_content_without_rewriting_it():
     assert task.title == content
 
 
+def test_create_command_task_preserves_rich_content_and_attachment_references():
+    scheduled_tasks = []
+    manager = _load_manager(_agent("ops"), scheduled_tasks)
+    creator = SimpleNamespace(id="operator-1")
+    attachments = [
+        {
+            "file_id": "diagram.png",
+            "filename": "diagram.png",
+            "size": 128,
+            "mime_type": "image/png",
+            "kind": "image",
+            "url": "/command_center/tasks/attachments/diagram.png",
+        }
+    ]
+
+    task = asyncio.run(
+        manager.create_command_task(
+            "tenant-1",
+            creator,
+            {
+                "description": "请核对图片中的拓扑",
+                "payload": {
+                    "content_html": "<p>请核对 <strong>图片</strong> 中的拓扑</p>",
+                    "attachments": attachments,
+                },
+            },
+        )
+    )
+
+    assert task.description == "请核对图片中的拓扑"
+    assert task.payload["content_html"] == "<p>请核对 <strong>图片</strong> 中的拓扑</p>"
+    assert task.payload["attachments"] == attachments
+
+
 def test_task_content_prefers_description_and_supports_legacy_title_only_input():
     manager = _load_manager(_agent("ops"), [])
 
@@ -761,6 +795,17 @@ def test_task_content_prefers_description_and_supports_legacy_title_only_input()
         {"title": "旧标题", "description": "完整任务内容"}
     ) == "完整任务内容"
     assert manager.task_content_from_data({"title": "旧接口任务内容"}) == "旧接口任务内容"
+
+
+def test_task_content_supports_rich_html_or_attachment_only_input():
+    manager = _load_manager(_agent("ops"), [])
+
+    assert manager.task_content_from_data(
+        {"content_html": "<p>请核对 <strong>图片</strong> 中的拓扑</p>"}
+    ) == "请核对 图片 中的拓扑"
+    assert manager.task_content_from_data(
+        {"payload": {"attachments": [{"file_id": "diagram.png"}]}}
+    ) == "请查看附件"
 
 
 def test_dispatch_task_blocks_assignment_and_persists_bounded_clarification_history():

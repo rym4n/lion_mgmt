@@ -293,6 +293,9 @@ def render_workspace_files(employee: Any, role: Any | None = None, skills: list[
 
 def build_runtime_prompt(task: Any, employee: Any) -> str:
     task_content = getattr(task, "description", None) or getattr(task, "title", "")
+    task_payload = getattr(task, "payload", {}) or {}
+    content_html = task_payload.get("content_html") if isinstance(task_payload, dict) else None
+    rich_content = ("任务富文本（HTML）：\n" + content_html) if isinstance(content_html, str) and content_html else ""
     return "\n".join(
         [
             f"任务来源：{getattr(task, 'source', '')}",
@@ -301,7 +304,9 @@ def build_runtime_prompt(task: Any, employee: Any) -> str:
             "任务内容：",
             task_content,
             "",
+            rich_content,
+            "",
             "任务载荷：",
-            _json_block(_public_payload(getattr(task, "payload", {}) or {})),
+            _json_block(_public_payload(task_payload)),
         ]
     )
