@@ -379,6 +379,46 @@ def test_workspace_skills_are_verbatim_files(tmp_path, monkeypatch):
     assert "instructions.md" not in files["skills"]["db_backup_check"]
 
 
+def test_workspace_skills_encode_image_and_office_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
+    skill_dir = tmp_path / "tenant-1" / "visual_inspection"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: visual-inspection\ndescription: d\n---\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "topology.png").write_bytes(b"\x89PNG\r\n\x1a")
+    (skill_dir / "runbook.docx").write_bytes(b"PK\x03\x04office")
+    employee = SimpleNamespace(
+        id="e1",
+        tenant_id="tenant-1",
+        name="employee",
+        runtime="lion_agent",
+        rbac_role_id="r1",
+        agent_key="k",
+        metadata={},
+    )
+    role = SimpleNamespace(
+        role_key="monitor",
+        name="monitor",
+        meta={"identity": "i", "responsibilities": "r"},
+        version=1,
+    )
+    skill = SimpleNamespace(
+        skill_key="visual_inspection",
+        name="visual inspection",
+        description="d",
+        skill_dir="tenant-1/visual_inspection",
+        version=1,
+        enabled=True,
+    )
+
+    files = render_workspace_files(employee, role, [skill])["skills"]["visual_inspection"]
+
+    assert files["topology.png"] == {"encoding": "base64", "data": "iVBORw0KGg=="}
+    assert files["runbook.docx"] == {"encoding": "base64", "data": "UEsDBG9mZmljZQ=="}
+
+
 def test_system_prompt_has_no_skill_listing(tmp_path, monkeypatch):
     """技能清单由 AgentScope 自动注入，system_prompt 不得重复拼接。"""
     monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))

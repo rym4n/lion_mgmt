@@ -16,9 +16,15 @@ def _source(name: str) -> str:
 
 
 def test_file_endpoints_use_path_validation():
-    for name in ("skill_file_read", "skill_file_write", "skill_files"):
+    for name in ("skill_file_read", "skill_file_write", "skill_file_upload", "skill_files"):
         source = _source(name)
         assert "resolve_skill_file" in source or "tenant_skill_root" in source, name
+
+
+def test_read_endpoint_allows_binary_asset_limit():
+    source = _source("skill_file_read")
+    assert "is_binary_skill_asset" in source
+    assert "SKILL_BINARY_MAX_BYTES" in source
 
 
 def test_write_endpoint_requires_update_permission():
@@ -29,6 +35,17 @@ def test_write_endpoint_requires_update_permission():
 def test_write_endpoint_copies_builtin_before_write():
     source = _source("skill_file_write")
     assert "is_builtin" in source
+
+
+def test_upload_endpoint_accepts_binary_assets_with_bounded_storage():
+    source = _source("skill_file_upload")
+    assert "digital_employee_skill:u" in source
+    assert "request.files" in source
+    assert "write_bytes" in source
+    assert "validate_skill_asset" in source
+    assert "skill_storage_usage" in source
+    assert "is_binary_skill_asset" in source
+    assert source.index("validate_skill_asset") < source.index("clone_builtin_skill_to_tenant")
 
 
 def test_skill_save_derives_skill_dir_server_side():

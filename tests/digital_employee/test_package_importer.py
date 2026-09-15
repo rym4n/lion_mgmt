@@ -2,6 +2,7 @@
 import asyncio
 import importlib.util
 import io
+import os
 from pathlib import Path
 import sys
 import types
@@ -850,16 +851,14 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
 
 
 def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
-    skill_root = tmp_path / "resources" / "skill" / "period_report_compose"
+    skill_root = tmp_path / "tenant-1" / "period_report_compose"
     skill_root.mkdir(parents=True)
-    (skill_root / "package.yaml").write_text(
-        yaml.safe_dump({"type": "skill", "skill_key": "period_report_compose", "version": 1}),
+    (skill_root / "SKILL.md").write_text(
+        "---\nname: Period report\ndescription: Compose reports\n---\n",
         encoding="utf-8",
     )
-    (skill_root / "manifest.yaml").write_text(
-        yaml.safe_dump({"key": "period_report_compose", "name": "周期报告生成", "enabled": False}),
-        encoding="utf-8",
-    )
+    (skill_root / "chart.png").write_bytes(b"\x89PNG\r\n\x1a")
+    (skill_root / "template.docx").write_bytes(b"PK\x03\x04office")
 
     async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert tenant_id == "tenant-1"
@@ -868,7 +867,8 @@ def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
         return [
             types.SimpleNamespace(
                 skill_key="period_report_compose",
-                skill_dir=str(skill_root),
+                skill_dir="tenant-1/period_report_compose",
+                version=7,
             )
         ]
 
@@ -880,6 +880,8 @@ def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
     manager_module.get_visible_skills = fake_get_visible_skills
     old_manager = sys.modules.get("services.digital_employee.manager")
     sys.modules["services.digital_employee.manager"] = manager_module
+    old_skill_root = os.environ.get("RY_SKILL_ROOT")
+    os.environ["RY_SKILL_ROOT"] = str(tmp_path)
     try:
         package = asyncio.run(
             export_package_for_tenant(
@@ -888,6 +890,10 @@ def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
             )
         )
     finally:
+        if old_skill_root is None:
+            os.environ.pop("RY_SKILL_ROOT", None)
+        else:
+            os.environ["RY_SKILL_ROOT"] = old_skill_root
         if old_manager is None:
             sys.modules.pop("services.digital_employee.manager", None)
         else:
@@ -896,6 +902,12 @@ def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
     package_type, meta = inspect_package(package)
     assert package_type == "skill"
     assert meta["skill_key"] == "period_report_compose"
+    assert meta["version"] == 7
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        assert {"package.yaml", "SKILL.md", "chart.png", "template.docx"}.issubset(
+            archive.namelist()
+        )
+        assert archive.read("chart.png") == b"\x89PNG\r\n\x1a"
 
 
 def test_export_role_package_strips_rbac_fields_and_rbac_roles_dir(tmp_path):
@@ -1308,7 +1320,7 @@ def test_import_package_strips_rbac_fields_from_staged_resource_dir(tmp_path):
 
     async def fake_upsert_role(root_path, package, tenant_id, is_builtin):
         staged.append(root_path)
-        return types.SimpleNamespace(role_key="monitor", id="role-1")
+        return types.SimpleNamespace(role_key="monitor", id="role-1", version=1)
 
     package_importer._upsert_role = fake_upsert_role
     async def fake_auto_create(role_keys, tenant_id):
@@ -1352,7 +1364,11 @@ def test_import_package_separates_builtin_and_tenant_resource_dirs(tmp_path, mon
 
     async def fake_upsert_skill(root_path, tenant_id, is_builtin):
         calls.append((root_path, tenant_id, is_builtin))
-        return types.SimpleNamespace(skill_key=root_path.name, id=f"{tenant_id}:{root_path.name}")
+        return types.SimpleNamespace(
+            skill_key=root_path.name,
+            id=f"{tenant_id}:{root_path.name}",
+            version=1,
+        )
 
     package_importer._upsert_skill = fake_upsert_skill
     try:
@@ -1408,6 +1424,10 @@ def test_safe_extract_accepts_valid_skill_package(tmp_path):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("log-triage/SKILL.md", "---\nname: log-triage\ndescription: d\n---\n\n# 正文\n")
+        archive.writestr("log-triage/topology.png", b"\x89PNG\r\n\x1a\n")
+        archive.writestr("log-triage/runbook.docx", b"PK\x03\x04office")
     with zipfile.ZipFile(buffer) as archive:
         _safe_extract(archive, tmp_path)
     assert (tmp_path / "log-triage" / "SKILL.md").is_file()
+    assert (tmp_path / "log-triage" / "topology.png").read_bytes() == b"\x89PNG\r\n\x1a\n"
+    assert (tmp_path / "log-triage" / "runbook.docx").read_bytes() == b"PK\x03\x04office"

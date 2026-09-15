@@ -14,6 +14,18 @@ from libs.error_code.exception import CustomError
 from settings import DIGITAL_EMPLOYEE_RESOURCES
 
 BUILTIN_SCOPE = "__builtin__"
+SKILL_TEXT_MAX_BYTES = 512 * 1024
+SKILL_BINARY_MAX_BYTES = 16 * 1024 * 1024
+SKILL_TOTAL_MAX_BYTES = 64 * 1024 * 1024
+SKILL_BINARY_SUFFIXES = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+}
+ALLOWED_SKILL_SUFFIXES = {
+    ".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".sql",
+    ".csv", ".toml", ".ini", "",
+    *SKILL_BINARY_SUFFIXES,
+}
 
 
 def skill_storage_root() -> Path:
@@ -53,6 +65,30 @@ def parse_skill_md(root: Path) -> tuple[str, str]:
     if not name or not description:
         raise CustomError(ErrorCode.PACKAGE_INVALID)
     return name, description
+
+
+def is_binary_skill_asset(path: str | Path) -> bool:
+    return Path(path).suffix.lower() in SKILL_BINARY_SUFFIXES
+
+
+def skill_storage_usage(root: Path) -> int:
+    if not root.is_dir():
+        return 0
+    return sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
+
+
+def validate_skill_asset(filename: str, size: int, current_usage: int = 0) -> None:
+    path = Path(str(filename or "").replace("\\", "/"))
+    if not filename or path.is_absolute() or ".." in path.parts or path.name in {"", ".", "SKILL.md"}:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    suffix = path.suffix.lower()
+    if suffix not in ALLOWED_SKILL_SUFFIXES:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    max_bytes = SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(path) else SKILL_TEXT_MAX_BYTES
+    if size < 0 or size > max_bytes:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    if current_usage + size > SKILL_TOTAL_MAX_BYTES:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
 
 
 def resolve_skill_file(skill_dir: str, relative_path: str, tenant_id: str, *, for_write: bool = False) -> Path:

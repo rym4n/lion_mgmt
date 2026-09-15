@@ -1,9 +1,15 @@
 # coding=utf-8
+import base64
 import hashlib
 import json
 from typing import Any
 
-from .skill_storage import skill_storage_root
+from .skill_storage import (
+    ALLOWED_SKILL_SUFFIXES,
+    SKILL_BINARY_MAX_BYTES,
+    SKILL_BINARY_SUFFIXES,
+    skill_storage_root,
+)
 
 
 WORKSPACE_TEXT_FILES = ("system_prompt.md",)
@@ -11,7 +17,7 @@ WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
 MAX_SKILL_FILE_BYTES = 512 * 1024
 
 
-def _read_skill_files(skill: Any) -> dict[str, str]:
+def _read_skill_files(skill: Any) -> dict[str, Any]:
     """把技能目录下的文件原样读出。文件是权威，此处不做任何加工。"""
     skill_dir = str(getattr(skill, "skill_dir", "") or "").strip()
     if not skill_dir:
@@ -19,9 +25,20 @@ def _read_skill_files(skill: Any) -> dict[str, str]:
     root = (skill_storage_root() / skill_dir).resolve()
     if not root.is_dir() or skill_storage_root() not in root.parents:
         return {}
-    files: dict[str, str] = {}
+    files: dict[str, Any] = {}
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.stat().st_size > MAX_SKILL_FILE_BYTES:
+        if not path.is_file() or path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES:
+            continue
+        size = path.stat().st_size
+        if path.suffix.lower() in SKILL_BINARY_SUFFIXES:
+            if size > SKILL_BINARY_MAX_BYTES:
+                continue
+            files[path.relative_to(root).as_posix()] = {
+                "encoding": "base64",
+                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+            }
+            continue
+        if size > MAX_SKILL_FILE_BYTES:
             continue
         try:
             files[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
@@ -194,8 +211,21 @@ def _flatten_workspace_files(files: dict[str, Any]) -> dict[str, bytes]:
             if not isinstance(skill_key, str) or not isinstance(skill_files, dict):
                 continue
             for filename, content in skill_files.items():
-                if isinstance(filename, str) and isinstance(content, str):
+                if not isinstance(filename, str):
+                    continue
+                if isinstance(content, str):
                     flattened[f"skills/{skill_key}/{filename}"] = content.encode("utf-8")
+                elif (
+                    isinstance(content, dict)
+                    and content.get("encoding") == "base64"
+                    and isinstance(content.get("data"), str)
+                ):
+                    try:
+                        flattened[f"skills/{skill_key}/{filename}"] = base64.b64decode(
+                            content["data"], validate=True
+                        )
+                    except ValueError:
+                        continue
     return flattened
 
 

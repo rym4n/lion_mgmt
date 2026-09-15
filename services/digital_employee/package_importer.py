@@ -19,12 +19,18 @@ from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models import Tool
 from settings import DIGITAL_EMPLOYEE_RESOURCES
 from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
-from .skill_storage import parse_skill_md, relative_skill_dir, tenant_skill_root
+from .skill_storage import (
+    ALLOWED_SKILL_SUFFIXES,
+    SKILL_BINARY_MAX_BYTES,
+    SKILL_BINARY_SUFFIXES,
+    parse_skill_md,
+    relative_skill_dir,
+    skill_storage_root,
+    tenant_skill_root,
+)
 
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 2000
-ALLOWED_SKILL_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".sql", ".csv", ".toml", ".ini", ""}
-
 ROLE_PROMPT_TEXT_FIELDS = ("identity", "responsibilities", "workflows", "tools_notes")
 
 RBAC_PACKAGE_FIELDS = (
@@ -165,6 +171,8 @@ def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
         total += member.file_size
         if total > MAX_ARCHIVE_BYTES:
             raise CustomError(ErrorCode.PACKAGE_INVALID)
+        if not member.is_dir() and member.file_size > SKILL_BINARY_MAX_BYTES and member_path.suffix.lower() in SKILL_BINARY_SUFFIXES:
+            raise CustomError(ErrorCode.PACKAGE_INVALID)
         if not member.is_dir() and member_path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES:
             raise CustomError(ErrorCode.PACKAGE_INVALID)
     archive.extractall(destination)
@@ -198,15 +206,25 @@ def _write_sanitized_yaml(archive: zipfile.ZipFile, path: Path, archive_path: st
     return True
 
 
-def _archive_package_directory(archive: zipfile.ZipFile, source_root: Path, archive_root: str = "") -> None:
+def _archive_package_directory(
+    archive: zipfile.ZipFile,
+    source_root: Path,
+    archive_root: str = "",
+    *,
+    skip_package_yaml: bool = False,
+) -> None:
     if not source_root.exists() or not source_root.is_dir():
         raise CustomError(ErrorCode.PACKAGE_INVALID)
     for path in sorted(source_root.rglob("*")):
         if path.is_dir():
             continue
         relative_path = path.relative_to(source_root).as_posix()
+        if skip_package_yaml and relative_path == "package.yaml":
+            continue
         if _is_rbac_payload_path(relative_path):
             continue
+        if path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES:
+            raise CustomError(ErrorCode.PACKAGE_INVALID)
         archive_path = f"{archive_root.rstrip('/')}/{relative_path}" if archive_root else relative_path
         if _write_sanitized_yaml(archive, path, archive_path):
             continue
@@ -795,7 +813,7 @@ async def export_package_for_tenant(
                 enabled=None,
             )
             skill_sources = {
-                skill.skill_key: Path(skill.skill_dir)
+                skill.skill_key: (skill_storage_root() / str(skill.skill_dir)).resolve()
                 for skill in skills
                 if getattr(skill, "skill_dir", None)
             }
@@ -830,9 +848,30 @@ async def export_package_for_tenant(
                 source_root = Path((await get_visible_role(effective_tenant_id, str(role_key))).template_dir)
             else:
                 skills = await get_visible_skills(effective_tenant_id, [str(skill_key)], enabled=None)
-                source_root = Path(skills[0].skill_dir)
+                skill = skills[0]
+                source_root = (skill_storage_root() / str(skill.skill_dir)).resolve()
+                if not source_root.is_dir():
+                    raise CustomError(ErrorCode.PACKAGE_INVALID)
+                archive.writestr(
+                    "package.yaml",
+                    yaml.safe_dump(
+                        {
+                            "type": "skill",
+                            "skill_key": skill.skill_key,
+                            "version": getattr(skill, "version", 1) or 1,
+                            "vendor": "aioe",
+                        },
+                        allow_unicode=True,
+                        sort_keys=False,
+                    ),
+                )
             if source_root.exists():
-                _archive_package_directory(archive, source_root)
+                _archive_package_directory(
+                    archive,
+                    source_root,
+                    skip_package_yaml=not bool(role_key),
+                )
             else:
-                archive.writestr("package.yaml", yaml.safe_dump({"type": package_type, f"{package_type}_key": package_key}, allow_unicode=True))
+                if role_key:
+                    archive.writestr("package.yaml", yaml.safe_dump({"type": package_type, f"{package_type}_key": package_key}, allow_unicode=True))
     return buffer.getvalue()

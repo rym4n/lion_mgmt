@@ -35,7 +35,16 @@ from .manager import (
 from .package_api import import_package_from_request
 from .package_importer import export_package_for_tenant, normalize_role_prompt_fields, require_role_identity
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
-from .skill_storage import parse_skill_md, relative_skill_dir, resolve_skill_file, tenant_skill_root
+from .skill_storage import (
+    SKILL_BINARY_MAX_BYTES,
+    is_binary_skill_asset,
+    parse_skill_md,
+    relative_skill_dir,
+    resolve_skill_file,
+    skill_storage_usage,
+    tenant_skill_root,
+    validate_skill_asset,
+)
 
 digital_employee_bp = Blueprint("digital_employee", url_prefix="/digital_employee")
 __all__ = ["digital_employee_bp"]
@@ -628,8 +637,19 @@ async def skill_file_read(request: Request):
     tenant_id = _tenant_id(request)
     skill = (await get_visible_skills(tenant_id, [data.get("skill_key")], enabled=None))[0]
     target = resolve_skill_file(skill.skill_dir, str(data.get("path") or ""), tenant_id)
-    if not target.is_file() or target.stat().st_size > SKILL_FILE_MAX_BYTES:
+    max_bytes = SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(target) else SKILL_FILE_MAX_BYTES
+    if not target.is_file() or target.stat().st_size > max_bytes:
         raise CustomError(ErrorCode.PARAM_ERROR)
+    if is_binary_skill_asset(target):
+        import base64
+
+        return response_ok(
+            data={
+                "path": str(data.get("path")),
+                "encoding": "base64",
+                "data": base64.b64encode(target.read_bytes()).decode("ascii"),
+            }
+        )
     return response_ok(data={"path": str(data.get("path")), "content": target.read_text(encoding="utf-8")})
 
 
@@ -658,6 +678,36 @@ async def skill_file_write(request: Request):
         skill.version += 1
         await skill.save(update_fields=["name", "description", "version", "utime"])
     return response_ok(data=skill.json)
+
+
+@digital_employee_bp.post("/skill/file/upload")
+@requires_permission("digital_employee_skill:u")
+async def skill_file_upload(request: Request):
+    """上传图片或 Office 技能资源，文件内容只写入当前租户技能目录。"""
+    form = request.form or {}
+    tenant_id = _tenant_id(request)
+    skill_key = str(form.get("skill_key") or "").strip()
+    uploaded = request.files.get("file") if request.files else None
+    if not skill_key or not uploaded:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    skills = await get_visible_skills(tenant_id, [skill_key], enabled=None)
+    skill = skills[0]
+    relative_path = str(form.get("path") or uploaded.name or "").strip()
+    body = uploaded.body or b""
+    if not is_binary_skill_asset(relative_path):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    root = resolve_skill_file(skill.skill_dir, ".", tenant_id)
+    validate_skill_asset(relative_path, len(body), skill_storage_usage(root))
+    if skill.is_builtin:
+        skill = await clone_builtin_skill_to_tenant(skill, tenant_id)
+    target = resolve_skill_file(skill.skill_dir, relative_path, tenant_id, for_write=True)
+    if target.exists():
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+    skill.version += 1
+    await skill.save(update_fields=["version", "utime"])
+    return response_ok(data={"skill": skill.json, "path": relative_path, "size": len(body)})
 
 
 @digital_employee_bp.post("/package/import")
