@@ -182,7 +182,7 @@ class ErrorCode(BaseErrorCode):
     DIGITAL_EMPLOYEE_SKILL_NOT_FOUND = ErrorData(4144, "数字伙伴技能不存在")
     DIGITAL_EMPLOYEE_EMPLOYEE_NOT_FOUND = ErrorData(4145, "数字伙伴不存在")
     WORKSPACE_SYNC_FAILED = ErrorData(4146, "数字伙伴工作区同步失败")
-    PACKAGE_INVALID = ErrorData(4147, "导入包格式无效，请上传标准 .zip 技能包")
+    PACKAGE_INVALID = ErrorData(4147, "软件包格式无效，请使用标准 .zip 软件包")
     PACKAGE_VERSION_LOWER = ErrorData(4148, "导入包版本低于已安装版本")
     PACKAGE_TYPE_UNSUPPORTED = ErrorData(4149, "导入包类型不支持")
     PACKAGE_PARTIAL_FAILURE = ErrorData(4150, "导入包部分内容导入失败")

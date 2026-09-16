@@ -486,6 +486,56 @@ def test_package_list_tenant_tombstone_hides_builtin(monkeypatch):
     assert out == {"roles": [], "skills": []}
 
 
+def test_package_export_resolves_employee_in_current_tenant(monkeypatch):
+    employee = SimpleNamespace(id="employee-1", tenant_id="tenant-1")
+    calls = []
+
+    async def fake_require_permission(request, data):
+        calls.append(("permission", data))
+
+    async def fake_employee_or_404(tenant_id, employee_id):
+        calls.append(("employee", tenant_id, employee_id))
+        return employee
+
+    async def fake_export(tenant_id, selected_employee):
+        calls.append(("export", tenant_id, selected_employee))
+        return b"employee-package"
+
+    async def reject_legacy_export(*args, **kwargs):
+        raise AssertionError("employee export must not fall back to role export")
+
+    monkeypatch.setattr(views, "_require_package_export_permission", fake_require_permission)
+    monkeypatch.setattr(views, "_employee_or_404", fake_employee_or_404)
+    monkeypatch.setattr(
+        views, "export_employee_package_for_tenant", fake_export, raising=False
+    )
+    monkeypatch.setattr(views, "export_package_for_tenant", reject_legacy_export)
+    monkeypatch.setattr(
+        views,
+        "response",
+        SimpleNamespace(
+            raw=lambda body, content_type: {
+                "body": body,
+                "content_type": content_type,
+            }
+        ),
+    )
+
+    out = asyncio.run(
+        views.package_export(_request(body={"employee_id": "employee-1"}))
+    )
+
+    assert out == {
+        "body": b"employee-package",
+        "content_type": "application/zip",
+    }
+    assert calls == [
+        ("permission", {"employee_id": "employee-1"}),
+        ("employee", "tenant-1", "employee-1"),
+        ("export", "tenant-1", employee),
+    ]
+
+
 def test_derive_capabilities_excludes_aioe_cli_and_skill_meta():
     from services.digital_employee.manager import derive_capabilities
 

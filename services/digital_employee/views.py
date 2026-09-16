@@ -33,7 +33,12 @@ from .manager import (
     validate_knowledge_binding,
 )
 from .package_api import import_package_from_request
-from .package_importer import export_package_for_tenant, normalize_role_prompt_fields, require_role_identity
+from .package_importer import (
+    export_employee_package_for_tenant,
+    export_package_for_tenant,
+    normalize_role_prompt_fields,
+    require_role_identity,
+)
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 from .skill_storage import (
     SKILL_BINARY_MAX_BYTES,
@@ -722,12 +727,17 @@ async def package_import(request: Request):
 async def package_export(request: Request):
     data = _json(request)
     await _require_package_export_permission(request, data)
-    data_bytes = await export_package_for_tenant(
-        _tenant_id(request),
-        data.get("role_key"),
-        data.get("skill_key"),
-        bool(data.get("bundle", False)),
-    )
+    tenant_id = _tenant_id(request)
+    if data.get("employee_id"):
+        employee = await _employee_or_404(tenant_id, data["employee_id"])
+        data_bytes = await export_employee_package_for_tenant(tenant_id, employee)
+    else:
+        data_bytes = await export_package_for_tenant(
+            tenant_id,
+            data.get("role_key"),
+            data.get("skill_key"),
+            bool(data.get("bundle", False)),
+        )
     return response.raw(data_bytes, content_type="application/zip")
 
 

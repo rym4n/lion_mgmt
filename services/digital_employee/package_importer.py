@@ -666,6 +666,66 @@ async def _auto_create_employees(role_keys: list[str], tenant_id: str) -> tuple[
     return created, skipped
 
 
+def _employee_manifest_path(root: Path, package: dict) -> Path | None:
+    manifest_name = str(package.get("employee_manifest") or "").strip()
+    if not manifest_name:
+        return None
+    manifest_path = (root / manifest_name).resolve()
+    root_path = root.resolve()
+    if root_path not in manifest_path.parents or not manifest_path.is_file():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    return manifest_path
+
+
+async def _create_employee_from_manifest(root: Path, package: dict, tenant_id: str) -> dict | None:
+    manifest_path = _employee_manifest_path(root, package)
+    if manifest_path is None:
+        return None
+    manifest = _read_yaml(manifest_path)
+    try:
+        schema_version = int(manifest.get("schema_version") or 0)
+        role_key = str(manifest.get("role_key") or "").strip()
+        name = str(manifest.get("name") or "").strip()
+        skill_keys = manifest.get("skill_keys") or []
+        knowledge_space_keys = manifest.get("knowledge_space_keys") or []
+        max_concurrent = int(manifest.get("max_concurrent") or 1)
+    except (TypeError, ValueError) as exc:
+        raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+    if (
+        schema_version != 1
+        or not role_key
+        or not name
+        or not isinstance(skill_keys, list)
+        or not isinstance(knowledge_space_keys, list)
+    ):
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+
+    from .manager import create_employee
+
+    employee = await create_employee(
+        tenant_id=tenant_id,
+        role_key=role_key,
+        name=name,
+        skill_keys=_package_skill_keys(skill_keys),
+        max_concurrent=max_concurrent,
+        rbac_role_id=manifest.get("rbac_role_id") or None,
+        llm_config_id=manifest.get("llm_config_id") or None,
+        knowledge_space_keys=_package_skill_keys(knowledge_space_keys),
+        knowledge_write_space=manifest.get("knowledge_write_space") or None,
+    )
+    enabled = bool(manifest.get("enabled", True))
+    if bool(employee.enabled) != enabled:
+        employee.enabled = enabled
+        await employee.save(update_fields=["enabled", "utime"])
+    return {
+        "type": "employee",
+        "employee_id": employee.id,
+        "agent_key": employee.agent_key,
+        "role_key": employee.role_key,
+        "name": employee.name,
+    }
+
+
 async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = False, operator_id: str | None = None, request=None) -> ImportResult:
     package_type, package = _inspect_or_error(file_bytes)
     declared_builtin = bool(package.get("is_builtin", False))
@@ -736,10 +796,20 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
                     skill_roots=[item.target for item in staged_skill_directories],
                 )
                 if not is_builtin:
-                    role_keys = [item["role_key"] for item in result.imported if item.get("type") == "role" and item.get("role_key")]
-                    created, skipped = await _auto_create_employees(role_keys, tenant_id)
-                    result.imported.extend(created)
-                    result.skipped.extend(skipped)
+                    imported_employee = await _create_employee_from_manifest(
+                        target_root, package, tenant_id
+                    )
+                    if imported_employee is not None:
+                        result.imported.append(imported_employee)
+                    else:
+                        role_keys = [
+                            item["role_key"]
+                            for item in result.imported
+                            if item.get("type") == "role" and item.get("role_key")
+                        ]
+                        created, skipped = await _auto_create_employees(role_keys, tenant_id)
+                        result.imported.extend(created)
+                        result.skipped.extend(skipped)
                 # 阶段三：ingest 随包文档
                 bundle_key = package.get("bundle_key", "bundle")
                 bundle_version = str(package.get("version", 1))
@@ -780,6 +850,89 @@ async def import_builtin_packages(operator_id: str = "system") -> ImportResult:
 
 async def export_package(role_key: str | None = None, skill_key: str | None = None, bundle: bool = False) -> bytes:
     return await export_package_for_tenant("__builtin__", role_key=role_key, skill_key=skill_key, bundle=bundle)
+
+
+async def export_employee_package_for_tenant(tenant_id: str, employee) -> bytes:
+    from .manager import get_visible_role, get_visible_skills
+
+    role_key = str(getattr(employee, "role_key", None) or "").strip()
+    if not tenant_id or not role_key or getattr(employee, "tenant_id", tenant_id) != tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    role = await get_visible_role(tenant_id, role_key)
+    employee_skill_keys = _package_skill_keys(getattr(employee, "skill_keys", None) or [])
+    role_skill_keys = _package_skill_keys(getattr(role, "default_skill_keys", None) or [])
+    packaged_skill_keys = list(dict.fromkeys([*employee_skill_keys, *role_skill_keys]))
+    skills = await get_visible_skills(tenant_id, packaged_skill_keys, enabled=None)
+
+    role_data = normalize_role_prompt_fields(getattr(role, "meta", None) or {})
+    role_data.pop("default_skills", None)
+    role_data.update(
+        {
+            "key": role_key,
+            "name": getattr(role, "name", None) or role_key,
+            "default_skill_keys": role_skill_keys,
+            "enabled": bool(getattr(role, "enabled", True)),
+        }
+    )
+    require_role_identity(role_data, ErrorCode.PACKAGE_INVALID)
+    role_package = {
+        "type": "role",
+        "role_key": role_key,
+        "name": role_data["name"],
+        "version": int(getattr(role, "version", 1) or 1),
+        "vendor": "aioe",
+        "license_required": bool(getattr(role, "license_required", False)),
+    }
+    employee_manifest = {
+        "schema_version": 1,
+        "name": str(getattr(employee, "name", None) or role_data["name"]),
+        "role_key": role_key,
+        "skill_keys": employee_skill_keys,
+        "max_concurrent": max(1, int(getattr(employee, "max_concurrent", 1) or 1)),
+        "enabled": bool(getattr(employee, "enabled", True)),
+        "rbac_role_id": getattr(employee, "rbac_role_id", None),
+        "llm_config_id": getattr(employee, "llm_config_id", None),
+        "knowledge_space_keys": _package_skill_keys(
+            getattr(employee, "knowledge_space_keys", None) or []
+        ),
+        "knowledge_write_space": getattr(employee, "knowledge_write_space", None),
+    }
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "package.yaml",
+            yaml.safe_dump(
+                {
+                    "type": "bundle",
+                    "bundle_key": f"employee-{role_key}",
+                    "role_key": role_key,
+                    "version": role_package["version"],
+                    "vendor": "aioe",
+                    "employee_manifest": "employee.yaml",
+                },
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+        )
+        archive.writestr(
+            f"roles/{role_key}/package.yaml",
+            yaml.safe_dump(role_package, allow_unicode=True, sort_keys=False),
+        )
+        archive.writestr(
+            f"roles/{role_key}/role.yaml",
+            yaml.safe_dump(role_data, allow_unicode=True, sort_keys=False),
+        )
+        archive.writestr(
+            "employee.yaml",
+            yaml.safe_dump(employee_manifest, allow_unicode=True, sort_keys=False),
+        )
+        for skill in skills:
+            skill_source = (skill_storage_root() / str(skill.skill_dir)).resolve()
+            _archive_package_directory(
+                archive, skill_source, f"skills/{skill.skill_key}"
+            )
+    return buffer.getvalue()
 
 
 async def export_package_for_tenant(

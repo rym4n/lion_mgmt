@@ -850,6 +850,248 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
     assert "name: Custom alert triage" in skill_md
 
 
+def test_export_employee_package_uses_persisted_role_and_instance_config(tmp_path, monkeypatch):
+    skill_root = tmp_path / "skill-storage"
+    for skill_key, name in (
+        ("alert_triage", "Alert triage"),
+        ("baseline_monitoring", "Baseline monitoring"),
+    ):
+        skill_dir = skill_root / "tenant-1" / skill_key
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Monitor alerts\n---\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("RY_SKILL_ROOT", str(skill_root))
+    role = types.SimpleNamespace(
+        role_key="monitor",
+        name="Monitor role",
+        template_dir="",
+        default_skill_keys=["baseline_monitoring"],
+        license_required=False,
+        version=4,
+        enabled=True,
+        meta={
+            "identity": "You are the monitor operator.",
+            "responsibilities": "Triage alerts.",
+            "rbac_role_id": "role-definition-must-not-export",
+        },
+    )
+    employee = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        agent_key="monitor-old12345",
+        name="Night monitor",
+        role_key="monitor",
+        skill_keys=["alert_triage"],
+        max_concurrent=3,
+        enabled=False,
+        rbac_role_id="role-7",
+        llm_config_id="llm-2",
+        knowledge_space_keys=["runbooks"],
+        knowledge_write_space="runbooks",
+        current_task_id="task-running",
+        status="busy",
+        load=1,
+        workspace_etag="old-workspace",
+        credentials={"token": "must-not-export"},
+    )
+
+    async def fake_get_visible_role(tenant_id, role_key):
+        assert (tenant_id, role_key) == ("tenant-1", "monitor")
+        return role
+
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
+        assert tenant_id == "tenant-1"
+        assert skill_keys == ["alert_triage", "baseline_monitoring"]
+        assert enabled is None
+        return [
+            types.SimpleNamespace(
+                skill_key=skill_key,
+                skill_dir=f"tenant-1/{skill_key}",
+                version=2,
+            )
+            for skill_key in skill_keys
+        ]
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.get_visible_role = fake_get_visible_role
+    manager_module.get_visible_skills = fake_get_visible_skills
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    sys.modules["services.digital_employee.manager"] = manager_module
+    try:
+        package = asyncio.run(
+            package_importer.export_employee_package_for_tenant(
+                "tenant-1", employee
+            )
+        )
+    finally:
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
+
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        names = set(archive.namelist())
+        package_yaml = yaml.safe_load(archive.read("package.yaml")) or {}
+        role_yaml = yaml.safe_load(archive.read("roles/monitor/role.yaml")) or {}
+        employee_yaml = yaml.safe_load(archive.read("employee.yaml")) or {}
+
+    assert package_yaml["type"] == "bundle"
+    assert package_yaml["employee_manifest"] == "employee.yaml"
+    assert role_yaml["identity"] == "You are the monitor operator."
+    assert role_yaml["default_skill_keys"] == ["baseline_monitoring"]
+    assert "rbac_role_id" not in role_yaml
+    assert "skills/alert_triage/SKILL.md" in names
+    assert "skills/baseline_monitoring/SKILL.md" in names
+    assert employee_yaml == {
+        "schema_version": 1,
+        "name": "Night monitor",
+        "role_key": "monitor",
+        "skill_keys": ["alert_triage"],
+        "max_concurrent": 3,
+        "enabled": False,
+        "rbac_role_id": "role-7",
+        "llm_config_id": "llm-2",
+        "knowledge_space_keys": ["runbooks"],
+        "knowledge_write_space": "runbooks",
+    }
+
+
+def test_import_employee_bundle_restores_instance_without_reusing_agent_key(
+    tmp_path, monkeypatch
+):
+    resources_root = tmp_path / "resources"
+    skill_root = tmp_path / "skill-storage"
+    package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
+    monkeypatch.setenv("RY_SKILL_ROOT", str(skill_root))
+    package = _zip_with(
+        {
+            "package.yaml": yaml.safe_dump(
+                {
+                    "type": "bundle",
+                    "bundle_key": "employee-monitor",
+                    "role_key": "monitor",
+                    "employee_manifest": "employee.yaml",
+                }
+            ),
+            "employee.yaml": yaml.safe_dump(
+                {
+                    "schema_version": 1,
+                    "name": "Night monitor",
+                    "role_key": "monitor",
+                    "skill_keys": ["alert_triage"],
+                    "max_concurrent": 3,
+                    "enabled": False,
+                    "rbac_role_id": "role-7",
+                    "llm_config_id": "llm-2",
+                    "knowledge_space_keys": ["runbooks"],
+                    "knowledge_write_space": "runbooks",
+                    "agent_key": "monitor-old12345",
+                    "current_task_id": "task-running",
+                    "credentials": {"token": "must-not-import"},
+                }
+            ),
+            "roles/monitor/package.yaml": yaml.safe_dump(
+                {"type": "role", "role_key": "monitor", "version": 1}
+            ),
+            "roles/monitor/role.yaml": yaml.safe_dump(
+                {
+                    "key": "monitor",
+                    "name": "Monitor role",
+                    "identity": "You are the monitor operator.",
+                    "default_skill_keys": ["alert_triage"],
+                }
+            ),
+            "skills/alert_triage/SKILL.md": (
+                "---\nname: Alert triage\ndescription: Triage alerts\n---\n"
+            ),
+        }
+    )
+    created = []
+    saved = []
+
+    class StubDigitalEmployeeRole:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            return None
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            return types.SimpleNamespace(
+                id="role-record-1",
+                role_key=kwargs["role_key"],
+                version=kwargs["defaults"]["version"],
+            ), True
+
+    class StubDigitalEmployeeSkill:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            return None
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            return types.SimpleNamespace(
+                id="skill-record-1",
+                skill_key=kwargs["skill_key"],
+                **kwargs["defaults"],
+            ), True
+
+    async def fake_create_employee(**kwargs):
+        created.append(kwargs)
+        employee = types.SimpleNamespace(
+            id="employee-new",
+            agent_key="monitor-new12345",
+            role_key=kwargs["role_key"],
+            name=kwargs["name"],
+            enabled=True,
+        )
+
+        async def save(update_fields=None):
+            saved.append((employee.enabled, update_fields))
+
+        employee.save = save
+        return employee
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.create_employee = fake_create_employee
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    original_role_model = package_importer.DigitalEmployeeRole
+    original_skill_model = package_importer.DigitalEmployeeSkill
+    sys.modules["services.digital_employee.manager"] = manager_module
+    package_importer.DigitalEmployeeRole = StubDigitalEmployeeRole
+    package_importer.DigitalEmployeeSkill = StubDigitalEmployeeSkill
+    try:
+        result = asyncio.run(import_package(package, tenant_id="tenant-1"))
+    finally:
+        package_importer.DigitalEmployeeRole = original_role_model
+        package_importer.DigitalEmployeeSkill = original_skill_model
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
+
+    assert created == [
+        {
+            "tenant_id": "tenant-1",
+            "role_key": "monitor",
+            "name": "Night monitor",
+            "skill_keys": ["alert_triage"],
+            "max_concurrent": 3,
+            "rbac_role_id": "role-7",
+            "llm_config_id": "llm-2",
+            "knowledge_space_keys": ["runbooks"],
+            "knowledge_write_space": "runbooks",
+        }
+    ]
+    assert saved == [(False, ["enabled", "utime"])]
+    assert {item["type"] for item in result.imported} == {
+        "role",
+        "skill",
+        "employee",
+    }
+    assert result.skipped == []
+
+
 def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
     skill_root = tmp_path / "tenant-1" / "period_report_compose"
     skill_root.mkdir(parents=True)
