@@ -346,7 +346,7 @@ def _decode_runlog_cursor(token, kind: str, **scope) -> dict | None:
 
 def _runlog_time_json(value):
     if isinstance(value, datetime):
-        return value.isoformat(timespec="seconds")
+        return value.isoformat()
     return value
 
 

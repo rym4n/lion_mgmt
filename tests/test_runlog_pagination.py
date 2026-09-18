@@ -618,6 +618,12 @@ def test_command_center_runlog_cursor_is_bound_to_task_and_run():
         views._decode_runlog_cursor(cursor, "batch", task_id="task-1")
 
 
+def test_command_center_runlog_cursor_time_keeps_microseconds():
+    value = datetime.fromisoformat("2026-09-11T14:02:21.770099+08:00")
+
+    assert views._runlog_time_json(value) == "2026-09-11T14:02:21.770099+08:00"
+
+
 @pytest.mark.parametrize("cursor", ["%%%", "_w"])
 def test_command_center_runlog_cursor_rejects_invalid_encoded_content(cursor):
     with pytest.raises(CustomError):
