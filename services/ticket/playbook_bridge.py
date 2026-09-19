@@ -81,7 +81,7 @@ def _ticket_config(log: dict, node: dict | None = None) -> dict:
         for source in (props, log):
             for key in (
                 "ticket_type_id", "ticket_flow_id", "flow_version_id",
-                "title", "priority", "form_data",
+                "title", "form_data",
                 "approvers", "users", "roles",
             ):
                 if key in source and key not in merged:
@@ -91,7 +91,7 @@ def _ticket_config(log: dict, node: dict | None = None) -> dict:
     for source in (props, log):
         for key in (
             "ticket_type_id", "ticket_flow_id", "flow_version_id",
-            "title", "priority", "form_data",
+            "title", "form_data",
             "approvers", "users", "roles",
         ):
             if key in source:
@@ -127,7 +127,6 @@ async def create_ticket_from_playbook(
             config.get("title") or log.get("node_name")
             or log.get("content") or "剧本工单"
         ),
-        "priority": config.get("priority", 1),
         "form_data": config.get("form_data") or params,
         "source": SOURCE_PLAYBOOK,
         "origin_run_id": log.get("run_id"),

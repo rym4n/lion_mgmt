@@ -49,6 +49,10 @@ def test_ticket_has_no_current_node_field():
     assert "current_node" not in Ticket._meta.fields_map
 
 
+def test_ticket_has_no_priority_field():
+    assert "priority" not in Ticket._meta.fields_map
+
+
 def test_ticket_origin_and_callback_fields():
     """剧本恢复契约依赖 origin_* 四field；callback_token 供外部回调。"""
     for field in ("origin_run_id", "origin_node_id", "origin_flow_id",
@@ -57,7 +61,7 @@ def test_ticket_origin_and_callback_fields():
 
 
 def test_ticket_sla_and_suspend_fields_nullable():
-    """sla_config 缺当前优先级键时两个字段留 null（SPEC §4.7）。"""
+    """SLA 未配置时两个字段留 null（SPEC §4.7）。"""
     for field in ("sla_respond_at", "sla_resolve_at", "closed_at", "suspended_at"):
         assert Ticket._meta.fields_map[field].null is True
 

@@ -306,6 +306,65 @@ def test_task_detail_event_dto_exposes_metadata_summary_only():
     assert event_out["phrase"] == "等待人工审批"
 
 
+def test_task_human_records_exclude_pending_approvals_and_process_events():
+    def approval(approval_id, status, ctime):
+        return SimpleNamespace(
+            id=approval_id,
+            status=status,
+            trigger_type="runtime",
+            risk_level="high",
+            impacted_resources=[{"kind": "service", "name": "api"}],
+            requested_action={"action": "restart_service"},
+            rollback_plan="rollback",
+            requester_id="requester-1",
+            approver_id="operator-1" if status != "pending" else None,
+            decided_at=ctime if status != "pending" else None,
+            expires_at=None,
+            decision_comment="done" if status != "pending" else None,
+            metadata={"secret": "must not leak"},
+            json={
+                "ctime": ctime,
+                "utime": ctime,
+                "task_id": "task-1",
+                "run_id": "run-1",
+                "employee_id": "employee-1",
+                "decided_at": ctime if status != "pending" else None,
+                "expires_at": None,
+            },
+        )
+
+    def event(event_id, event_type, ctime):
+        return SimpleNamespace(
+            id=event_id,
+            event_type=event_type,
+            status="completed",
+            progress=100,
+            agent_key="ops-agent",
+            message="human action",
+            metadata={"secret": "must not leak"},
+            operator_id="operator-1",
+            json={"ctime": ctime, "utime": ctime, "task_id": "task-1"},
+        )
+
+    records = views._task_human_records(
+        [
+            approval("approval-pending", "pending", "2026-06-29 13:00:00"),
+            approval("approval-done", "approved", "2026-06-29 13:02:00"),
+        ],
+        [
+            event("event-progress", "task_progress_updated", "2026-06-29 13:01:00"),
+            event("event-answered", "clarification_answered", "2026-06-29 13:03:00"),
+        ],
+    )
+
+    assert [record["id"] for record in records] == [
+        "approval:approval-done",
+        "event:event-answered",
+    ]
+    assert [record["record_type"] for record in records] == ["approval", "event"]
+    assert all("metadata" not in record for record in records)
+
+
 def test_task_stream_event_dto_exposes_one_bounded_render_item():
     event_out = views._task_stream_event_json(
         {
@@ -336,8 +395,9 @@ def test_task_detail_defers_process_and_tool_history_to_lazy_endpoints():
     process_source = inspect.getsource(inspect.unwrap(views.task_process))
     process_query_source = inspect.getsource(views._task_process_events)
 
-    assert "CommandTaskEvent" not in detail_source
-    assert "_task_event_detail_json" not in detail_source
+    assert "CommandTaskEvent" in detail_source
+    assert "event_type__in=HUMAN_HANDLING_EVENT_TYPES" in detail_source
+    assert "_task_human_records" in detail_source
     assert "_task_run_detail_json" not in detail_source
     assert 'status=COMMAND_APPROVAL_STATUS_PENDING' in detail_source
     assert "_task_process_events" in process_source

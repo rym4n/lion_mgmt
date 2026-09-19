@@ -408,7 +408,7 @@ async def test_list_supports_keyword_and_pagination(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_applies_column_filters_and_returns_filter_ids(monkeypatch):
+async def test_list_applies_supported_column_filters_and_ignores_priority(monkeypatch):
     now = datetime(2026, 8, 11, 9, 0, 0)
     matched = _ticket(
         "matched",
@@ -417,7 +417,6 @@ async def test_list_applies_column_filters_and_returns_filter_ids(monkeypatch):
         ticket_no="CHG-001",
         ctime=now,
     )
-    matched.priority = 2
     matched.ticket_type_id = "type-1"
     ignored = _ticket(
         "ignored",
@@ -426,7 +425,6 @@ async def test_list_applies_column_filters_and_returns_filter_ids(monkeypatch):
         ticket_no="NET-002",
         ctime=now - timedelta(days=2),
     )
-    ignored.priority = 1
     ignored.ticket_type_id = "type-2"
     ticket_model = ModelStub([matched, ignored])
     monkeypatch.setattr(views, "Ticket", ticket_model)
@@ -449,7 +447,7 @@ async def test_list_applies_column_filters_and_returns_filter_ids(monkeypatch):
     assert {"ticket_no__icontains": "CHG"} in filters
     assert {"title__icontains": "扩容"} in filters
     assert {"ticket_type_id": "type-1"} in filters
-    assert {"priority": 2} in filters
+    assert {"priority": 2} not in filters
 
 
 @pytest.mark.asyncio
@@ -509,7 +507,7 @@ async def test_todolist_uses_active_m2m_reverse_lookup_and_tenant_filter(monkeyp
 
     assert body["code"] == 0
     assert [item["id"] for item in body["data"]] == ["first", "second"]
-    assert set(body["data"][0]) == {"id", "ticket_no", "title", "priority"}
+    assert set(body["data"][0]) == {"id", "ticket_no", "title"}
     assert any(
         kwargs.get("approvers__id") == "user-1"
         and kwargs.get("tenant_id") == "tenant-1"

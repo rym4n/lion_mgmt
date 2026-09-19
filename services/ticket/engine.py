@@ -120,7 +120,13 @@ def validate_node_form_data(
             value is None or value == "" or (isinstance(value, list) and not value)
         ):
             raise CustomError(ErrorCode.TICKET_FORM_INVALID)
-    return {key: merged[key] for key in allowed_keys if key in merged}
+    system_data = {}
+    if isinstance(current, dict) and isinstance(current.get("sla"), dict):
+        system_data["sla"] = dict(current["sla"])
+    return {
+        **system_data,
+        **{key: merged[key] for key in allowed_keys if key in merged},
+    }
 
 
 def _out_edges(flow_json, node_id) -> list[dict]:
@@ -365,7 +371,7 @@ async def _refresh_ticket_sla(ticket, connection=None) -> None:
     ).using_db(connection).first()
     sla_config = getattr(ticket_type, "sla_config", None) if ticket_type else None
     ticket.sla_respond_at, ticket.sla_resolve_at = calculate_sla(
-        ticket.ctime, ticket.priority, sla_config
+        ticket.ctime, sla_config
     )
     await ticket.save(
         update_fields=["sla_respond_at", "sla_resolve_at", "utime"],
@@ -391,7 +397,8 @@ async def mark_node_abnormal(node, ticket, reason, connection=None) -> None:
 def _node_deadline(definition, now):
     from datetime import timedelta
 
-    duration = (definition.get("sla") or {}).get("duration")
+    configured_sla = _definition_value(definition, "sla")
+    duration = (configured_sla or {}).get("duration") if isinstance(configured_sla, dict) else None
     if duration is None:
         duration = _definition_value(definition, "expire_time")
     try:
@@ -399,6 +406,20 @@ def _node_deadline(definition, now):
     except (TypeError, ValueError):
         return None
     return now + timedelta(seconds=seconds) if seconds > 0 else None
+
+
+def _node_runtime_form_data(definition, node_type):
+    configured_sla = _definition_value(definition, "sla")
+    sla = dict(configured_sla) if isinstance(configured_sla, dict) else {}
+    if sla.get("duration") is None:
+        legacy_duration = _definition_value(definition, "expire_time")
+        if legacy_duration is not None:
+            sla["duration"] = legacy_duration
+    if node_type == NODE_TYPE_AUTO:
+        sla["on_timeout"] = "auto_fail"
+    elif sla.get("duration") is not None and not sla.get("on_timeout"):
+        sla["on_timeout"] = "notify_only"
+    return {"sla": sla} if sla else {}
 
 
 async def activate_nodes(
@@ -425,7 +446,8 @@ async def activate_nodes(
             node_type=node_type,
             status=NODE_STATUS_RUNNING if is_auto else NODE_STATUS_PENDING,
             approve_type=definition.get("approve_type") or APPROVE_TYPE_ANY,
-            results={}, form_data={}, deadline=_node_deadline(definition, now),
+            results={}, form_data=_node_runtime_form_data(definition, node_type),
+            deadline=_node_deadline(definition, now),
             fork_id=definition.get("fork_id"), branch_key=definition.get("branch_key"),
             entered_at=now,
         )
@@ -753,6 +775,25 @@ def _terminal_status_for(flow_json, target_ids) -> int | None:
 
 
 async def _apply_decision(ticket, node, actor_id, decision, conn, form_data=None):
+    if decision == "timeout" and node.node_type == NODE_TYPE_AUTO:
+        if not can_transition_node(node.status, NODE_STATUS_TIMEOUT):
+            return None
+        node.status = NODE_STATUS_TIMEOUT
+        node.completed_at = datetime.now(TZ)
+        await node.save(
+            update_fields=["status", "completed_at", "utime"],
+            using_db=conn,
+        )
+        await record_activity(
+            ticket,
+            "timeout",
+            content="自动化节点超时失败",
+            node_instance=node,
+            payload={"node_id": node.node_id, "outcome": NODE_STATUS_TIMEOUT},
+            connection=conn,
+        )
+        return NODE_STATUS_TIMEOUT
+
     approver_ids = [a.id for a in await node.approvers.all()]
     if actor_id and actor_id not in approver_ids:
         raise CustomError(ErrorCode.TICKET_NOT_APPROVER)

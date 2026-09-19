@@ -27,6 +27,7 @@ from models.ticket import (
     NODE_STATUS_PENDING,
     NODE_STATUS_REJECTED,
     NODE_STATUS_RUNNING,
+    NODE_STATUS_TIMEOUT,
     TICKET_STATUS_PROCESSING,
     TICKET_STATUS_SUSPENDED,
     TICKET_STATUS_TIMEOUT,
@@ -47,23 +48,23 @@ SUSPENSION_ALERT_SECONDS = 3600
 _TIMEOUT_OUTCOMES = {
     "auto_approve": NODE_STATUS_APPROVED,
     "auto_reject": NODE_STATUS_REJECTED,
+    "auto_fail": NODE_STATUS_TIMEOUT,
 }
 
 
-def calculate_sla(ctime, priority, sla_config, flow_deadline=None):
+def calculate_sla(ctime, sla_config, flow_deadline=None):
     """算工单级响应/解决时限。
 
-    公式以 ctime 为锚点（不是改动时刻），所以优先级中途被表单改动时
-    直接重算即可。缺当前优先级键则两个字段留 None，不报错。
+    公式以 ctime 为锚点（不是改动时刻）。缺少响应或解决时限时，
+    对应字段留 None，不报错。
 
     flow_deadline 是剧本触发场景的外层边界（SPEC §2.2）：
     Redis 上游输出 TTL 与剧本 flow_timeout 对齐，工单过期时间取更早者，
     否则缓存先于审批过期，恢复失败。
     """
     config = sla_config or {}
-    bucket = config.get(str(priority)) or {}
-    respond = _plus(ctime, bucket.get("respond"))
-    resolve = _plus(ctime, bucket.get("resolve"))
+    respond = _plus(ctime, config.get("respond"))
+    resolve = _plus(ctime, config.get("resolve"))
 
     if flow_deadline is not None:
         # 即便没配 SLA，也要受剧本超时约束，否则工单永不终结
@@ -108,10 +109,9 @@ def timeout_outcome(policy) -> int | None:
     return _TIMEOUT_OUTCOMES.get(policy)
 
 
-def notify_only_allowed(sla_config, priority) -> bool:
+def notify_only_allowed(sla_config) -> bool:
     """「仅通知」必须有工单级 resolve 兜底，否则工单无法终结。"""
-    bucket = (sla_config or {}).get(str(priority)) or {}
-    return bool(bucket.get("resolve"))
+    return bool((sla_config or {}).get("resolve"))
 
 
 def suspension_overdue(suspended_at, now=None) -> bool:
@@ -456,6 +456,25 @@ async def _handle_node_timeout(node, owner, moment) -> bool:
         ticket = await _claim_ticket(node, owner, moment, connection=connection)
         if ticket is None or await already_escalated(node, connection=connection):
             return False
+
+        if node.node_type == "auto":
+            await record_activity(
+                ticket,
+                "sla_timeout",
+                content="自动化节点超时，自动失败",
+                node_instance=node,
+                payload={"node_id": node.node_id, "policy": "auto_fail"},
+                connection=connection,
+            )
+            await advance_ticket(
+                node.ticket_id,
+                node.tenant_id,
+                trigger="sla",
+                node_instance_id=node.id,
+                decision="timeout",
+                connection=connection,
+            )
+            return True
 
         policy = ((node.form_data or {}).get("sla") or {}).get("on_timeout") or "notify_only"
         await record_activity(

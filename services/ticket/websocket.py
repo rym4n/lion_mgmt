@@ -68,7 +68,6 @@ async def get_pending_snapshot(
                 "id": ticket.id,
                 "ticket_no": ticket.ticket_no,
                 "title": ticket.title,
-                "priority": ticket.priority,
             }
             for ticket in tickets
         ],

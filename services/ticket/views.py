@@ -351,7 +351,6 @@ async def detail_view(request: Request, ticket_id: str):
         {"name": "title", "in": "query", "schema": {"type": "string"}},
         {"name": "ticket_type_id", "in": "query", "schema": {"type": "string"}},
         {"name": "flow_id", "in": "query", "schema": {"type": "string"}},
-        {"name": "priority", "in": "query", "schema": {"type": "integer"}},
         {"name": "creator_id", "in": "query", "schema": {"type": "string"}},
         {"name": "ctime_start", "in": "query", "schema": {"type": "string"}},
         {"name": "ctime_end", "in": "query", "schema": {"type": "string"}},
@@ -480,13 +479,6 @@ async def list_view(request: Request):
             raise CustomError(ErrorCode.PARAM_ERROR)
         query = query.filter(**{lookup: parsed_value})
 
-    priority_filter = request.args.get("priority")
-    if priority_filter not in (None, ""):
-        try:
-            query = query.filter(priority=int(priority_filter))
-        except (TypeError, ValueError):
-            raise CustomError(ErrorCode.PARAM_ERROR)
-
     if status_filter not in (None, "") and view != "my_apply":
         try:
             query = query.filter(status=int(status_filter))
@@ -507,7 +499,6 @@ async def list_view(request: Request):
             "ticket_no": ticket.ticket_no,
             "title": ticket.title,
             "status": ticket.status,
-            "priority": ticket.priority,
             "ticket_type_id": ticket.ticket_type_id,
             "creator_id": ticket.creator_id,
             "ticket_type_name": type_names.get(ticket.ticket_type_id, ""),

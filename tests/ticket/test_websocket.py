@@ -51,7 +51,7 @@ async def test_pending_snapshot_has_untruncated_count_and_excludes_terminal():
     assert snapshot["count"] == 22
     assert len(snapshot["items"]) == 20
     assert all(item["id"] != "terminal" for item in snapshot["items"])
-    assert set(snapshot["items"][0]) == {"id", "ticket_no", "title", "priority"}
+    assert set(snapshot["items"][0]) == {"id", "ticket_no", "title"}
 
 
 @pytest.mark.asyncio

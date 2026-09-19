@@ -45,7 +45,7 @@ def _install(
     ticket_type = SimpleNamespace(
         id="type-1", code="CHG", name="变更", deleted=False, tenant_id="tenant-1",
         default_flow_id="flow-1" if default_flow else None,
-        sla_config=sla_config if sla_config is not None else {"1": {"respond": 900, "resolve": 7200}},
+        sla_config=sla_config if sla_config is not None else {"respond": 900, "resolve": 7200},
     )
     flow = SimpleNamespace(
         id="flow-1", ticket_type_id="type-1", deleted=False,
@@ -68,7 +68,7 @@ def _install(
         created.update(kwargs)
         return make_ticket(
             ticket_id="t-new", status=kwargs.get("status", 0),
-            source=kwargs.get("source", 0), priority=kwargs.get("priority", 1),
+            source=kwargs.get("source", 0),
         )
 
     monkeypatch.setattr(manager, "Ticket", type("M", (), {
@@ -100,12 +100,13 @@ async def _await_value(value):
 async def test_create_assigns_ticket_no_and_pins_version(monkeypatch):
     ctx = _install(monkeypatch)
     await manager.create_ticket("tenant-1", "acc-creator", {
-        "ticket_type_id": "type-1", "title": "换机", "priority": 1,
+        "ticket_type_id": "type-1", "title": "换机", "priority": 3,
         "form_data": {"amount": 100},
     })
     assert ctx.created["ticket_no"] == "CHG-20260810-0001"
     assert ctx.created["flow_version_id"] == "ver-1"     # 钉住版本
     assert ctx.created["status"] == TICKET_STATUS_PROCESSING
+    assert "priority" not in ctx.created
 
 
 @pytest.mark.asyncio
@@ -186,7 +187,7 @@ async def test_create_activates_first_node_after_start(monkeypatch):
 async def test_create_computes_sla_from_type_config(monkeypatch):
     ctx = _install(monkeypatch)
     await manager.create_ticket("tenant-1", "acc-creator", {
-        "ticket_type_id": "type-1", "title": "换机", "priority": 1,
+        "ticket_type_id": "type-1", "title": "换机",
         "form_data": {"amount": 1},
     })
     assert ctx.created["sla_respond_at"] is not None
@@ -194,13 +195,13 @@ async def test_create_computes_sla_from_type_config(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_leaves_sla_null_when_priority_unconfigured(monkeypatch):
-    ctx = _install(monkeypatch, sla_config={"3": {"respond": 900}})
+async def test_create_supports_partial_sla_config(monkeypatch):
+    ctx = _install(monkeypatch, sla_config={"respond": 900})
     await manager.create_ticket("tenant-1", "acc-creator", {
-        "ticket_type_id": "type-1", "title": "换机", "priority": 0,
+        "ticket_type_id": "type-1", "title": "换机",
         "form_data": {"amount": 1},
     })
-    assert ctx.created["sla_respond_at"] is None
+    assert ctx.created["sla_respond_at"] is not None
     assert ctx.created["sla_resolve_at"] is None
 
 

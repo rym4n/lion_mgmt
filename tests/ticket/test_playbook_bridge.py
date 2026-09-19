@@ -45,7 +45,6 @@ async def test_create_ticket_from_playbook_maps_origin_fields(monkeypatch):
     assert captured["payload"] == {
         "ticket_type_id": "type-1",
         "title": "变更审批",
-        "priority": 2,
         "form_data": {"reason": "扩容"},
         "source": SOURCE_PLAYBOOK,
         "origin_run_id": "run-1",

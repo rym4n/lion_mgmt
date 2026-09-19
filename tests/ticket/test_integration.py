@@ -69,7 +69,7 @@ def _install_lifecycle_fakes(monkeypatch):
         id="type-1",
         code="CHG",
         default_flow_id="flow-1",
-        sla_config={"1": {"respond": 900, "resolve": 7200}},
+        sla_config={"respond": 900, "resolve": 7200},
     )
 
     class FakeTicket:
@@ -89,7 +89,6 @@ def _install_lifecycle_fakes(monkeypatch):
                 ticket_id="ticket-1",
                 status=kwargs["status"],
                 source=kwargs["source"],
-                priority=kwargs["priority"],
                 tenant_id=kwargs["tenant_id"],
                 flow_json=TWO_STEP,
                 form_data=kwargs["form_data"],
@@ -208,7 +207,6 @@ async def test_submit_approve_and_archive_end_to_end(monkeypatch):
         {
             "ticket_type_id": "type-1",
             "title": "生产变更",
-            "priority": 1,
             "form_data": {"reason": "扩容"},
         },
     )

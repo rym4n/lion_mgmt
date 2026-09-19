@@ -80,7 +80,6 @@ async def test_create_calculates_sla(monkeypatch):
         "acc-creator",
         {
             "ticket_type_id": "type-1",
-            "priority": 1,
             "form_data": {"amount": 1},
         },
     )
@@ -106,7 +105,7 @@ async def test_advance_updates_sla_for_non_terminal_ticket(monkeypatch):
     _install_engine_fakes(monkeypatch, ticket, [node], flow=NON_TERMINAL_FLOW)
     _install_ticket_type(
         monkeypatch,
-        {"1": {"respond": 900, "resolve": 7200}},
+        {"respond": 900, "resolve": 7200},
     )
 
     account_b = make_account("b")
@@ -151,7 +150,7 @@ async def test_advance_does_not_update_sla_for_terminal_ticket(monkeypatch):
     _install_engine_fakes(monkeypatch, ticket, [node], flow=TERMINAL_FLOW)
     _install_ticket_type(
         monkeypatch,
-        {"1": {"respond": 1, "resolve": 1}},
+        {"respond": 1, "resolve": 1},
     )
 
     assert await engine.advance_ticket(

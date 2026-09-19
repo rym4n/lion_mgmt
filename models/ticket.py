@@ -48,7 +48,7 @@ NODE_TERMINAL_STATUSES = frozenset({
 
 NODE_TRANSITIONS = {
     NODE_STATUS_PENDING: frozenset({1, 2, 3, 5}),
-    NODE_STATUS_RUNNING: frozenset({1, 2, 5}),
+    NODE_STATUS_RUNNING: frozenset({1, 2, NODE_STATUS_TIMEOUT, 5}),
     NODE_STATUS_ABNORMAL: frozenset({NODE_STATUS_PENDING}),
     NODE_STATUS_APPROVED: frozenset(),
     NODE_STATUS_REJECTED: frozenset(),
@@ -96,7 +96,7 @@ class TicketType(BaseModel):
     )
     sla_config = fields.JSONField(
         default=dict,
-        description='按优先级配置时限：{"3": {"respond": 900, "resolve": 7200}, "warn_before": 900}',
+        description='工单类型时限：{"respond": 900, "resolve": 7200, "warn_before": 900}',
     )
 
     def validate(self) -> None:
@@ -240,7 +240,6 @@ class Ticket(BaseModel):
 
     ticket_no: str = fields.CharField(max_length=64, index=True, description="可读单号，如 CHG-20260810-0001")
     title: str = fields.CharField(max_length=255, description="标题")
-    priority = fields.IntField(default=1, index=True, description="0低 1中 2高 3紧急")
     status = fields.IntField(default=TICKET_STATUS_PROCESSING, index=True,
                              description="0处理中 1已完成 2已拒绝 3已超时 4已撤回 5已强关 6异常挂起")
     ticket_type = fields.ForeignKeyField("models.TicketType", related_name="tickets")
@@ -283,7 +282,6 @@ class Ticket(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "ticket_no": self.ticket_no,
             "title": self.title,
-            "priority": self.priority,
             "status": self.status,
             "ticket_type_id": self.ticket_type_id,
             "flow_version_id": self.flow_version_id,

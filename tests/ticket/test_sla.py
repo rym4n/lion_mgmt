@@ -8,62 +8,49 @@ from types import SimpleNamespace
 
 import pytest
 
-from models.ticket import NODE_STATUS_ABNORMAL, TICKET_STATUS_SUSPENDED
+from models.ticket import TICKET_STATUS_SUSPENDED
 from services.ticket import sla_scheduler as sla
 from tests.ticket.conftest import make_node, make_ticket
 
 CTIME = datetime(2026, 8, 10, 9, 0, 0)
-CONFIG = {"3": {"respond": 900, "resolve": 7200}, "1": {"respond": 3600}, "warn_before": 600}
+CONFIG = {"respond": 900, "resolve": 7200, "warn_before": 600}
 
 
 def test_respond_and_resolve_anchored_on_ctime():
     """公式以 ctime 为锚点，不是「改动时刻」（SPEC §4.7）。"""
-    respond, resolve = sla.calculate_sla(CTIME, 3, CONFIG)
+    respond, resolve = sla.calculate_sla(CTIME, CONFIG)
     assert respond == CTIME + timedelta(seconds=900)
     assert resolve == CTIME + timedelta(seconds=7200)
 
 
-def test_missing_priority_key_means_no_sla_not_error():
-    """SPEC §4.7：缺当前优先级键时两个字段留 null，不报错拒绝创建。"""
-    assert sla.calculate_sla(CTIME, 2, CONFIG) == (None, None)
-
-
 def test_partial_config_leaves_missing_side_null():
-    respond, resolve = sla.calculate_sla(CTIME, 1, CONFIG)
+    respond, resolve = sla.calculate_sla(CTIME, {"respond": 3600})
     assert respond == CTIME + timedelta(seconds=3600)
     assert resolve is None
 
 
 def test_empty_config_yields_no_sla():
-    assert sla.calculate_sla(CTIME, 3, {}) == (None, None)
-    assert sla.calculate_sla(CTIME, 3, None) == (None, None)
-
-
-def test_priority_change_recomputes_from_ctime_not_now():
-    """优先级被表单改动时重算，锚点仍是 ctime。"""
-    first = sla.calculate_sla(CTIME, 1, CONFIG)
-    second = sla.calculate_sla(CTIME, 3, CONFIG)
-    assert second[0] == CTIME + timedelta(seconds=900)
-    assert second[0] < first[0]
+    assert sla.calculate_sla(CTIME, {}) == (None, None)
+    assert sla.calculate_sla(CTIME, None) == (None, None)
 
 
 def test_playbook_flow_deadline_caps_resolve():
     """SPEC §2.2：剧本触发的工单过期时间取 min(节点/工单 SLA, 剧本剩余 flow_timeout)。"""
     flow_deadline = CTIME + timedelta(seconds=300)
-    _, resolve = sla.calculate_sla(CTIME, 3, CONFIG, flow_deadline=flow_deadline)
+    _, resolve = sla.calculate_sla(CTIME, CONFIG, flow_deadline=flow_deadline)
     assert resolve == flow_deadline
 
 
 def test_flow_deadline_ignored_when_later_than_sla():
     flow_deadline = CTIME + timedelta(seconds=99999)
-    _, resolve = sla.calculate_sla(CTIME, 3, CONFIG, flow_deadline=flow_deadline)
+    _, resolve = sla.calculate_sla(CTIME, CONFIG, flow_deadline=flow_deadline)
     assert resolve == CTIME + timedelta(seconds=7200)
 
 
 def test_flow_deadline_applies_even_without_sla_config():
     """无 SLA 配置但有剧本超时时，仍受剧本超时约束，否则工单永不终结。"""
     flow_deadline = CTIME + timedelta(seconds=300)
-    _, resolve = sla.calculate_sla(CTIME, 9, {}, flow_deadline=flow_deadline)
+    _, resolve = sla.calculate_sla(CTIME, {}, flow_deadline=flow_deadline)
     assert resolve == flow_deadline
 
 
@@ -176,6 +163,7 @@ async def test_owner_can_reenter_its_own_claim():
     [
         ("auto_approve", 1),      # NODE_STATUS_APPROVED
         ("auto_reject", 2),       # NODE_STATUS_REJECTED
+        ("auto_fail", 3),         # NODE_STATUS_TIMEOUT
         ("notify_only", None),    # 只发通知，不改节点状态
     ],
 )
@@ -196,9 +184,9 @@ def test_unknown_policy_defaults_to_notify_only():
 def test_notify_only_requires_ticket_resolve_deadline():
     """SPEC §4.6：「仅通知」必须依赖工单级 sla_resolve_at 兜底终结，
     未配 resolve 时限则禁止选它（发布校验拦截）。"""
-    assert sla.notify_only_allowed({"3": {"respond": 900, "resolve": 7200}}, 3) is True
-    assert sla.notify_only_allowed({"3": {"respond": 900}}, 3) is False
-    assert sla.notify_only_allowed({}, 3) is False
+    assert sla.notify_only_allowed({"respond": 900, "resolve": 7200}) is True
+    assert sla.notify_only_allowed({"respond": 900}) is False
+    assert sla.notify_only_allowed({}) is False
 
 
 @pytest.mark.asyncio
@@ -339,8 +327,8 @@ async def test_sweep_continues_after_one_row_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_running_auto_node_timeout_becomes_abnormal(monkeypatch):
-    """执行中自动动作到期必须异常挂起，不能套审批超时策略。"""
+async def test_running_auto_node_timeout_auto_fails(monkeypatch):
+    """自动化节点超时直接失败，不升级也不把工单挂起。"""
     from services.ticket import engine
 
     ticket = make_ticket()
@@ -365,20 +353,23 @@ async def test_running_auto_node_timeout_becomes_abnormal(monkeypatch):
     async def _record(_ticket, action, **_kwargs):
         activities.append(action)
 
-    async def _unexpected_advance(*_args, **_kwargs):
-        raise AssertionError("RUNNING 节点超时不得按审批结果推进")
+    advanced = []
+
+    async def _advance(*_args, **kwargs):
+        advanced.append(kwargs)
+        return True
 
     monkeypatch.setattr(sla, "in_transaction", _fake_tx)
     monkeypatch.setattr(sla, "_claim_ticket", _claim)
     monkeypatch.setattr(sla, "already_escalated", _not_escalated)
     monkeypatch.setattr(engine, "record_activity", _record)
-    monkeypatch.setattr(engine, "advance_ticket", _unexpected_advance)
+    monkeypatch.setattr(engine, "advance_ticket", _advance)
 
     assert await sla._handle_node_timeout(node, "worker-1", CTIME) is True
-    assert node.status == NODE_STATUS_ABNORMAL
-    assert ticket.status == TICKET_STATUS_SUSPENDED
-    assert "sla_escalate" in activities
-    assert "exception" in activities
+    assert advanced[0]["decision"] == "timeout"
+    assert advanced[0]["trigger"] == "sla"
+    assert ticket.status != TICKET_STATUS_SUSPENDED
+    assert activities == ["sla_timeout"]
 
 
 # ---------- 数字伙伴过期传播 ----------

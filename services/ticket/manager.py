@@ -112,10 +112,9 @@ async def create_ticket(
     if not targets:
         raise CustomError(ErrorCode.TICKET_FLOW_VALIDATE_FAILED)
 
-    priority = int(payload.get("priority") or 1)
     now = datetime.now(TZ)
     respond_at, resolve_at = calculate_sla(
-        now, priority, ticket_type.sla_config,
+        now, ticket_type.sla_config,
         flow_deadline=payload.get("flow_deadline"),
     )
 
@@ -128,7 +127,6 @@ async def create_ticket(
             tenant_id=tenant_id,
             ticket_no=ticket_no,
             title=payload.get("title") or ticket_no,
-            priority=priority,
             status=TICKET_STATUS_PROCESSING,
             ticket_type_id=ticket_type.id,
             flow_version_id=version.id,       # 钉住版本，流程改动不影响在途工单

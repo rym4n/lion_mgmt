@@ -168,13 +168,13 @@ def make_node(
 
 
 def make_ticket(
-    ticket_id="t1", status=0, source=0, priority=1, tenant_id="tenant-1",
+    ticket_id="t1", status=0, source=0, tenant_id="tenant-1",
     ctime=None, sla_respond_at=None, sla_resolve_at=None, suspended_at=None,
     flow_json=None, form_data=None,
 ):
     ticket = SimpleNamespace(
         id=ticket_id, ticket_no="CHG-20260810-0001", title="测试工单",
-        status=status, source=source, priority=priority, tenant_id=tenant_id,
+        status=status, source=source, tenant_id=tenant_id,
         deleted=False, ctime=ctime or datetime(2026, 8, 10, 9, 0, 0),
         sla_respond_at=sla_respond_at, sla_resolve_at=sla_resolve_at,
         closed_at=None, suspended_at=suspended_at,

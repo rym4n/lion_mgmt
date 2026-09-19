@@ -56,9 +56,13 @@ def test_node_pending_transitions():
 
 
 def test_node_running_transitions():
-    for target in (NODE_STATUS_APPROVED, NODE_STATUS_REJECTED, NODE_STATUS_ABNORMAL):
+    for target in (
+        NODE_STATUS_APPROVED,
+        NODE_STATUS_REJECTED,
+        NODE_STATUS_TIMEOUT,
+        NODE_STATUS_ABNORMAL,
+    ):
         assert engine.can_transition_node(NODE_STATUS_RUNNING, target) is True
-    assert engine.can_transition_node(NODE_STATUS_RUNNING, NODE_STATUS_TIMEOUT) is False
 
 
 def test_node_abnormal_recovers_to_pending_only():
@@ -384,6 +388,53 @@ async def test_activate_auto_node_enters_running_directly(monkeypatch):
     fakes = _install_engine_fakes(monkeypatch, ticket, nodes=[])
     await engine.activate_nodes(ticket, ["auto1"], flow)
     assert fakes.created[0]["status"] == NODE_STATUS_RUNNING
+
+
+@pytest.mark.asyncio
+async def test_activate_node_copies_sla_policy_to_instance_form_data(monkeypatch):
+    flow = {
+        "nodes": [
+            {
+                "id": "auto1",
+                "type": "auto",
+                "sla": {"duration": 600, "on_timeout": "auto_fail"},
+                "action": {"func": "noop"},
+            }
+        ],
+        "edges": [],
+    }
+    ticket = make_ticket()
+    fakes = _install_engine_fakes(monkeypatch, ticket, nodes=[])
+
+    await engine.activate_nodes(ticket, ["auto1"], flow)
+
+    assert fakes.created[0]["form_data"] == {
+        "sla": {"duration": 600, "on_timeout": "auto_fail"}
+    }
+
+
+@pytest.mark.asyncio
+async def test_auto_timeout_decision_marks_running_node_timeout(monkeypatch):
+    ticket = make_ticket()
+    node = make_node(node_id="auto1", node_type="auto", status=NODE_STATUS_RUNNING)
+
+    async def _record(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(engine, "record_activity", _record)
+
+    outcome = await engine._apply_decision(
+        ticket,
+        node,
+        actor_id=None,
+        decision="timeout",
+        conn=object(),
+    )
+
+    assert outcome == NODE_STATUS_TIMEOUT
+    assert node.status == NODE_STATUS_TIMEOUT
+    assert node.completed_at is not None
+    assert node.saved[-1] == ("status", "completed_at", "utime")
 
 
 @pytest.mark.asyncio

@@ -71,6 +71,11 @@ RUNLOG_CURSOR_VERSION = 1
 PROCESS_STREAM_MAX_LENGTH = 200_000
 PROCESS_HIDDEN_EVENT_TYPES = ("run_checked_out", "runtime_tool_call", "runtime_progress")
 PROCESS_STREAM_EVENT_TYPES = ("runtime_delta", "runtime_thinking")
+HUMAN_HANDLING_EVENT_TYPES = (
+    "clarification_answered",
+    "run_handed_off",
+    "run_cancelled",
+)
 _RUNLOG_LOOP_RE = re.compile(r"【第(\d+)次循环】")
 _RUNLOG_RETRY_RE = re.compile(r"（(\d+)次重试）")
 
@@ -763,6 +768,31 @@ def _task_event_detail_json(event: CommandTaskEvent) -> dict:
     }
 
 
+def _task_human_records(approvals: list[CommandApproval], events: list[CommandTaskEvent]) -> list[dict]:
+    records = []
+    for approval in approvals:
+        if approval.status == COMMAND_APPROVAL_STATUS_PENDING:
+            continue
+        record = _task_approval_detail_json(approval)
+        record["id"] = f"approval:{approval.id}"
+        record["record_type"] = "approval"
+        records.append(record)
+    for event in events:
+        if event.event_type not in HUMAN_HANDLING_EVENT_TYPES:
+            continue
+        record = _task_event_detail_json(event)
+        record["id"] = f"event:{event.id}"
+        record["record_type"] = "event"
+        records.append(record)
+    return sorted(
+        records,
+        key=lambda record: (
+            str(record.get("decided_at") or record.get("ctime") or ""),
+            str(record.get("id") or ""),
+        ),
+    )
+
+
 def _task_stream_event_json(row: dict) -> dict:
     run_id = row.get("run_id") or "unscoped"
     return {
@@ -1072,7 +1102,7 @@ async def query_tasks(request: Request):
 @openapi.definition(
     summary="查看任务轻量详情",
     description=(
-        "优先返回任务基本信息、结果、摘要和待审批项；不包含执行事件和工具调用明细。"
+        "优先返回任务基本信息、结果、摘要、待审批项和人工处理历史；不包含执行事件和工具调用明细。"
         "执行过程通过/tasks/process按需查询。需要command_center:r权限。"
     ),
     body=_json_body(
@@ -1093,6 +1123,11 @@ async def query_tasks(request: Request):
                 "result": {"type": "string", "nullable": True, "description": "任务结果"},
                 "summary": {"type": "object", "description": "任务进度、用量和风险摘要"},
                 "approvals": {"type": "array", "description": "当前待审批项", "items": APPROVAL_SCHEMA},
+                "human_records": {
+                    "type": "array",
+                    "description": "已完成的人工处理记录",
+                    "items": {"type": "object"},
+                },
             },
         },
         {"400": "参数错误", "404": "任务不存在"},
@@ -1109,19 +1144,31 @@ async def task_detail(request: Request):
     if not task:
         raise CustomError(ErrorCode.NOT_FOUND)
     runs = await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
-    approvals = await CommandApproval.filter(
+    pending_approvals = await CommandApproval.filter(
         task_id=task.id,
         tenant_id=tenant_id,
         deleted=False,
         status=COMMAND_APPROVAL_STATUS_PENDING,
     ).order_by("-ctime").all()
+    historical_approvals = await CommandApproval.filter(
+        task_id=task.id,
+        tenant_id=tenant_id,
+        deleted=False,
+    ).exclude(status=COMMAND_APPROVAL_STATUS_PENDING).order_by("ctime", "id").all()
+    human_events = await CommandTaskEvent.filter(
+        task_id=task.id,
+        tenant_id=tenant_id,
+        deleted=False,
+        event_type__in=HUMAN_HANDLING_EVENT_TYPES,
+    ).order_by("ctime", "id").all()
     actors = await _resolve_task_actors([task], tenant_id)
     return response_ok(
         {
             "task": _task_detail_json(task, actors.get(task.id)),
-            "summary": build_task_summary(task, runs, approvals),
+            "summary": build_task_summary(task, runs, pending_approvals),
             "result": task.result,
-            "approvals": [_task_approval_detail_json(approval) for approval in approvals],
+            "approvals": [_task_approval_detail_json(approval) for approval in pending_approvals],
+            "human_records": _task_human_records(historical_approvals, human_events),
         }
     )
 
