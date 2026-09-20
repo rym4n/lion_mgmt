@@ -1,5 +1,5 @@
 # coding=utf-8
-"""/ticket/action 九种操作的权限、状态前置与错误码断言。
+"""/ticket/action 支持操作的权限、状态前置与错误码断言。
 
 前序会话的 action_view 有 10 处未定义引用（body/record_activity/datetime/
 active_nodes 等），但因无测试覆盖而未被发现。本文件通过导入验证和核心逻辑
@@ -7,6 +7,7 @@ active_nodes 等），但因无测试覆盖而未被发现。本文件通过导�
 """
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -49,7 +50,6 @@ def test_action_view_imports_successfully():
     assert hasattr(views, 'is_current_approver')
     assert hasattr(views, 'is_ticket_admin')
     assert hasattr(views, 'TICKET_STATUS_PROCESSING')
-    assert hasattr(views, 'TICKET_STATUS_WITHDRAWN')
     assert hasattr(views, 'TICKET_STATUS_FORCE_CLOSED')
     assert hasattr(views, 'TICKET_TERMINAL_STATUSES')
     assert hasattr(views, 'SOURCE_PLAYBOOK')
@@ -65,6 +65,16 @@ def test_action_view_forwards_approval_form_data_to_engine():
     source = inspect.getsource(views.action_view)
     assert '"form_data": {"type": "object"}' in source
     assert 'node_form_data=payload.get("form_data")' in source
+
+
+def test_action_view_removes_unsupported_action_branches():
+    """详情操作接口不再提供撤回、管理员指派、重试解析等旧动作。"""
+    import inspect
+    from services.ticket import views
+
+    source = inspect.getsource(views.action_view)
+    for action in ("withdraw", "assign", "retry_resolve"):
+        assert f'action == "{action}"' not in source
 
 
 def test_engine_imports_successfully():
@@ -87,54 +97,31 @@ def test_callback_playbook_function_exists():
     assert 'approval_status' in source
 
 
-# ==================== withdraw 权限与状态 ====================
+# ==================== removed legacy actions ====================
 
-def test_withdraw_permission_check():
-    """withdraw 只能由提单人执行（非剧本工单）"""
+def test_withdraw_is_not_a_supported_detail_action():
+    """撤回已从详情操作集合移除。"""
     ticket = make_ticket(status=TICKET_STATUS_PROCESSING, source=0)
 
-    # 验证条件：提单人 + 非剧本 + 处理中
     assert is_ticket_creator(ticket, "acc-creator") is True
     assert is_ticket_creator(ticket, "other_user") is False
     assert ticket.source != SOURCE_PLAYBOOK
-    assert ticket.status == TICKET_STATUS_PROCESSING
+    assert "withdraw" not in {"approve", "reject", "force_close", "return", "urge", "transfer", "add_approver"}
 
 
 def test_withdraw_forbidden_for_playbook_source():
-    """剧本触发的工单不允许撤回"""
+    """剧本触发的工单不允许撤回。"""
     ticket = make_ticket(status=TICKET_STATUS_PROCESSING, source=SOURCE_PLAYBOOK)
 
-    # 即使是提单人也不能撤回剧本工单
     assert is_ticket_creator(ticket, "acc-creator") is True
     assert ticket.source == SOURCE_PLAYBOOK
 
 
 def test_withdraw_forbidden_for_terminal_ticket():
-    """终态工单不能撤回"""
+    """终态工单不包含撤回动作。"""
     for terminal_status in [TICKET_STATUS_COMPLETED, TICKET_STATUS_REJECTED, TICKET_STATUS_WITHDRAWN]:
         ticket = make_ticket(status=terminal_status, source=0)
         assert ticket.status in [TICKET_STATUS_COMPLETED, TICKET_STATUS_REJECTED, TICKET_STATUS_WITHDRAWN]
-
-
-@pytest.mark.asyncio
-async def test_withdraw_records_activity(monkeypatch):
-    """withdraw 成功后应记录 activity"""
-    ticket = make_ticket(status=TICKET_STATUS_PROCESSING, source=0)
-
-    record_activity_calls = []
-
-    async def mock_record_activity(ticket, action, actor_id=None, connection=None, **kwargs):
-        record_activity_calls.append({'action': action, 'actor_id': actor_id})
-
-    monkeypatch.setattr(engine, 'record_activity', mock_record_activity)
-
-    # 模拟 withdraw 逻辑
-    ticket.status = TICKET_STATUS_WITHDRAWN
-    await ticket.save()
-    await engine.record_activity(ticket, 'withdraw', actor_id='acc-creator', connection=None)
-
-    assert len(record_activity_calls) == 1
-    assert record_activity_calls[0]['action'] == 'withdraw'
 
 
 # ==================== urge 限流与权限 ====================
@@ -174,20 +161,37 @@ async def test_return_requires_current_approver():
 
 
 @pytest.mark.asyncio
-async def test_return_target_validation(monkeypatch):
-    """return 目标节点必须存在且已执行过"""
-    # 目标节点不存在 -> 应抛出异常
-    historical_node = None
+async def test_return_target_must_be_before_current_node(monkeypatch):
+    """return 目标必须是当前活跃节点之前的已执行节点。"""
+    ticket = make_ticket(
+        flow_json={
+            "nodes": [
+                {"id": "start", "type": "start"},
+                {"id": "n1", "type": "approve"},
+                {"id": "n2", "type": "approve"},
+                {"id": "n3", "type": "approve"},
+            ]
+        }
+    )
+    previous = make_node("n1", status=NODE_STATUS_APPROVED)
+    current = make_node("n2", status=NODE_STATUS_PENDING)
+    later = make_node("n3", status=NODE_STATUS_APPROVED)
 
-    def mock_filter(**kw):
-        return FakeQuery([historical_node] if historical_node else [])
+    def node_filter(**kwargs):
+        if kwargs.get("status") == NODE_STATUS_RUNNING:
+            return FakeQuery([])
+        return FakeQuery([previous, current, later])
 
-    monkeypatch.setattr("models.ticket.TicketNodeInstance.filter", mock_filter)
+    monkeypatch.setattr(engine.TicketNodeInstance, "filter", node_filter)
+    monkeypatch.setattr(
+        engine.TicketFlowVersion,
+        "filter",
+        lambda **_kwargs: FakeQuery([SimpleNamespace(flow_json=ticket._flow_json)]),
+    )
+    monkeypatch.setattr(engine, "activate_nodes", lambda *args, **kwargs: None)
 
-    # 模拟 return_to_node 的校验逻辑
     with pytest.raises(CustomError) as exc:
-        if historical_node is None:
-            raise CustomError(ErrorCode.TICKET_RETURN_TARGET_INVALID)
+        await engine.return_to_node(ticket, "n3", "approver1", connection=object())
 
     assert exc.value.enum is ErrorCode.TICKET_RETURN_TARGET_INVALID
 
@@ -221,36 +225,6 @@ def test_force_close_callback_decision_mapping():
     assert 2 in (1, 2)
 
 
-# ==================== assign 管理员指定审批人 ====================
-
-def test_assign_requires_admin():
-    """assign 需要管理员权限"""
-    assert callable(is_ticket_admin)
-
-
-@pytest.mark.asyncio
-async def test_assign_calls_change_node_approvers(monkeypatch):
-    """assign 应调用 change_node_approvers with operation='assign_approver'"""
-    ticket = make_ticket()
-    node = make_node("n1", status=NODE_STATUS_PENDING)
-
-    change_calls = []
-
-    async def mock_change(ticket, node, operation, target_ids, actor_id=None, connection=None):
-        change_calls.append({'operation': operation, 'target_ids': target_ids})
-        return target_ids
-
-    monkeypatch.setattr(engine, 'change_node_approvers', mock_change)
-
-    # 模拟 assign 逻辑
-    await engine.change_node_approvers(
-        ticket, node, "assign_approver", ["user1"], actor_id="admin1", connection=None
-    )
-
-    assert len(change_calls) == 1
-    assert change_calls[0]['operation'] == 'assign_approver'
-
-
 # ==================== 通用场景 ====================
 
 def test_terminal_ticket_status_check():
@@ -277,7 +251,7 @@ def test_available_actions_for_terminal_ticket():
 
 
 def test_available_actions_for_creator():
-    """提单人有 withdraw 和 urge 权限（非剧本工单）"""
+    """提单人有 urge 权限（非剧本工单）。"""
     ticket = make_ticket(status=TICKET_STATUS_PROCESSING, source=0)
     session = {
         "tenant_id": "tenant-1",
@@ -286,8 +260,8 @@ def test_available_actions_for_creator():
 
     actions = compute_available_actions(ticket, set(), set(), "acc-creator", session)
 
-    # 提单人应该有 withdraw 和 urge
-    assert "withdraw" in actions
+    # 撤回已删除，提单人仍可催办
+    assert "withdraw" not in actions
     assert "urge" in actions
 
 
@@ -410,113 +384,6 @@ async def test_callback_playbook_approval_status_guard(monkeypatch):
         await _callback_playbook(ticket, 3, "user1", {"decision": "other"})
 
     assert exc.value.enum is ErrorCode.PARAM_ERROR
-
-
-# ==================== retry_resolve 重试审批人解析 ====================
-#
-# 该分支修复的缺陷：permissions.py 对挂起工单下发 "retry_resolve"，但
-# views.py 的 action 分发链原先没有对应分支，请求会落到末尾的
-# `raise CustomError(ErrorCode.PARAM_ERROR)`，管理员点「重试」必然报错。
-# 下面的测试锁住成功/失败两条路径的最终状态与错误码。
-
-
-def _retry_env(monkeypatch, ticket, node, resolve_effect):
-    """装配 retry_resolve 所需的最小依赖，返回被调用记录。"""
-    from services.ticket import views
-
-    calls = {"resolve": 0, "activities": []}
-
-    class _Conn:
-        pass
-
-    class _Tx:
-        async def __aenter__(self):
-            return _Conn()
-
-        async def __aexit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(views, "in_transaction", lambda: _Tx())
-    monkeypatch.setattr(
-        views.TicketNodeInstance, "filter", lambda **kw: FakeQuery([node])
-    )
-    monkeypatch.setattr(views, "load_flow_json", lambda t: {
-        "nodes": [{"id": node.node_id, "type": "approve"}], "edges": [],
-    })
-
-    async def _resolve(_ticket, _node, _definition, _conn=None):
-        calls["resolve"] += 1
-        resolve_effect(_node)
-
-    async def _record(_ticket, action, **kw):
-        calls["activities"].append(action)
-
-    monkeypatch.setattr(views, "resolve_node_approvers", _resolve)
-    monkeypatch.setattr(views, "record_activity", _record)
-    return calls
-
-
-@pytest.mark.asyncio
-async def test_retry_resolve_success_restores_processing(monkeypatch):
-    """解析成功：节点回 pending，工单从挂起回处理中，且记了 retry_resolve 活动"""
-    from models.ticket import NODE_STATUS_ABNORMAL, TICKET_STATUS_SUSPENDED
-    from services.ticket import views
-
-    ticket = make_ticket(status=TICKET_STATUS_SUSPENDED)
-    node = make_node("ap1", status=NODE_STATUS_ABNORMAL)
-
-    # 解析成功 = 不把节点重新置为 abnormal
-    calls = _retry_env(monkeypatch, ticket, node, lambda n: None)
-
-    await views._retry_resolve(ticket, "tenant-1", "admin1")
-
-    assert calls["resolve"] == 1
-    assert node.status == NODE_STATUS_PENDING
-    assert ticket.status == TICKET_STATUS_PROCESSING
-    assert "retry_resolve" in calls["activities"]
-
-
-@pytest.mark.asyncio
-async def test_retry_resolve_failure_keeps_suspended(monkeypatch):
-    """解析再次失败：抛 TICKET_APPROVER_INVALID，工单仍挂起、节点仍异常"""
-    from models.ticket import NODE_STATUS_ABNORMAL, TICKET_STATUS_SUSPENDED
-    from services.ticket import views
-
-    ticket = make_ticket(status=TICKET_STATUS_SUSPENDED)
-    node = make_node("ap1", status=NODE_STATUS_ABNORMAL)
-
-    def _fail(n):
-        # 复刻 engine.mark_node_abnormal 的效果
-        n.status = NODE_STATUS_ABNORMAL
-
-    calls = _retry_env(monkeypatch, ticket, node, _fail)
-
-    with pytest.raises(CustomError) as exc:
-        await views._retry_resolve(ticket, "tenant-1", "admin1")
-
-    assert exc.value.enum is ErrorCode.TICKET_APPROVER_INVALID
-    assert calls["resolve"] == 1
-    assert node.status == NODE_STATUS_ABNORMAL
-    # 失败不得把工单改回处理中
-    assert ticket.status == TICKET_STATUS_SUSPENDED
-
-
-@pytest.mark.asyncio
-async def test_retry_resolve_without_abnormal_node(monkeypatch):
-    """没有异常节点时抛 TICKET_NODE_NOT_ACTIVE，不触碰工单状态"""
-    from models.ticket import TICKET_STATUS_SUSPENDED
-    from services.ticket import views
-
-    ticket = make_ticket(status=TICKET_STATUS_SUSPENDED)
-    monkeypatch.setattr(
-        views.TicketNodeInstance, "filter", lambda **kw: FakeQuery([])
-    )
-
-    with pytest.raises(CustomError) as exc:
-        await views._retry_resolve(ticket, "tenant-1", "admin1")
-
-    assert exc.value.enum is ErrorCode.TICKET_NODE_NOT_ACTIVE
-    assert ticket.status == TICKET_STATUS_SUSPENDED
 
 
 def test_is_ticket_admin_is_not_a_coroutine():

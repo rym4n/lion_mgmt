@@ -62,12 +62,12 @@ def compute_available_actions(
     Args:
         ticket: Ticket 实例
         active_approver_ids: 当前活跃节点的审批人并集
-        all_approver_ids: 全部节点 (含历史) 的审批人并集,用于 comment/attachment 判定
+        all_approver_ids: 保留参数以兼容详情权限计算调用方
         user_id: 当前用户 id
         session: request.ctx.session
 
     Returns:
-        action 列表，如 ["approve", "reject", "transfer", "comment"]
+        action 列表，如 ["approve", "reject", "transfer", "return"]
     """
     actions = []
 
@@ -81,32 +81,21 @@ def compute_available_actions(
     # 异常挂起态只对管理员开放
     if ticket.status == TICKET_STATUS_SUSPENDED:
         if is_admin:
-            return ["retry_resolve", "assign_approver", "force_close"]
+            return ["force_close"]
         return []
 
     # 管理员特权操作
     if is_admin:
-        actions.extend(["force_close", "assign"])
+        actions.append("force_close")
 
-    # 提单人操作（剧本触发的工单禁止撤回）
+    # 提单人可催办；剧本工单同样禁止用户侧撤回（撤回已不再是详情操作）。
     if is_creator and ticket.source != SOURCE_PLAYBOOK:
-        actions.extend(["withdraw", "urge"])
+        actions.append("urge")
 
     # 当前审批人操作
     is_active_approver = user_id in active_approver_ids if user_id else False
     if is_active_approver:
         actions.extend(["approve", "reject", "transfer", "return", "add_approver"])
-
-    # 评论与附件：任一相关人（提单人、任一节点审批人含历史、管理员），且工单非终态
-    is_any_approver = user_id in all_approver_ids if user_id else False
-    if is_creator or is_any_approver or is_admin:
-        actions.extend(["comment", "attachment"])
-
-    # 关联工单：具 ticket:u 且对该流程有 u 权限（流程级权限在外层校验）
-    account = session.get("account_info")
-    tenant_id = session.get("tenant_id")
-    if account_has_permission(account, "ticket:u", tenant_id=tenant_id):
-        actions.append("link")
 
     # 去重并返回
     return list(dict.fromkeys(actions))

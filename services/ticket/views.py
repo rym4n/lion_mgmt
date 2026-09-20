@@ -15,13 +15,11 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import (
-    account_has_permission,
     check_ticket_flow_permission,
     requires_permission,
     ticket_flow_permission,
 )
 from models.ticket import (
-    NODE_STATUS_ABNORMAL,
     NODE_STATUS_PENDING,
     NODE_STATUS_RUNNING,
     SOURCE_AGENT,
@@ -29,7 +27,6 @@ from models.ticket import (
     SOURCE_PLAYBOOK,
     TICKET_STATUS_FORCE_CLOSED,
     TICKET_STATUS_PROCESSING,
-    TICKET_STATUS_WITHDRAWN,
     TICKET_TERMINAL_STATUSES,
     Ticket,
     TicketActivity,
@@ -42,12 +39,8 @@ from models.user import Account
 from services.digital_employee.lion_agent_adapter import chat_with_agent
 from services.ticket.engine import (
     advance_ticket,
-    can_transition_ticket,
     change_node_approvers,
-    load_flow_json,
     record_activity,
-    resolve_node_approvers,
-    _node_def,
 )
 from services.ticket.flow_package import (
     active_snapshot,
@@ -284,6 +277,10 @@ async def detail_view(request: Request, ticket_id: str):
     if ticket is None:
         raise CustomError(ErrorCode.TICKET_NOT_FOUND)
 
+    type_names, _, creator_names = await _ticket_list_relation_names(
+        [ticket], tenant_id
+    )
+
     nodes = await TicketNodeInstance.filter(
         ticket_id=ticket.id, tenant_id=tenant_id, deleted=False
     ).prefetch_related("approvers").order_by("ctime").all()
@@ -317,6 +314,8 @@ async def detail_view(request: Request, ticket_id: str):
     return response_ok(
         {
             **ticket.json,
+            "ticket_type_name": type_names.get(ticket.ticket_type_id, ""),
+            "creator_name": creator_names.get(ticket.creator_id, ""),
             "flow_json": _flow_json_for_ticket(ticket),
             "form_schema": form_schema if isinstance(form_schema, (dict, list)) else {},
             "nodes": [n.json for n in nodes],
@@ -368,7 +367,7 @@ async def list_view(request: Request):
         size = min(int(request.args.get("size", 20)), 100)
     except (TypeError, ValueError):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if view not in ("my_todo", "my_apply", "my_history", "all", "link_search"):
+    if view not in ("my_todo", "my_apply", "my_history", "all"):
         raise CustomError(ErrorCode.PARAM_ERROR)
     if not tenant_id or not user_id or page < 1 or size < 1:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -419,20 +418,6 @@ async def list_view(request: Request):
     elif view == "all":
         # 全部工单：需要 ticket:all 权限
         if not is_ticket_admin(session):
-            raise CustomError(ErrorCode.TICKET_PERM_DENIED)
-        query = query.order_by("-ctime")
-
-    elif view == "link_search":
-        # 关联工单选择器专用：关联动作本身只要 ticket:u（见 permissions.py
-        # compute_available_actions 与 link_add_view），若这里沿用 all 的
-        # ticket:all 门槛，非管理员搜不到任何工单，关联功能形同虚设。
-        # 放宽到 ticket:u，仍限本租户，且响应只含单号/标题/状态/类型，
-        # 不暴露表单内容与审批意见。
-        if not account_has_permission(
-            session.get("account_info"),
-            "ticket:u",
-            tenant_id=tenant_id,
-        ):
             raise CustomError(ErrorCode.TICKET_PERM_DENIED)
         query = query.order_by("-ctime")
 
@@ -549,7 +534,7 @@ async def todolist_view(request: Request):
 @ticket_bp.post("/action")
 @openapi.definition(
     summary="工单操作统一入口",
-    description="九种操作：approve/reject/transfer/return/add_approver/withdraw/urge/force_close/assign",
+    description="七种操作：approve/reject/transfer/return/add_approver/urge/force_close",
     body={
         "application/json": {
             "schema": {
@@ -665,62 +650,6 @@ async def action_view(request: Request):
         )
         return response_ok({"message": "操作成功"})
 
-    # assign：管理员给异常挂起节点手工指定审批人
-    if action == "assign":
-        if not is_ticket_admin(session):
-            raise CustomError(ErrorCode.TICKET_ADMIN_ONLY)
-
-        target_user_ids = payload.get("target_user_ids") or []
-        if not target_user_ids or not node_instance_id:
-            raise CustomError(ErrorCode.PARAM_ERROR)
-
-        node = await TicketNodeInstance.filter(
-            id=node_instance_id, tenant_id=tenant_id, deleted=False
-        ).prefetch_related("approvers").first()
-        if node is None:
-            raise CustomError(ErrorCode.TICKET_NODE_NOT_ACTIVE)
-
-        from tortoise.transactions import in_transaction
-
-        async with in_transaction() as conn:
-            await change_node_approvers(
-                ticket, node, "assign_approver", target_user_ids, actor_id=user_id, connection=conn
-            )
-            # 成功后节点回 pending，工单回 processing
-            node.status = NODE_STATUS_PENDING
-            await node.save(using_db=conn)
-            ticket.status = TICKET_STATUS_PROCESSING
-            await ticket.save(using_db=conn)
-
-        await _push_pending_after_commit(
-            tenant_id,
-            ticket.id,
-            previous_user_ids | _approver_ids([node]),
-        )
-        return response_ok({"message": "操作成功"})
-
-    # withdraw：撤回工单
-    if action == "withdraw":
-        # 校验：提单人 && 非剧本触发 && 处理中
-        if ticket.creator_id != user_id:
-            raise CustomError(ErrorCode.TICKET_PERM_DENIED)
-        if ticket.source == SOURCE_PLAYBOOK:
-            raise CustomError(ErrorCode.TICKET_WITHDRAW_FORBIDDEN)
-        if ticket.status != TICKET_STATUS_PROCESSING:
-            raise CustomError(ErrorCode.TICKET_ALREADY_CLOSED)
-
-        from tortoise.transactions import in_transaction
-        async with in_transaction() as conn:
-            ticket.status = TICKET_STATUS_WITHDRAWN
-            await ticket.save(using_db=conn)
-            await record_activity(
-                ticket, "withdraw", actor_id=user_id, connection=conn
-            )
-        await _push_pending_after_commit(
-            tenant_id, ticket.id, previous_user_ids
-        )
-        return response_ok({"message": "撤回成功"})
-
     # return：退回指定节点
     if action == "return":
         return_target = payload.get("return_target")  # "creator" 或 node_id
@@ -806,67 +735,10 @@ async def action_view(request: Request):
                 approval_result={"decision": callback_decision, "comment": comment},
             )
 
-        return response_ok({"message": "强制关闭成功"})
-
-    # retry_resolve：管理员重试异常挂起节点的审批人解析
-    # 挂起的成因都在 engine.resolve_node_approvers：动态取值动作抛异常、
-    # 未解析出候选、候选全部无效。重试即按工单钉住的流程定义重跑这段解析。
-    if action == "retry_resolve":
-        if not is_ticket_admin(session):
-            raise CustomError(ErrorCode.TICKET_ADMIN_ONLY)
-        response = await _retry_resolve(ticket, tenant_id, user_id)
-        await _push_pending_after_commit(
-            tenant_id, ticket.id, previous_user_ids
-        )
-        return response
+        return response_ok({"message": "关闭成功"})
 
     # 未知操作
     raise CustomError(ErrorCode.PARAM_ERROR)
-
-
-async def _retry_resolve(ticket, tenant_id: str, actor_id: str):
-    """重试异常挂起节点的审批人解析（仅管理员，调用方已校验权限）。
-
-    挂起的成因都在 engine.resolve_node_approvers：动态取值动作抛异常、
-    未解析出候选、候选全部无效。重试即按工单钉住的流程定义重跑这段解析。
-    """
-    # 不额外校验工单状态：非挂起工单不存在异常节点，下面的查询即可兜底。
-    node = await TicketNodeInstance.filter(
-        ticket_id=ticket.id, tenant_id=tenant_id, deleted=False,
-        status=NODE_STATUS_ABNORMAL,
-    ).first()
-    if node is None:
-        raise CustomError(ErrorCode.TICKET_NODE_NOT_ACTIVE)
-
-    flow_json = load_flow_json(ticket)
-    definition = _node_def(flow_json, node.node_id)
-    if not definition:
-        raise CustomError(ErrorCode.TICKET_FLOW_VALIDATE_FAILED)
-
-    async with in_transaction() as conn:
-        # 先回 pending：resolve_node_approvers 内部若再次失败会调
-        # mark_node_abnormal，而它的 can_transition_node 只允许 0→5。
-        node.status = NODE_STATUS_PENDING
-        await node.save(update_fields=["status", "utime"], using_db=conn)
-        await record_activity(
-            ticket, "retry_resolve", actor_id=actor_id,
-            content="重试审批人解析", node_instance=node,
-            payload={"node_id": node.node_id}, connection=conn,
-        )
-        await resolve_node_approvers(ticket, node, definition, conn)
-        # resolve 失败会把节点重新置为 abnormal，这里据最终态判断成败。
-        # 不回滚事务：失败时 mark_node_abnormal 记的 exception 活动
-        # 正是管理员判断下一步的依据，必须落库。
-        retry_ok = node.status != NODE_STATUS_ABNORMAL
-        if retry_ok and can_transition_ticket(
-            ticket.status, TICKET_STATUS_PROCESSING
-        ):
-            ticket.status = TICKET_STATUS_PROCESSING
-            await ticket.save(update_fields=["status", "utime"], using_db=conn)
-
-    if not retry_ok:
-        raise CustomError(ErrorCode.TICKET_APPROVER_INVALID)
-    return response_ok({"message": "重试成功"})
 
 
 async def _callback_playbook(ticket, approval_status: int, executor: str | None, results: dict) -> None:
@@ -880,41 +752,6 @@ async def _callback_playbook(ticket, approval_status: int, executor: str | None,
         approval_result=results,
         approval_status=approval_status,
     )
-
-
-@ticket_bp.post("/comment")
-@openapi.definition(summary="添加评论", description="写入 TicketActivity")
-@requires_permission("ticket:u")
-async def comment_view(request: Request):
-    tenant_id = request.ctx.session.get("tenant_id")
-    user_id = request.ctx.session.get("sub")
-
-    payload = request.json or {}
-    ticket_id = payload.get("ticket_id")
-    content = payload.get("content", "").strip()
-
-    if not ticket_id or not content:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    ticket = await Ticket.filter(
-        id=ticket_id, tenant_id=tenant_id, deleted=False
-    ).first()
-    if ticket is None:
-        raise CustomError(ErrorCode.TICKET_NOT_FOUND)
-
-    from models.ticket import TICKET_TERMINAL_STATUSES
-    if ticket.status in TICKET_TERMINAL_STATUSES:
-        raise CustomError(ErrorCode.TICKET_ALREADY_CLOSED)
-
-    await TicketActivity.create(
-        tenant_id=tenant_id,
-        ticket_id=ticket.id,
-        actor_id=user_id,
-        action="comment",
-        content=content,
-        payload={},
-    )
-    return response_ok({"message": "评论已添加"})
 
 
 # ============================================================================
@@ -1849,134 +1686,3 @@ async def callback_view(request: Request):
         ticket.tenant_id, ticket.id, previous_user_ids
     )
     return response_ok()
-
-
-# ============================================================================
-# 附件与关联
-# ============================================================================
-
-@ticket_bp.post("/attachment/upload")
-@openapi.definition(summary="上传附件")
-@requires_permission("ticket:u")
-async def attachment_upload_view(request: Request):
-    tenant_id = request.ctx.session.get("tenant_id")
-    user_id = request.ctx.session.get("sub")
-
-    ticket_id = request.form.get("ticket_id")
-    file = request.files.get("file")
-
-    if not ticket_id or not file:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    ticket = await Ticket.filter(
-        id=ticket_id, tenant_id=tenant_id, deleted=False
-    ).first()
-    if ticket is None:
-        raise CustomError(ErrorCode.TICKET_NOT_FOUND)
-
-    # 上传到 S3/MinIO
-    from libs.utils import upload_to_s3
-    from settings import RY_USER_BUCKET
-    import uuid
-
-    file_id = str(uuid.uuid4())
-    file_key = f"{tenant_id}/{ticket_id}/{file_id}-{file.name}"
-
-    await upload_to_s3(file.body, RY_USER_BUCKET, file_key, "ticket_attachments")
-
-    # 记录附件
-    from models.ticket import TicketAttachment
-    attachment = await TicketAttachment.create(
-        tenant_id=tenant_id,
-        ticket_id=ticket.id,
-        file_name=file.name,
-        file_key=file_key,
-        file_size=len(file.body),
-        uploader_id=user_id,
-    )
-
-    return response_ok(attachment.json)
-
-
-@ticket_bp.post("/attachment/delete")
-@openapi.definition(summary="删除附件（软删除）")
-@requires_permission("ticket:u")
-async def attachment_delete_view(request: Request):
-    tenant_id = request.ctx.session.get("tenant_id")
-    from models.ticket import TicketAttachment
-
-    payload = request.json or {}
-    attachment_id = payload.get("id")
-    if not attachment_id:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    attachment = await TicketAttachment.filter(
-        id=attachment_id, tenant_id=tenant_id, deleted=False
-    ).first()
-    if attachment is None:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    attachment.deleted = True
-    await attachment.save()
-    return response_ok({"message": "删除成功"})
-
-
-@ticket_bp.post("/link/add")
-@openapi.definition(summary="关联工单")
-@requires_permission("ticket:u")
-async def link_add_view(request: Request):
-    tenant_id = request.ctx.session.get("tenant_id")
-    from models.ticket import TicketLink
-
-    payload = request.json or {}
-    ticket_id = payload.get("ticket_id")
-    linked_ticket_id = payload.get("linked_ticket_id")
-
-    if not ticket_id or not linked_ticket_id:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    # 检查自身关联
-    if ticket_id == linked_ticket_id:
-        raise CustomError(ErrorCode.TICKET_LINK_INVALID)
-
-    # 检查是否已关联
-    existing = await TicketLink.filter(
-        tenant_id=tenant_id,
-        deleted=False,
-    ).filter(
-        Q(from_ticket_id=ticket_id, to_ticket_id=linked_ticket_id)
-        | Q(from_ticket_id=linked_ticket_id, to_ticket_id=ticket_id)
-    ).first()
-    if existing:
-        raise CustomError(ErrorCode.TICKET_LINK_INVALID)
-
-    # 双向写入（存一行但两个方向都要查询）
-    link = await TicketLink.create(
-        tenant_id=tenant_id,
-        from_ticket_id=ticket_id,
-        to_ticket_id=linked_ticket_id,
-    )
-    return response_ok(link.json)
-
-
-@ticket_bp.post("/link/remove")
-@openapi.definition(summary="移除关联")
-@requires_permission("ticket:u")
-async def link_remove_view(request: Request):
-    tenant_id = request.ctx.session.get("tenant_id")
-    from models.ticket import TicketLink
-
-    payload = request.json or {}
-    link_id = payload.get("id")
-    if not link_id:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    link = await TicketLink.filter(
-        id=link_id, tenant_id=tenant_id, deleted=False
-    ).first()
-    if link is None:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    link.deleted = True
-    await link.save()
-    return response_ok({"message": "移除成功"})

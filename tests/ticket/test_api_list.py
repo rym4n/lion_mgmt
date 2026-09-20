@@ -210,6 +210,10 @@ async def _list(request):
     return await unwrap(views.list_view)(request)
 
 
+async def _detail(request, ticket_id):
+    return await unwrap(views.detail_view)(request, ticket_id)
+
+
 async def _todolist(request):
     return await unwrap(views.todolist_view)(request)
 
@@ -353,15 +357,13 @@ async def test_all_returns_tenant_rows_when_authorized(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_link_search_accepts_ticket_update_permission(monkeypatch):
-    ticket_model = ModelStub([_ticket("linkable")])
-    monkeypatch.setattr(views, "Ticket", ticket_model)
+async def test_link_search_is_rejected_after_link_feature_removal(monkeypatch):
+    monkeypatch.setattr(views, "Ticket", ModelStub([]))
 
-    body = _payload(
+    with pytest.raises(CustomError) as exc:
         await _list(_request({"view": "link_search"}, permissions=("ticket:u",)))
-    )
 
-    assert [item["id"] for item in body["data"]["data"]] == ["linkable"]
+    assert exc.value.enum is ErrorCode.PARAM_ERROR
 
 
 @pytest.mark.asyncio
@@ -488,6 +490,36 @@ async def test_list_loads_related_names_in_batches_with_tenant_filters(monkeypat
         assert len(_filter_kwargs(model.calls)) == 1
         assert _filter_kwargs(model.calls)[0]["tenant_id"] == "tenant-1"
         assert _filter_kwargs(model.calls)[0]["deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_detail_returns_related_type_and_creator_names(monkeypatch):
+    ticket = _ticket("detail", creator_id="user-1")
+    ticket.ticket_type_id = "type-1"
+    ticket.flow_version_id = "ver-1"
+    ticket.json["ticket_type_id"] = ticket.ticket_type_id
+    ticket.json["flow_version_id"] = ticket.flow_version_id
+    ticket_model = ModelStub([ticket])
+    node_model = ModelStub([])
+    activity_model = ModelStub([])
+    monkeypatch.setattr(views, "Ticket", ticket_model)
+    monkeypatch.setattr(views, "TicketNodeInstance", node_model)
+    monkeypatch.setattr(views, "TicketActivity", activity_model)
+    monkeypatch.setattr(
+        views,
+        "TicketType",
+        ValuesModelStub([SimpleNamespace(id="type-1", name="变更")]),
+    )
+    monkeypatch.setattr(
+        views,
+        "Account",
+        ValuesModelStub([SimpleNamespace(id="user-1", display_name="申请人")]),
+    )
+
+    body = _payload(await _detail(_request(), "detail"))
+
+    assert body["data"]["ticket_type_name"] == "变更"
+    assert body["data"]["creator_name"] == "申请人"
 
 
 @pytest.mark.asyncio

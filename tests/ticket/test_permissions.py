@@ -127,7 +127,7 @@ def test_compute_available_actions_for_suspended_ticket_admin(mock_session_admin
 
     with patch("services.ticket.permissions.is_ticket_admin", return_value=True):
         actions = compute_available_actions(ticket, set(), set(), "admin-id", mock_session_admin)
-        assert set(actions) == {"retry_resolve", "assign_approver", "force_close"}
+        assert set(actions) == {"force_close"}
 
 
 def test_compute_available_actions_for_suspended_ticket_user(mock_session_user):
@@ -142,8 +142,8 @@ def test_compute_available_actions_for_suspended_ticket_user(mock_session_user):
         assert actions == []
 
 
-def test_compute_available_actions_for_creator_can_withdraw(mock_session_user):
-    """提单人可以撤回（非剧本触发）。"""
+def test_compute_available_actions_for_creator_can_urge(mock_session_user):
+    """提单人可以催办（非剧本触发）。"""
     from unittest.mock import MagicMock, patch
     ticket = MagicMock()
     ticket.status = TICKET_STATUS_PROCESSING
@@ -153,7 +153,7 @@ def test_compute_available_actions_for_creator_can_withdraw(mock_session_user):
     with patch("services.ticket.permissions.is_ticket_admin", return_value=False):
         with patch("services.ticket.permissions.account_has_permission", return_value=False):
             actions = compute_available_actions(ticket, set(), set(), "user-id", mock_session_user)
-            assert "withdraw" in actions
+            assert "withdraw" not in actions
             assert "urge" in actions
 
 
@@ -172,8 +172,8 @@ def test_compute_available_actions_for_creator_cannot_withdraw_playbook(mock_ses
             assert "urge" not in actions
 
 
-def test_compute_available_actions_grants_link_from_current_tenant_permission():
-    """ticket:u from the current tenant enables the link action."""
+def test_compute_available_actions_does_not_grant_link_from_current_tenant_permission():
+    """关联工单已删除，不再从租户权限产生 link 动作。"""
     account = SimpleNamespace(
         id="user-id",
         roles=[
@@ -197,7 +197,7 @@ def test_compute_available_actions_grants_link_from_current_tenant_permission():
 
     actions = compute_available_actions(ticket, set(), set(), "user-id", session)
 
-    assert "link" in actions
+    assert "link" not in actions
 
 
 def test_compute_available_actions_for_approver(mock_session_user):
@@ -225,7 +225,7 @@ def test_compute_available_actions_for_approver(mock_session_user):
 
 
 def test_compute_available_actions_admin_privileges(mock_session_admin):
-    """管理员拥有强制关闭与指派权限。"""
+    """管理员拥有关闭权限，但不再有旧的手工指派入口。"""
     from unittest.mock import MagicMock, patch
 
     ticket = MagicMock()
@@ -237,7 +237,33 @@ def test_compute_available_actions_admin_privileges(mock_session_admin):
         with patch("services.ticket.permissions.account_has_permission", return_value=True):
             actions = compute_available_actions(ticket, set(), set(), "admin-id", mock_session_admin)
             assert "force_close" in actions
-            assert "assign" in actions
+            assert "assign" not in actions
+
+
+def test_compute_available_actions_exposes_only_supported_detail_actions(mock_session_admin):
+    """详情页只允许审批直达按钮和五个更多操作。"""
+    from unittest.mock import MagicMock, patch
+
+    ticket = MagicMock()
+    ticket.status = TICKET_STATUS_PROCESSING
+    ticket.creator_id = "admin-id"
+    ticket.source = SOURCE_MANUAL
+
+    with patch("services.ticket.permissions.is_ticket_admin", return_value=True):
+        with patch("services.ticket.permissions.account_has_permission", return_value=True):
+            actions = compute_available_actions(
+                ticket, {"admin-id"}, {"admin-id"}, "admin-id", mock_session_admin
+            )
+
+    assert set(actions) == {
+        "approve",
+        "reject",
+        "force_close",
+        "return",
+        "urge",
+        "transfer",
+        "add_approver",
+    }
 
 
 # ---------- Task 2: 新增测试暴露两个缺陷 ----------
@@ -274,12 +300,8 @@ def test_approver_detection_does_not_depend_on_tortoise_internals(mock_session_u
             assert "transfer" in actions
 
 
-def test_historical_approver_can_comment_and_attach(mock_session_user):
-    """历史节点审批人也能评论和上传附件。
-
-    缺陷二: comment/attachment 权限只检查当前审批人,遗漏历史审批人。
-    SPEC §7.1 要求: 任一节点审批人(含历史)都能 comment/attachment。
-    """
+def test_historical_approver_has_no_removed_comment_or_attachment_actions(mock_session_user):
+    """评论和附件入口已删除，历史审批人也不再得到这些动作。"""
     from unittest.mock import MagicMock, patch
 
     ticket = MagicMock()
@@ -297,8 +319,7 @@ def test_historical_approver_can_comment_and_attach(mock_session_user):
                 ticket, active_approver_ids, all_approver_ids, "user-id", mock_session_user
             )
 
-            # 期望: 历史审批人应该能评论和上传附件
-            assert "comment" in actions, "历史审批人应该能评论"
-            assert "attachment" in actions, "历史审批人应该能上传附件"
+            assert "comment" not in actions
+            assert "attachment" not in actions
             # 但不能执行审批操作(因为不在 active_approver_ids 中)
             assert "approve" not in actions, "历史审批人不应能审批当前节点"

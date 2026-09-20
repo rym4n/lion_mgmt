@@ -945,19 +945,32 @@ async def return_to_node(ticket, return_target, actor_id, connection):
             raise CustomError(ErrorCode.TICKET_FLOW_VALIDATE_FAILED)
         target_node_ids = [start_node["id"]]
     else:
-        # 退回指定节点：校验该节点是否存在且已完成
+        # 退回指定节点：必须是当前流程中位于当前活跃节点之前的已执行节点。
         target_node_def = next((n for n in flow_json["nodes"] if n["id"] == return_target), None)
         if not target_node_def:
             raise CustomError(ErrorCode.TICKET_RETURN_TARGET_INVALID)
 
-        # 检查该节点是否曾被执行过（必须真取到，不要用 getattr 探测）
-        historical_node = await TicketNodeInstance.filter(
+        ordered_nodes = await TicketNodeInstance.filter(
             ticket_id=ticket.id,
-            node_id=return_target,
             tenant_id=ticket.tenant_id,
             deleted=False,
-        ).using_db(connection).first()
-        if historical_node is None or historical_node.status not in NODE_TERMINAL_STATUSES:
+        ).using_db(connection).order_by("ctime").all()
+        active_positions = [
+            index
+            for index, node in enumerate(ordered_nodes)
+            if node.status in (NODE_STATUS_PENDING, NODE_STATUS_RUNNING)
+        ]
+        target_positions = [
+            index
+            for index, node in enumerate(ordered_nodes)
+            if node.node_id == return_target
+            and node.status in NODE_TERMINAL_STATUSES
+        ]
+        if not target_positions or not active_positions:
+            raise CustomError(ErrorCode.TICKET_RETURN_TARGET_INVALID)
+        if not any(
+            target_index < min(active_positions) for target_index in target_positions
+        ):
             raise CustomError(ErrorCode.TICKET_RETURN_TARGET_INVALID)
 
         target_node_ids = [return_target]
