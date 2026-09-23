@@ -125,6 +125,7 @@ async def stream_prompt_events(
     request_id: str | None = None,
     memory: dict[str, Any] | None = None,
     cognee: dict[str, Any] | None = None,
+    knowledge: dict[str, Any] | None = None,
     aioe: dict[str, Any] | None = None,
     model: str | None = None,
     system_prompt: str | None = None,
@@ -139,6 +140,7 @@ async def stream_prompt_events(
         "attachments": attachments or [],
         "memory": memory,
         "cognee": cognee,
+        "knowledge": knowledge,
         "aioe": aioe,
         "execution_id": uuid.uuid4().hex,
     }

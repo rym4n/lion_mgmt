@@ -278,6 +278,27 @@ def test_stream_prompt_events_carries_memory():
     assert client.payloads[-1]["cognee"] is None
 
 
+def test_stream_prompt_events_carries_knowledge():
+    adapter, client = _load_adapter()
+    knowledge = {
+        "enabled": True,
+        "spaces": [{"key": "ops", "name": "运维知识", "writable": False}],
+    }
+
+    async def _drain():
+        async for _ in adapter.stream_prompt_events(
+            workspace_id="employee-1",
+            session_id="run-1",
+            message="check knowledge",
+            knowledge=knowledge,
+        ):
+            pass
+
+    asyncio.run(_drain())
+
+    assert client.payloads[-1]["knowledge"] == knowledge
+
+
 def test_stream_prompt_events_carries_runtime_attachments():
     adapter, client = _load_adapter()
     attachments = [
