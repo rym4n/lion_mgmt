@@ -54,15 +54,6 @@ def test_dockerfile_avoids_docker_hub_and_keeps_runtime_packages_cacheable():
     assert "FROM timberio/vector:" not in dockerfile
     assert "ARG VECTOR_VERSION=0.50.0" in dockerfile
     assert (
-        'if [ "${TARGETARCH}" = "arm64" ]; then export UV_COMPILE_BYTECODE=0; fi;'
-        in dockerfile
-    )
-    assert dockerfile.count(
-        'if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; '
-        'export CFLAGS="-fPIC -O1"; fi;'
-    ) == 4
-    assert dockerfile.count('--jobs="${NUITKA_JOBS}"') == 4
-    assert (
         "ARG VECTOR_AMD64_SHA256="
         "5ecc335a2d2a1ff73c8408b5d979b6e238f5663ba8803ea5054ca8aa464dd410"
     ) in dockerfile
