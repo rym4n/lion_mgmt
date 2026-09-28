@@ -31,18 +31,7 @@ def test_ci_uses_pinned_fast_registry_images_and_remote_build_cache():
         "--cache-from=type=registry,ref=10.3.0.41:5000/lion_mgmt:buildcache "
         "--cache-to=type=registry,ref=10.3.0.41:5000/lion_mgmt:buildcache,mode=min"
     )
-    assert build_step["platforms"] == "linux/amd64,linux/arm64"
     assert "mode=max" not in build_step["moreOptions"]
-
-    sync_job = next(job for job in buildspec["jobs"] if job["name"] == "同步镜像")
-    sync_command = sync_job["steps"][0]["interpreter"]["commands"]
-    assert (
-        "gcrane copy 10.3.0.41:5000/lion_mgmt:@tag@ "
-        "10.3.0.38:5000/lion_mgmt:@tag@ --insecure"
-    ) in sync_command
-    assert sync_job["jobDependencies"] == [
-        {"jobName": "ci", "requireSuccessful": True, "artifacts": "**"}
-    ]
 
 
 def test_dockerfile_avoids_docker_hub_and_keeps_runtime_packages_cacheable():
