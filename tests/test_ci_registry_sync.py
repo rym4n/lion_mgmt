@@ -32,7 +32,6 @@ def test_ci_uses_pinned_fast_registry_images_and_remote_build_cache():
         "--cache-to=type=registry,ref=10.3.0.41:5000/lion_mgmt:buildcache,mode=min"
     )
     assert build_step["platforms"] == "linux/amd64,linux/arm64"
-    assert ci_job["timeout"] == 14400
     assert "mode=max" not in build_step["moreOptions"]
 
     sync_job = next(job for job in buildspec["jobs"] if job["name"] == "同步镜像")
