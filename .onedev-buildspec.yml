@@ -94,7 +94,7 @@ jobs:
   retryDelay: 30
   includeUpstreamWhenRebuild: false
   includeDownstreamWhenRebuild: false
-  timeout: 1440
+  timeout: 14400
 - name: 同步镜像
   jobExecutor: tgy-deploy
   steps:
