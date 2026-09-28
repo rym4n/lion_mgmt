@@ -28,6 +28,7 @@ WORKDIR /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    if [ "${TARGETARCH}" = "arm64" ]; then export UV_COMPILE_BYTECODE=0; fi; \
     uv sync --frozen --no-install-project --no-dev
 
 COPY . ./
@@ -35,13 +36,21 @@ COPY . ./
 RUN sed -i "s|AIOE_LICENSE_KEY|$(cat LICKEY | tr -d '\n')|g" libs/utils.py
 
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
+    NUITKA_JOBS=4; \
+    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file core/
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
+    NUITKA_JOBS=4; \
+    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file libs/
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
+    NUITKA_JOBS=4; \
+    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file models/
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
+    NUITKA_JOBS=4; \
+    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file services/
 
 FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS runtime
 
