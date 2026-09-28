@@ -11,6 +11,7 @@ from tortoise.expressions import Q
 from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
+from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs.chat import chat_manager, get_or_create_private_chat_room
 from libs.error_code.exception import CustomError
@@ -1156,7 +1157,7 @@ async def get_list(request):
     messages = await MessageAccount.filter(account_id=account.id, status=0, tenant_id=tenant_id).offset(offset).limit(size).all().prefetch_related("message__sender")
     for message in messages:
         message_list.append(message.json)
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await current_maintenance_mode(request)
     if maintenance_mode:
         return response_ok({"message_list": message_list, "maintenance_mode": True, "count": count})
     return response_ok({"message_list": message_list, "maintenance_mode": False, "count": count})
@@ -1316,9 +1317,7 @@ async def run(request):
     if not params:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = await request.app.ctx.cache_client.get(
-        request.ctx.session["id"]
-    )
+    maintenance_mode = await current_maintenance_mode(request)
     if run_type == "action" and not await check_action_execute_permission(
         user,
         params.get("app_name"),
@@ -1462,7 +1461,7 @@ async def execution(request):
         params.get("action"),
         params.get("resource"),
         tenant_id,
-        bool(await request.app.ctx.cache_client.get(request.ctx.session["id"])),
+        await current_maintenance_mode(request),
         params.get("app_ver"),
     ):
         raise CustomError(ErrorCode.UNAUTH)

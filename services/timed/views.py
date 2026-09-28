@@ -10,6 +10,7 @@ from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
+from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
@@ -61,12 +62,11 @@ def _timed_name_filter_kwargs(name, tenant_id, internal):
 
 
 async def get_current_timed_internal_scope(request):
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    return _current_timed_internal_scope(maintenance_mode)
+    return await current_maintenance_mode(request)
 
 
 async def get_requested_timed_internal_scope(request):
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await current_maintenance_mode(request)
     return _timed_internal_scope_from_request((request.json or {}).get("scope"), maintenance_mode)
 
 
@@ -488,7 +488,7 @@ async def get_all(request):
     enable = req_json.get("enable")
     updator = (req_json.get("updator") or "").strip()
     utime = req_json.get("utime")
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await current_maintenance_mode(request)
 
     tenant_id = request.ctx.session.get("tenant_id")
 

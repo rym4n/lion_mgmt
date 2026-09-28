@@ -9,6 +9,7 @@ from sanic.request import Request
 from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
+from core.maintenance import effective_maintenance_mode, is_api_account
 from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
@@ -322,9 +323,10 @@ async def playbook_ids_for_user(account, tenant_id: str, permission: str = "r") 
     调用方应先判断 is_superadmin 走全量分支，本函数只负责普通用户按记录过滤。
     """
     if has_uncontrolled_playbook_permission(account, [permission], tenant_id):
-        pb_ids = await Playbook.filter(deleted=False, tenant_id=tenant_id).values_list(
-            "id", flat=True
-        )
+        pb_filters = {"deleted": False, "tenant_id": tenant_id}
+        if is_api_account(account):
+            pb_filters["internal"] = False
+        pb_ids = await Playbook.filter(**pb_filters).values_list("id", flat=True)
         return set(pb_ids)
 
     user_id = str(account.id) if account and getattr(account, "id", None) else None
@@ -461,6 +463,9 @@ async def check_action_execute_permission(
     - tool_name / action_func 缺失时直接判定失败——上层应保证参数完备再调用。
     - 命中条件复用 action_permission_hits：查 action_name 自身 + "all" 兜底两类 ActionPermissions。
     """
+    # API token accounts, including digital employee credentials, never execute
+    # against the maintenance application namespace even if a caller passes True.
+    maintenance_mode = effective_maintenance_mode(account, maintenance_mode)
     if not tool_name or not action_func:
         return False
     if tool_version and not await Tool.filter(
@@ -611,16 +616,27 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
     :return: bool 表示是否拥有权限
     """
     tenant_id = request.ctx.session.get("tenant_id")
+    playbook_ids = None
+    if is_api_account(user):
+        playbook_ids = await _candidate_permission_playbook_ids(playbook_id, tenant_id)
+        if await Playbook.filter(
+            id__in=playbook_ids,
+            tenant_id=tenant_id,
+            deleted=False,
+            internal=True,
+        ).exists():
+            return False
     if has_uncontrolled_playbook_permission(
         user, required_permissions, tenant_id=tenant_id
     ):
         return True
 
+    if playbook_ids is None:
+        playbook_ids = await _candidate_permission_playbook_ids(playbook_id, tenant_id)
+
     user_id = str(user.id)
     user_roles = set(str(role.id) for role in user.roles)
     data = await request.app.ctx.cache_client.get((playbook_id, user_id))
-
-    playbook_ids = await _candidate_permission_playbook_ids(playbook_id, tenant_id)
 
     if not data:
         if await _has_playbook_permission_record(

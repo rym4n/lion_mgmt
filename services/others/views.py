@@ -5,6 +5,7 @@ from sanic import response
 from sanic_ext import openapi
 
 from core.error_code import ErrorCode
+from core.maintenance import current_maintenance_mode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import (
@@ -72,9 +73,7 @@ async def playbook_list(request):
     offset = (page - 1) * size
 
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
 
     pvs = await PlaybookVersion.filter(
         deleted=False,
@@ -136,9 +135,7 @@ async def all_apps(request):
     offset = (page - 1) * size
 
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
 
     tools = await Tool.filter(
         deleted=False,

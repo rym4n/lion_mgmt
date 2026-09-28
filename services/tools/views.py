@@ -24,6 +24,7 @@ from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
+from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
@@ -388,8 +389,7 @@ def _as_bool(value, default=False):
 
 async def _current_maintenance_mode(request) -> bool:
     """Return the trusted application scope stored for the current session."""
-    value = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    return _as_bool(value, False)
+    return await current_maintenance_mode(request)
 
 
 async def _scoped_tool_pairs(tenant_id, maintenance_mode, tool_names=None):

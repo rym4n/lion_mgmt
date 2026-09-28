@@ -5,6 +5,7 @@ from sanic import Blueprint
 from sanic_ext import openapi
 
 from core.error_code import ErrorCode
+from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.chat import chat_manager, get_playbook_prompt_words, get_prompt_words
@@ -288,9 +289,7 @@ async def publish_msg(request):
 @requires_permission("warroom:r")
 async def get_prompt_word(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
 
     if request.json.get("ai_type") == "action":
         system_prompt, ai_dict, ai_desc = await get_prompt_words(
@@ -362,9 +361,7 @@ async def get_prompt_word(request):
 @requires_permission("warroom:r")
 async def get_tool_action(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
     tool_actions = await ToolAction.filter(id__in=request.json.get("data"), deleted=False, tenant_id=tenant_id).all()
     data = []
     for tool_action in tool_actions:
@@ -429,9 +426,7 @@ async def get_tool_action(request):
 @requires_permission("warroom:r")
 async def get_tool_info(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
 
     tool = await Tool.get_or_none(
         name=request.json.get("tool_name"),

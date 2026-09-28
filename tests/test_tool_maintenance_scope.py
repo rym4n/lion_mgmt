@@ -272,6 +272,68 @@ async def test_action_execution_rejects_version_from_other_mode(monkeypatch):
     assert allowed is False
 
 
+@pytest.mark.asyncio
+async def test_api_account_action_permission_forces_ordinary_mode(monkeypatch):
+    seen = []
+
+    async def requires_resource(tool_name, tenant_id, maintenance_mode=False):
+        seen.append((tool_name, tenant_id, maintenance_mode))
+        return False
+
+    monkeypatch.setattr(authorization, "tool_requires_resource", requires_resource)
+    account = SimpleNamespace(id="api-1", type="api", roles=[])
+
+    allowed = await authorization.check_action_execute_permission(
+        account,
+        "same_app",
+        "ordinary_action",
+        "",
+        "tenant-1",
+        True,
+    )
+
+    assert allowed is True
+    assert seen == [("same_app", "tenant-1", False)]
+
+
+@pytest.mark.asyncio
+async def test_api_account_playbook_permission_rejects_maintenance_playbook(monkeypatch):
+    class FakePlaybookQuery:
+        async def exists(self):
+            return True
+
+    class FakePlaybook:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs == {
+                "id__in": ["flow-1"],
+                "tenant_id": "tenant-1",
+                "deleted": False,
+                "internal": True,
+            }
+            return FakePlaybookQuery()
+
+    async def candidate_ids(_playbook_id, _tenant_id):
+        return ["flow-1"]
+
+    monkeypatch.setattr(authorization, "Playbook", FakePlaybook)
+    monkeypatch.setattr(
+        authorization,
+        "_candidate_permission_playbook_ids",
+        candidate_ids,
+    )
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+    account = SimpleNamespace(id="api-1", type="api", roles=[])
+
+    allowed = await authorization.check_playbook_permission(
+        request, account, "flow-1", ["e"]
+    )
+
+    assert allowed is False
+
+
 def test_resource_model_migration_backfills_latest_application_scope():
     sql = asyncio.run(scope_migration.upgrade(None))
     downgrade_sql = asyncio.run(scope_migration.downgrade(None))

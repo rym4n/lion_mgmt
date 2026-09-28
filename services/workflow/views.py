@@ -21,6 +21,7 @@ from tortoise.functions import Count, Max
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
+from core.maintenance import current_maintenance_mode, is_api_account
 from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
@@ -265,9 +266,7 @@ async def create_workflow(request):
             permissions=["*:*"],
             tenant_id=tenant_id,
         )
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
     async with in_transaction():
         playbook = await Playbook.create(
             name=name,
@@ -416,7 +415,7 @@ async def list_workflow(request):
         condition = Q(deleted=False, id__in=pb_ids, tenant_id=tenant_id)
 
     # 分页查询Account，返回总数和数据
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await current_maintenance_mode(request)
     condition = condition & Q(internal=maintenance_mode if maintenance_mode else False)
     if json_params.get("playbook_ids"):
         condition = condition & Q(id__in=json_params.get("playbook_ids"))
@@ -721,9 +720,7 @@ async def list_workflow_versions(request):
 async def export_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
     playbook_ids = request.json.get("playbook_ids", [])
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
 
     pv = await PlaybookVersion.filter(
         playbook__id__in=playbook_ids,
@@ -1317,13 +1314,24 @@ async def execute_action(request):
     message = request.json
 
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = await request.app.ctx.cache_client.get(
-        request.ctx.session["id"]
-    )
+    maintenance_mode = await current_maintenance_mode(request)
 
     if message.get("type") in ("flow", "action", "code"):
         if message.get("type") == "flow":
-            pv = await PlaybookVersion.get_or_none(id=message.get("flow_id"), tenant_id=tenant_id)
+            pv = await PlaybookVersion.get_or_none(
+                id=message.get("flow_id"),
+                tenant_id=tenant_id,
+            ).prefetch_related("playbook")
+            if not pv:
+                await resp.send("data: 缺少剧本执行权限，执行失败\n\n")
+                await resp.eof()
+                return resp
+            if is_api_account(request.ctx.session.get("account_info")) and bool(
+                getattr(getattr(pv, "playbook", None), "internal", False)
+            ):
+                await resp.send("data: 缺少剧本执行权限，执行失败\n\n")
+                await resp.eof()
+                return resp
             playbook_id = pv.playbook_id
             has_access = await check_playbook_permission(
                 request=request,
@@ -2315,9 +2323,7 @@ async def import_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
     creator = request.ctx.session["account_info"]
     admin = await get_superadmin_role()
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
 
     imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
 

@@ -12,6 +12,7 @@ from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
+from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
@@ -310,9 +311,7 @@ async def count_mttr(request):
 @requires_permission("dashboard:r")
 async def count_playbooks(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
     result = (
         await PlaybookVersion.filter(
             status=1,
@@ -354,9 +353,7 @@ async def count_playbooks(request):
 @requires_permission("dashboard:r")
 async def count_apps(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = bool(
-        await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    )
+    maintenance_mode = await current_maintenance_mode(request)
     result = (
         await ToolResources.filter(
             deleted=False,
