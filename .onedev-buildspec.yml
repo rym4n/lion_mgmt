@@ -1,4 +1,4 @@
-version: 52
+version: 53
 jobs:
 - name: cd
   jobExecutor: aioe-test
@@ -27,6 +27,8 @@ jobs:
   retryCondition: never
   maxRetries: 3
   retryDelay: 30
+  includeUpstreamWhenRebuild: false
+  includeDownstreamWhenRebuild: false
   timeout: 14400
 - name: ci
   jobExecutor: aioe-builder
@@ -78,7 +80,7 @@ jobs:
     output:
       type: RegistryOutput
       tags: 10.3.0.41:5000/lion_mgmt:@tag@
-    platforms: linux/amd64
+    platforms: linux/amd64,linux/arm64
     moreOptions: --cache-from=type=registry,ref=10.3.0.41:5000/lion_mgmt:buildcache --cache-to=type=registry,ref=10.3.0.41:5000/lion_mgmt:buildcache,mode=min
     condition: SUCCESSFUL
     optional: false
@@ -90,4 +92,34 @@ jobs:
   retryCondition: never
   maxRetries: 1
   retryDelay: 30
+  includeUpstreamWhenRebuild: false
+  includeDownstreamWhenRebuild: false
   timeout: 1440
+- name: 同步镜像
+  jobExecutor: tgy-deploy
+  steps:
+  - type: CommandStep
+    name: sync
+    runInContainer: false
+    interpreter:
+      type: PosixInterpreter
+      shell: sh
+      commands: |
+        gcrane copy 10.3.0.41:5000/lion_mgmt:@tag@ 10.3.0.38:5000/lion_mgmt:@tag@ --insecure
+    runAs: 0:0
+    useTTY: true
+    condition: SUCCESSFUL
+    optional: false
+  triggers:
+  - type: DependencyFinishedTrigger
+    projects: lion_mgmt
+  jobDependencies:
+  - jobName: ci
+    requireSuccessful: true
+    artifacts: '**'
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  includeUpstreamWhenRebuild: false
+  includeDownstreamWhenRebuild: false
+  timeout: 14400
