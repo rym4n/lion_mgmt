@@ -222,9 +222,46 @@ async def _check_space_quota(tenant_id: str, space_key: str, incoming: int) -> N
         raise CustomError(ErrorCode.KNOWLEDGE_SPACE_QUOTA_EXCEEDED)
 
 
-def _callback_url(document_id: str) -> str:
+def _callback_url(document_id: str, attempt_id: str) -> str:
     base = (LION_MGMT_INTERNAL_BASE_URL or "").rstrip("/")
-    return f"{base}/knowledge/internal/documents/{document_id}/status"
+    return f"{base}/knowledge/internal/documents/{document_id}/status?attempt_id={attempt_id}"
+
+
+async def submit_document_ingest(
+    tenant_id: str,
+    document: KnowledgeDocument,
+    embedding: dict,
+    *,
+    filename: str | None = None,
+    updater_id: str | None = None,
+    client=None,
+) -> None:
+    """Submit an ingest attempt and bind its callback to the current row version."""
+    document.status = "processing"
+    document.error = None
+    document.indexed_at = None
+    document.ingest_attempt_id = uuid.uuid4().hex
+    if updater_id is not None:
+        document.uploader_id = updater_id
+    await document.save()
+
+    try:
+        await (client or get_knowledge_client()).ingest(
+            tenant_id=tenant_id,
+            space_key=document.space_key,
+            document_id=str(document.id),
+            storage_key=document.storage_key,
+            filename=filename or document.filename or (
+                f"{document.title}.md" if document.source == "agent" else document.title
+            ),
+            embedding=embedding,
+            callback_url=_callback_url(str(document.id), document.ingest_attempt_id),
+        )
+    except Exception:
+        document.status = "failed"
+        document.error = "索引任务提交失败，请重试"
+        await document.save()
+        raise
 
 
 async def upsert_document(
@@ -276,6 +313,7 @@ async def upsert_document(
             space=space,
             space_key=space_key,
             title=title or filename,
+            filename=filename,
             size=len(content),
             content_hash=digest,
             source=source,
@@ -285,6 +323,7 @@ async def upsert_document(
         )
     else:
         document.title = title or document.title or filename
+        document.filename = filename
         document.size = len(content)
         document.uploader_id = uploader_id
         document.status = "processing"
@@ -294,15 +333,7 @@ async def upsert_document(
     document.storage_key = await object_store.put_raw(str(document.id), content)
     await document.save()
 
-    await get_knowledge_client().ingest(
-        tenant_id=tenant_id,
-        space_key=space_key,
-        document_id=str(document.id),
-        storage_key=document.storage_key,
-        filename=filename,
-        embedding=embedding,
-        callback_url=_callback_url(str(document.id)),
-    )
+    await submit_document_ingest(tenant_id, document, embedding, filename=filename)
     return {**document.json, "skipped": False}
 
 
@@ -505,19 +536,8 @@ async def retry_document(
     if embedding is None:
         raise CustomError(ErrorCode.KNOWLEDGE_EMBEDDING_NOT_CONFIGURED)
 
-    document.status = "processing"
-    document.error = None
-    if updater_id is not None:
-        document.uploader_id = updater_id
-    await document.save()
-    await get_knowledge_client().ingest(
-        tenant_id=tenant_id,
-        space_key=document.space_key,
-        document_id=str(document.id),
-        storage_key=document.storage_key,
-        filename=document.title,
-        embedding=embedding,
-        callback_url=_callback_url(str(document.id)),
+    await submit_document_ingest(
+        tenant_id, document, embedding, updater_id=updater_id
     )
     return document.json
 

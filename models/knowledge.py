@@ -56,6 +56,7 @@ class KnowledgeDocument(BaseModel):
     )
     space_key = fields.CharField(max_length=64, description="冗余存储，便于按空间查询")
     title = fields.CharField(max_length=255, description="显示名，默认取文件名")
+    filename = fields.CharField(max_length=255, null=True, description="原始文件名，用于重新选择解析器")
     mime_type = fields.CharField(max_length=128, null=True)
     size = fields.BigIntField(default=0, description="字节数")
     content_hash = fields.CharField(max_length=64, description="SHA256，用于幂等判重")
@@ -78,6 +79,9 @@ class KnowledgeDocument(BaseModel):
     )
     error = fields.TextField(null=True, description="失败原因，截断 1000 字符")
     indexed_at = fields.DatetimeField(null=True, description="索引完成时间")
+    ingest_attempt_id = fields.CharField(
+        max_length=32, null=True, description="当前索引任务标识，阻止旧回调覆盖新结果"
+    )
 
     @property
     def json(self) -> dict:

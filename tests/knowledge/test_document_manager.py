@@ -3,6 +3,7 @@
 
 import hashlib
 from datetime import datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -24,6 +25,7 @@ class _FakeDoc:
         self.tenant_id = kw.get("tenant_id", "t1")
         self.space_key = kw.get("space_key", "ops")
         self.title = kw.get("title", "a.md")
+        self.filename = kw.get("filename")
         self.content_hash = kw.get("content_hash", "")
         self.size = kw.get("size", 0)
         self.status = kw.get("status", "processing")
@@ -180,6 +182,56 @@ async def test_upsert_creates_document_and_submits_ingest(monkeypatch):
     assert created["status"] == "processing"
     assert len(client.ingests) == 1
     assert client.ingests[0]["storage_key"] == "knowledge/doc-1/raw"
+    assert created["filename"] == "new.md"
+    callback = urlparse(client.ingests[0]["callback_url"])
+    assert callback.path.endswith("/knowledge/internal/documents/doc-1/status")
+    assert len(parse_qs(callback.query)["attempt_id"][0]) == 32
+
+
+@pytest.mark.asyncio
+async def test_rebuild_uses_original_filename_for_custom_title(monkeypatch):
+    from services.knowledge import manager
+
+    document = _FakeDoc(title="Monthly report", filename="report.xlsx")
+    client = _FakeClient()
+    await manager.submit_document_ingest(
+        "t1", document, {"model": "m"}, client=client
+    )
+
+    assert client.ingests[0]["filename"] == "report.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_rebuild_legacy_agent_document_uses_markdown_extension(monkeypatch):
+    from services.knowledge import manager
+
+    document = _FakeDoc(title="Runbook", source="agent")
+    client = _FakeClient()
+    await manager.submit_document_ingest(
+        "t1", document, {"model": "m"}, client=client
+    )
+
+    assert client.ingests[0]["filename"] == "Runbook.md"
+
+
+@pytest.mark.asyncio
+async def test_ingest_submission_failure_leaves_document_retryable(monkeypatch):
+    from services.knowledge import manager
+
+    class FailingClient:
+        async def ingest(self, **kwargs):
+            raise RuntimeError("agent unavailable")
+
+    document = _FakeDoc(status="ready", indexed_at=datetime.now())
+    with pytest.raises(RuntimeError, match="agent unavailable"):
+        await manager.submit_document_ingest(
+            "t1", document, {"model": "m"}, client=FailingClient()
+        )
+
+    assert document.status == "failed"
+    assert document.indexed_at is None
+    assert document.error == "索引任务提交失败，请重试"
+    assert len(document.ingest_attempt_id) == 32
 
 
 @pytest.mark.asyncio

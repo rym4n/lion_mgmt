@@ -10,9 +10,11 @@
   2. 换模型后丢弃旧 collection，为重建让路
 """
 
+import asyncio
 from datetime import datetime
 
 from sanic import Blueprint, Request
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -26,6 +28,7 @@ from models.tenant_embedding import (
     get_embedding_status,
 )
 from services.knowledge.client import get_knowledge_client
+from services.knowledge import manager
 from settings import TZ
 
 knowledge_embedding_bp = Blueprint(
@@ -57,11 +60,13 @@ async def get_config(request: Request):
 @knowledge_embedding_bp.post("/rebuild")
 @requires_permission("knowledge:u")
 async def rebuild_index(request: Request):
-    """丢弃当前 collection，为换模型后的重建让路。
-
-    只丢弃，不重灌：重新入库由用户逐篇重试或后续批量任务驱动。
-    """
+    """Confirm one space, then rebuild the shared tenant index and resubmit all documents."""
     tenant_id = _tenant(request)
+    space_key = str((request.json or {}).get("space_key") or "")
+    if not space_key:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    await manager.get_space_or_404(tenant_id, space_key)
+
     embedding = await get_embedding_payload(tenant_id)
     if embedding is None:
         raise CustomError(ErrorCode.KNOWLEDGE_EMBEDDING_NOT_CONFIGURED)
@@ -70,20 +75,25 @@ async def rebuild_index(request: Request):
         embedding["base_url"], embedding["model"], embedding["dimensions"]
     )
 
-    result = await get_knowledge_client().rebuild(
+    documents = await KnowledgeDocument.filter(
+        tenant_id=tenant_id, deleted=False
+    ).all()
+    selected_count = sum(doc.space_key == space_key for doc in documents)
+    client = get_knowledge_client()
+    result = await client.rebuild(
         tenant_id=tenant_id, embedding=embedding
     )
 
-    # The collection is now empty. Mark documents that previously had vectors
-    # as retryable so the UI cannot report them as ready against an empty index.
-    retry_required_count = await KnowledgeDocument.filter(
+    # A tenant owns one collection. Invalidate every record before resubmitting
+    # so no other space appears ready while its vectors are absent.
+    await KnowledgeDocument.filter(
         tenant_id=tenant_id,
         deleted=False,
-        status__in=["ready", "processing"],
     ).update(
         status="failed",
-        error="索引已重建，请重试文档",
+        error="索引已重建，正在重新提交",
         indexed_at=None,
+        ingest_attempt_id=None,
     )
 
     state = await TenantEmbeddingIndexState.get_or_none(
@@ -91,9 +101,33 @@ async def rebuild_index(request: Request):
     )
     if state is None:
         state = TenantEmbeddingIndexState(tenant_id=tenant_id)
-    # 记账：collection 已按当前指纹重置，不再提示需要重建。
+    # The collection now uses the current model, even if some documents fail.
     state.indexed_fingerprint = fingerprint
     state.rebuilt_at = datetime.now(TZ)
     state.rebuilt_by = _operator_id(request)
     await state.save()
-    return response_ok({**result, "retry_required_count": retry_required_count})
+
+    semaphore = asyncio.Semaphore(8)
+
+    async def submit(document: KnowledgeDocument) -> bool:
+        async with semaphore:
+            try:
+                await manager.submit_document_ingest(
+                    tenant_id, document, embedding, client=client
+                )
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "knowledge_rebuild_submit_failed tenant=%s doc=%s error_type=%s",
+                    tenant_id, document.id, type(exc).__name__,
+                )
+                return False
+
+    submitted = await asyncio.gather(*(submit(doc) for doc in documents))
+    return response_ok({
+        **result,
+        "document_count": len(documents),
+        "selected_document_count": selected_count,
+        "submitted_count": sum(submitted),
+        "failed_count": len(documents) - sum(submitted),
+    })

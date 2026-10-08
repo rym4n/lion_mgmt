@@ -241,6 +241,7 @@ async def internal_document_status(request: Request, document_id: str):
     tenant_id = params.get("tenant_id")
     if not tenant_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
+    params["attempt_id"] = request.args.get("attempt_id")
     return response_ok(
         await apply_ingest_result(str(tenant_id), str(document_id), params)
     )

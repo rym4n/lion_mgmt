@@ -13,6 +13,7 @@ class _FakeDoc:
         self.status = "processing"
         self.error = None
         self.indexed_at = None
+        self.ingest_attempt_id = None
         self.saved = False
 
     async def save(self):
@@ -97,4 +98,39 @@ async def test_late_callback_does_not_restore_invalidated_index(monkeypatch):
 
     assert result["status"] == "failed"
     assert document.indexed_at is None
+    assert document.saved is False
+
+
+@pytest.mark.asyncio
+async def test_callback_ignores_previous_ingest_attempt(monkeypatch):
+    from services.knowledge.callbacks import apply_ingest_result
+
+    document = _FakeDoc()
+    document.ingest_attempt_id = "new-attempt"
+    _patch_lookup(monkeypatch, document)
+
+    result = await apply_ingest_result(
+        "t1", "doc-1", {"status": "ready", "attempt_id": "old-attempt"}
+    )
+
+    assert result["status"] == "processing"
+    assert document.saved is False
+
+
+@pytest.mark.asyncio
+async def test_callback_ignores_previous_failed_attempt(monkeypatch):
+    from services.knowledge.callbacks import apply_ingest_result
+
+    document = _FakeDoc()
+    document.ingest_attempt_id = "new-attempt"
+    _patch_lookup(monkeypatch, document)
+
+    result = await apply_ingest_result(
+        "t1", "doc-1", {
+            "status": "failed", "error": "old model failed", "attempt_id": "old-attempt"
+        }
+    )
+
+    assert result["status"] == "processing"
+    assert document.error is None
     assert document.saved is False
