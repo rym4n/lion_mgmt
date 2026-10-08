@@ -82,3 +82,19 @@ async def test_callback_is_tenant_scoped(monkeypatch):
     _patch_lookup(monkeypatch, _FakeDoc(tenant_id="t1"))
     with pytest.raises(CustomError):
         await apply_ingest_result("another-tenant", "doc-1", {"status": "ready"})
+
+
+@pytest.mark.asyncio
+async def test_late_callback_does_not_restore_invalidated_index(monkeypatch):
+    from services.knowledge.callbacks import apply_ingest_result
+
+    document = _FakeDoc()
+    document.status = "failed"
+    document.error = "索引已重建，请重试文档"
+    _patch_lookup(monkeypatch, document)
+
+    result = await apply_ingest_result("t1", "doc-1", {"status": "ready"})
+
+    assert result["status"] == "failed"
+    assert document.indexed_at is None
+    assert document.saved is False

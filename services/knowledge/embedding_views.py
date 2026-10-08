@@ -18,13 +18,14 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from models.knowledge import KnowledgeDocument
 from models.tenant_embedding import (
     TenantEmbeddingIndexState,
     compute_fingerprint,
-    get_embedding_config,
     get_embedding_payload,
     get_embedding_status,
 )
+from services.knowledge.client import get_knowledge_client
 from settings import TZ
 
 knowledge_embedding_bp = Blueprint(
@@ -60,21 +61,31 @@ async def rebuild_index(request: Request):
 
     只丢弃，不重灌：重新入库由用户逐篇重试或后续批量任务驱动。
     """
-    from services.knowledge.client import get_knowledge_client
-
     tenant_id = _tenant(request)
     embedding = await get_embedding_payload(tenant_id)
     if embedding is None:
         raise CustomError(ErrorCode.KNOWLEDGE_EMBEDDING_NOT_CONFIGURED)
 
+    fingerprint = compute_fingerprint(
+        embedding["base_url"], embedding["model"], embedding["dimensions"]
+    )
+
     result = await get_knowledge_client().rebuild(
         tenant_id=tenant_id, embedding=embedding
     )
 
-    config = await get_embedding_config(tenant_id)
-    fingerprint = compute_fingerprint(
-        config.base_url, config.model_name, config.dimensions
+    # The collection is now empty. Mark documents that previously had vectors
+    # as retryable so the UI cannot report them as ready against an empty index.
+    retry_required_count = await KnowledgeDocument.filter(
+        tenant_id=tenant_id,
+        deleted=False,
+        status__in=["ready", "processing"],
+    ).update(
+        status="failed",
+        error="索引已重建，请重试文档",
+        indexed_at=None,
     )
+
     state = await TenantEmbeddingIndexState.get_or_none(
         tenant_id=tenant_id, deleted=False
     )
@@ -85,4 +96,4 @@ async def rebuild_index(request: Request):
     state.rebuilt_at = datetime.now(TZ)
     state.rebuilt_by = _operator_id(request)
     await state.save()
-    return response_ok(result)
+    return response_ok({**result, "retry_required_count": retry_required_count})

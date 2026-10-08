@@ -34,6 +34,12 @@ async def apply_ingest_result(
         # 区分开会泄露「该 id 在别的租户下存在」。
         raise CustomError(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND)
 
+    # A rebuild invalidates ready/processing records. A late success callback
+    # from the old ingest must not make an unindexed document look ready again.
+    # A new retry sets the row back to processing before submitting ingest.
+    if status == "ready" and document.status != "processing":
+        return document.json
+
     document.status = status
     if status == "ready":
         document.indexed_at = datetime.now(TZ)
