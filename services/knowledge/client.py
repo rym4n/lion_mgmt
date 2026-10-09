@@ -134,6 +134,25 @@ class KnowledgeAgentClient:
             json={"tenant_id": tenant_id, "embedding": embedding},
         )
 
+    async def rebuild_space(
+        self,
+        *,
+        tenant_id: str,
+        space_key: str,
+        document_ids: list[str],
+        embedding: dict,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            "/internal/v1/knowledge/spaces/rebuild",
+            json={
+                "tenant_id": tenant_id,
+                "space_key": space_key,
+                "document_ids": document_ids,
+                "embedding": embedding,
+            },
+        )
+
 
 def get_knowledge_client() -> KnowledgeAgentClient:
     """构造客户端。

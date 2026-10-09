@@ -7,7 +7,7 @@
 
 本模块只负责：
   1. 报告当前 embedding 配置状态与索引是否需要重建
-  2. 换模型后丢弃旧 collection，为重建让路
+  2. 在不改变向量空间的前提下重建单个空间
 """
 
 import asyncio
@@ -60,7 +60,7 @@ async def get_config(request: Request):
 @knowledge_embedding_bp.post("/rebuild")
 @requires_permission("knowledge:u")
 async def rebuild_index(request: Request):
-    """Confirm one space, then rebuild the shared tenant index and resubmit all documents."""
+    """Clear and resubmit only the selected space's documents."""
     tenant_id = _tenant(request)
     space_key = str((request.json or {}).get("space_key") or "")
     if not space_key:
@@ -75,19 +75,27 @@ async def rebuild_index(request: Request):
         embedding["base_url"], embedding["model"], embedding["dimensions"]
     )
 
-    documents = await KnowledgeDocument.filter(
+    state = await TenantEmbeddingIndexState.get_or_none(
         tenant_id=tenant_id, deleted=False
+    )
+    if state and state.indexed_fingerprint and state.indexed_fingerprint != fingerprint:
+        raise CustomError(ErrorCode.KNOWLEDGE_SPACE_REBUILD_REQUIRES_TENANT_MIGRATION)
+
+    documents = await KnowledgeDocument.filter(
+        tenant_id=tenant_id, space_key=space_key, deleted=False
     ).all()
-    selected_count = sum(doc.space_key == space_key for doc in documents)
     client = get_knowledge_client()
-    result = await client.rebuild(
-        tenant_id=tenant_id, embedding=embedding
+    result = await client.rebuild_space(
+        tenant_id=tenant_id,
+        space_key=space_key,
+        document_ids=[str(document.id) for document in documents],
+        embedding=embedding,
     )
 
-    # A tenant owns one collection. Invalidate every record before resubmitting
-    # so no other space appears ready while its vectors are absent.
+    # The collection is shared, but only this space's document IDs are cleared.
     await KnowledgeDocument.filter(
         tenant_id=tenant_id,
+        space_key=space_key,
         deleted=False,
     ).update(
         status="failed",
@@ -96,12 +104,9 @@ async def rebuild_index(request: Request):
         ingest_attempt_id=None,
     )
 
-    state = await TenantEmbeddingIndexState.get_or_none(
-        tenant_id=tenant_id, deleted=False
-    )
     if state is None:
         state = TenantEmbeddingIndexState(tenant_id=tenant_id)
-    # The collection now uses the current model, even if some documents fail.
+    # The selected space uses the current model. Other spaces remain untouched.
     state.indexed_fingerprint = fingerprint
     state.rebuilt_at = datetime.now(TZ)
     state.rebuilt_by = _operator_id(request)
@@ -126,8 +131,8 @@ async def rebuild_index(request: Request):
     submitted = await asyncio.gather(*(submit(doc) for doc in documents))
     return response_ok({
         **result,
+        "space_key": space_key,
         "document_count": len(documents),
-        "selected_document_count": selected_count,
         "submitted_count": sum(submitted),
         "failed_count": len(documents) - sum(submitted),
     })

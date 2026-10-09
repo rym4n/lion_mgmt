@@ -1,5 +1,5 @@
 # coding=utf-8
-"""A row action rebuilds the tenant collection and queues every affected document."""
+"""A row action rebuilds only the selected space's documents."""
 
 import inspect
 from types import SimpleNamespace
@@ -55,15 +55,15 @@ def _patch_rebuild(monkeypatch, documents, *, fail_rebuild=False, fail_doc=None)
         return {"base_url": "http://e", "model": "m", "dimensions": 2048}
 
     class _Client:
-        async def rebuild(self, **kwargs):
-            calls.append(("rebuild", kwargs["tenant_id"]))
+        async def rebuild_space(self, **kwargs):
+            calls.append(("rebuild_space", kwargs["tenant_id"], kwargs["space_key"], kwargs["document_ids"]))
             if fail_rebuild:
                 raise RuntimeError("upstream unavailable")
-            return {"status": "dropped"}
+            return {"status": "cleared", "deleted_count": len(kwargs["document_ids"])}
 
     async def state(**kwargs):
         class _State:
-            indexed_fingerprint = "old"
+            indexed_fingerprint = "new"
             rebuilt_at = None
             rebuilt_by = None
 
@@ -79,8 +79,8 @@ def _patch_rebuild(monkeypatch, documents, *, fail_rebuild=False, fail_doc=None)
         document.status = "processing"
 
     def filter_documents(**kwargs):
-        assert kwargs == {"tenant_id": "t1", "deleted": False}
-        return _Query(documents, calls)
+        assert kwargs == {"tenant_id": "t1", "space_key": "ops", "deleted": False}
+        return _Query([doc for doc in documents if doc.space_key == "ops"], calls)
 
     monkeypatch.setattr(embedding_views.manager, "get_space_or_404", get_space)
     monkeypatch.setattr(embedding_views.manager, "submit_document_ingest", submit)
@@ -94,22 +94,23 @@ def _patch_rebuild(monkeypatch, documents, *, fail_rebuild=False, fail_doc=None)
 
 
 @pytest.mark.asyncio
-async def test_rebuild_queues_selected_and_other_spaces(monkeypatch):
+async def test_rebuild_queues_only_selected_space(monkeypatch):
     documents = [_Doc("doc-ops", "ops"), _Doc("doc-sec", "sec")]
     views, calls = _patch_rebuild(monkeypatch, documents)
 
     result = await inspect.unwrap(views.rebuild_index)(_request())
 
-    assert result["document_count"] == 2
-    assert result["selected_document_count"] == 1
-    assert result["submitted_count"] == 2
+    assert result["document_count"] == 1
+    assert result["space_key"] == "ops"
+    assert result["submitted_count"] == 1
     assert result["failed_count"] == 0
     assert [call[0] for call in calls] == [
-        "space", "rebuild", "invalidate", "state", "submit", "submit"
+        "space", "rebuild_space", "invalidate", "state", "submit"
     ]
+    assert calls[1][3] == ["doc-ops"]
     assert calls[2][1]["ingest_attempt_id"] is None
-    assert {call[1] for call in calls if call[0] == "submit"} == {"doc-ops", "doc-sec"}
-    assert all(doc.status == "processing" for doc in documents)
+    assert documents[0].status == "processing"
+    assert documents[1].status == "ready"
 
 
 @pytest.mark.asyncio
@@ -120,7 +121,7 @@ async def test_rebuild_failure_keeps_documents_unchanged(monkeypatch):
     with pytest.raises(RuntimeError, match="upstream unavailable"):
         await inspect.unwrap(views.rebuild_index)(_request())
 
-    assert [call[0] for call in calls] == ["space", "rebuild"]
+    assert [call[0] for call in calls] == ["space", "rebuild_space"]
     assert documents[0].status == "ready"
     assert documents[0].ingest_attempt_id == "old"
 
@@ -128,12 +129,32 @@ async def test_rebuild_failure_keeps_documents_unchanged(monkeypatch):
 @pytest.mark.asyncio
 async def test_partial_submission_failure_is_reported(monkeypatch):
     documents = [_Doc("doc-ops", "ops"), _Doc("doc-sec", "sec")]
-    views, _ = _patch_rebuild(monkeypatch, documents, fail_doc="doc-sec")
+    views, _ = _patch_rebuild(monkeypatch, documents, fail_doc="doc-ops")
 
     result = await inspect.unwrap(views.rebuild_index)(_request())
 
-    assert result["submitted_count"] == 1
+    assert result["submitted_count"] == 0
     assert result["failed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_rebuild_rejects_model_change_for_shared_collection(monkeypatch):
+    from libs.error_code.exception import CustomError
+    from services.knowledge import embedding_views
+
+    documents = [_Doc("doc-ops", "ops")]
+    views, calls = _patch_rebuild(monkeypatch, documents)
+
+    async def old_state(**kwargs):
+        class _State:
+            indexed_fingerprint = "old"
+
+        return _State()
+
+    monkeypatch.setattr(embedding_views.TenantEmbeddingIndexState, "get_or_none", old_state)
+    with pytest.raises(CustomError):
+        await inspect.unwrap(views.rebuild_index)(_request())
+    assert [call[0] for call in calls] == ["space"]
 
 
 @pytest.mark.asyncio

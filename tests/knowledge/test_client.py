@@ -47,6 +47,27 @@ async def test_ingest_posts_storage_key():
 
 
 @pytest.mark.asyncio
+async def test_rebuild_space_posts_selected_document_ids():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = request.read().decode()
+        return httpx.Response(200, json={"status": "cleared", "deleted_count": 2})
+
+    result = await _client(handler).rebuild_space(
+        tenant_id="t1",
+        space_key="ops",
+        document_ids=["doc-1", "doc-2"],
+        embedding={"base_url": "http://e", "model": "m", "dimensions": 8},
+    )
+
+    assert seen["url"].endswith("/internal/v1/knowledge/spaces/rebuild")
+    assert "doc-1" in seen["body"] and "doc-2" in seen["body"]
+    assert result["deleted_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_sends_internal_token():
     seen = {}
 

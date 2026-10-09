@@ -293,3 +293,6 @@ class ErrorCode(BaseErrorCode):
     KNOWLEDGE_SPACE_KEY_INVALID = ErrorData(4257, "空间标识非法")
     KNOWLEDGE_FILE_TYPE_REJECTED = ErrorData(4258, "不支持的文件类型")
     KNOWLEDGE_FILE_TOO_LARGE = ErrorData(4259, "文件超过大小限制")
+    KNOWLEDGE_SPACE_REBUILD_REQUIRES_TENANT_MIGRATION = ErrorData(
+        4260, "向量模型已变更，不能只重建单个空间，请执行全租户迁移"
+    )
