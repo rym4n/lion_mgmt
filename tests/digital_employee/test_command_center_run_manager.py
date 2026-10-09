@@ -640,6 +640,41 @@ def test_runtime_error_finalizes_task_through_progress_manager():
     assert RECORDED_EVENTS[-1][0] == "runtime_error"
 
 
+def test_persisted_runtime_error_code_survives_generic_wrapper_exception():
+    run_manager = _load_run_manager()
+    run = SimpleNamespace(
+        error={
+            "code": "context_compression_failed",
+            "message": "上下文压缩失败，数字伙伴无法继续执行",
+            "blocking": True,
+        },
+        metadata={},
+    )
+
+    layers = asyncio.run(
+        run_manager._collect_failure_layers(run, RuntimeError("wrapper lost details"))
+    )
+
+    assert layers["runtime"]["code"] == "context_compression_failed"
+
+
+def test_runtime_error_payload_method_preserves_specific_code():
+    run_manager = _load_run_manager()
+
+    class _StructuredRuntimeError(RuntimeError):
+        def payload(self):
+            return {
+                "code": "context_compression_failed",
+                "message": "上下文压缩失败，数字伙伴无法继续执行",
+                "retryable": False,
+            }
+
+    error = run_manager._safe_runtime_error(_StructuredRuntimeError("opaque wrapper"))
+
+    assert error["code"] == "context_compression_failed"
+    assert error["blocking"] is True
+
+
 def test_runtime_tool_call_normalization_accepts_agentscope_tool_call_name():
     run_manager = _load_run_manager()
 

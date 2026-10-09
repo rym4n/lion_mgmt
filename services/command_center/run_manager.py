@@ -117,6 +117,11 @@ def _merge_runtime_diagnostics(metadata: Any, diagnostic: Any) -> dict:
 
 def _safe_runtime_error(exc: BaseException) -> dict:
     payload = getattr(exc, "payload", None)
+    if callable(payload):
+        try:
+            payload = payload()
+        except TypeError:
+            payload = None
     if isinstance(payload, dict):
         return {
             "layer": "runtime",
@@ -129,6 +134,28 @@ def _safe_runtime_error(exc: BaseException) -> dict:
         "code": "runtime_internal_error",
         "message": "数字伙伴运行异常，请查看运行详情",
         "blocking": True,
+    }
+
+
+def _existing_runtime_error(run: CommandTaskRun) -> dict | None:
+    """Keep a structured runtime event when a later wrapper raises generically.
+
+    Streaming runtimes persist the error event before the coordinator raises its
+    control-flow exception. If that wrapper loses the original exception type,
+    the persisted code is still the most specific operator-facing evidence.
+    """
+    error = getattr(run, "error", None)
+    if not isinstance(error, dict):
+        return None
+    primary = error.get("primary") if isinstance(error.get("primary"), dict) else error
+    code = primary.get("code")
+    if not code or code == "runtime_internal_error":
+        return None
+    return {
+        "layer": "runtime",
+        "code": str(code),
+        "message": str(primary.get("message") or "数字伙伴运行异常"),
+        "blocking": bool(primary.get("blocking", True)),
     }
 
 
@@ -170,6 +197,9 @@ def _runlog_business_failed(runlog: Any) -> bool:
 
 async def _collect_failure_layers(run: CommandTaskRun, exc: BaseException) -> dict[str, Any]:
     runtime = _safe_runtime_error(exc)
+    persisted_runtime = _existing_runtime_error(run)
+    if persisted_runtime and runtime.get("code") == "runtime_internal_error":
+        runtime = persisted_runtime
     layers: dict[str, Any] = {"runtime": runtime}
     metadata = run.metadata if isinstance(run.metadata, dict) else {}
     memory = metadata.get("memory_status")
