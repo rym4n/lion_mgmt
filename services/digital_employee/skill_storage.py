@@ -16,7 +16,11 @@ from settings import DIGITAL_EMPLOYEE_RESOURCES
 BUILTIN_SCOPE = "__builtin__"
 SKILL_TEXT_MAX_BYTES = 512 * 1024
 SKILL_BINARY_MAX_BYTES = 16 * 1024 * 1024
+OFFICECLI_BINARY_MAX_BYTES = 64 * 1024 * 1024
 SKILL_TOTAL_MAX_BYTES = 64 * 1024 * 1024
+OFFICECLI_BINARY_NAMES = frozenset(
+    {"officecli", "officecli-linux-x64", "officecli-linux-arm64", "officecli-linux-aarch64"}
+)
 SKILL_BINARY_SUFFIXES = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
     ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
@@ -68,7 +72,8 @@ def parse_skill_md(root: Path) -> tuple[str, str]:
 
 
 def is_binary_skill_asset(path: str | Path) -> bool:
-    return Path(path).suffix.lower() in SKILL_BINARY_SUFFIXES
+    candidate = Path(path)
+    return candidate.suffix.lower() in SKILL_BINARY_SUFFIXES or candidate.name in OFFICECLI_BINARY_NAMES
 
 
 def skill_storage_usage(root: Path) -> int:
@@ -84,7 +89,10 @@ def validate_skill_asset(filename: str, size: int, current_usage: int = 0) -> No
     suffix = path.suffix.lower()
     if suffix not in ALLOWED_SKILL_SUFFIXES:
         raise CustomError(ErrorCode.PACKAGE_INVALID)
-    max_bytes = SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(path) else SKILL_TEXT_MAX_BYTES
+    if path.name in OFFICECLI_BINARY_NAMES:
+        max_bytes = OFFICECLI_BINARY_MAX_BYTES
+    else:
+        max_bytes = SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(path) else SKILL_TEXT_MAX_BYTES
     if size < 0 or size > max_bytes:
         raise CustomError(ErrorCode.PACKAGE_INVALID)
     if current_usage + size > SKILL_TOTAL_MAX_BYTES:

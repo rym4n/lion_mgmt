@@ -6,6 +6,8 @@ from typing import Any
 
 from .skill_storage import (
     ALLOWED_SKILL_SUFFIXES,
+    OFFICECLI_BINARY_MAX_BYTES,
+    OFFICECLI_BINARY_NAMES,
     SKILL_BINARY_MAX_BYTES,
     SKILL_BINARY_SUFFIXES,
     skill_storage_root,
@@ -27,11 +29,19 @@ def _read_skill_files(skill: Any) -> dict[str, Any]:
         return {}
     files: dict[str, Any] = {}
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES:
+        is_officecli_binary = (
+            path.parent.name == "officecli" and path.name in OFFICECLI_BINARY_NAMES
+        )
+        if not path.is_file() or (
+            path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES and not is_officecli_binary
+        ):
             continue
         size = path.stat().st_size
-        if path.suffix.lower() in SKILL_BINARY_SUFFIXES:
-            if size > SKILL_BINARY_MAX_BYTES:
+        if path.suffix.lower() in SKILL_BINARY_SUFFIXES or is_officecli_binary:
+            max_binary_bytes = (
+                OFFICECLI_BINARY_MAX_BYTES if is_officecli_binary else SKILL_BINARY_MAX_BYTES
+            )
+            if size > max_binary_bytes:
                 continue
             files[path.relative_to(root).as_posix()] = {
                 "encoding": "base64",
@@ -278,6 +288,8 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         system_prompt.extend(["## Workflows", workflows, ""])
     runtime_lines = [
         "以当前任务和平台强制访问控制为准。",
+        "所有 .docx、.xlsx、.pptx 文件的读取、创建和修改必须调用工具 `officecli`；不得使用 `Read`、`Write` 或其他方式直接解析、覆盖 Office 文件。",
+        "officecli 只接受当前工作区内的文档路径；读取大表格时使用 view/get/query 的范围或行数选项，避免把完整文件结果放入上下文。",
         "AIOE 平台操作必须调用工具 `aioe_cli`；未配置平台 RBAC 角色时不得调用 AIOE 任何接口。",
         "`aioe_cli` 的唯一参数 command 是命令行参数字符串，可用子命令：",
         "- `apps`：列出可见应用；",

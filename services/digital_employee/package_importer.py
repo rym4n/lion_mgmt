@@ -21,6 +21,8 @@ from settings import DIGITAL_EMPLOYEE_RESOURCES
 from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
 from .skill_storage import (
     ALLOWED_SKILL_SUFFIXES,
+    OFFICECLI_BINARY_MAX_BYTES,
+    OFFICECLI_BINARY_NAMES,
     SKILL_BINARY_MAX_BYTES,
     SKILL_BINARY_SUFFIXES,
     parse_skill_md,
@@ -171,7 +173,11 @@ def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
         total += member.file_size
         if total > MAX_ARCHIVE_BYTES:
             raise CustomError(ErrorCode.PACKAGE_INVALID)
-        if not member.is_dir() and member.file_size > SKILL_BINARY_MAX_BYTES and member_path.suffix.lower() in SKILL_BINARY_SUFFIXES:
+        is_officecli_binary = member_path.name in OFFICECLI_BINARY_NAMES
+        max_binary_bytes = OFFICECLI_BINARY_MAX_BYTES if is_officecli_binary else SKILL_BINARY_MAX_BYTES
+        if not member.is_dir() and member.file_size > max_binary_bytes and (
+            member_path.suffix.lower() in SKILL_BINARY_SUFFIXES or is_officecli_binary
+        ):
             raise CustomError(ErrorCode.PACKAGE_INVALID)
         if not member.is_dir() and member_path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES:
             raise CustomError(ErrorCode.PACKAGE_INVALID)

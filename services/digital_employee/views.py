@@ -41,6 +41,8 @@ from .package_importer import (
 )
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 from .skill_storage import (
+    OFFICECLI_BINARY_MAX_BYTES,
+    OFFICECLI_BINARY_NAMES,
     SKILL_BINARY_MAX_BYTES,
     is_binary_skill_asset,
     parse_skill_md,
@@ -642,7 +644,11 @@ async def skill_file_read(request: Request):
     tenant_id = _tenant_id(request)
     skill = (await get_visible_skills(tenant_id, [data.get("skill_key")], enabled=None))[0]
     target = resolve_skill_file(skill.skill_dir, str(data.get("path") or ""), tenant_id)
-    max_bytes = SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(target) else SKILL_FILE_MAX_BYTES
+    max_bytes = (
+        OFFICECLI_BINARY_MAX_BYTES if target.name in OFFICECLI_BINARY_NAMES
+        else SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(target)
+        else SKILL_FILE_MAX_BYTES
+    )
     if not target.is_file() or target.stat().st_size > max_bytes:
         raise CustomError(ErrorCode.PARAM_ERROR)
     if is_binary_skill_asset(target):

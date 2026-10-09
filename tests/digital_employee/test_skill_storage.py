@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 from core.error_code import ErrorCode  # noqa: E402
 from libs.error_code.exception import CustomError  # noqa: E402
 from services.digital_employee.skill_storage import resolve_skill_file, relative_skill_dir, tenant_skill_root  # noqa: E402
+from services.digital_employee.skill_storage import is_binary_skill_asset, validate_skill_asset  # noqa: E402
 
 TENANT = "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"
 
@@ -19,6 +20,11 @@ def test_resolves_file_inside_skill_dir():
     path = resolve_skill_file(f"{TENANT}/db_backup_check", "SKILL.md", TENANT)
     assert path.name == "SKILL.md"
     assert str(tenant_skill_root(TENANT)) in str(path)
+
+
+def test_officecli_binary_is_accepted_as_binary_skill_asset():
+    assert is_binary_skill_asset("officecli-linux-x64")
+    validate_skill_asset("officecli-linux-x64", 34 * 1024 * 1024)
 
 
 @pytest.mark.parametrize(

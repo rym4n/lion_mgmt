@@ -65,6 +65,8 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
     assert "分诊告警" in files["system_prompt.md"]
     assert "只用授权工具" not in files["system_prompt.md"]
     assert "以当前任务和平台强制访问控制为准。" in files["system_prompt.md"]
+    assert "所有 .docx、.xlsx、.pptx 文件的读取、创建和修改必须调用工具 `officecli`" in files["system_prompt.md"]
+    assert "避免把完整文件结果放入上下文" in files["system_prompt.md"]
     assert "执行剧本必须先调用 playbook-input" in files["system_prompt.md"]
     assert "不得用 '{}' 执行有入参的剧本" in files["system_prompt.md"]
     assert "playbook-status --flow <剧本版本id> --run-id <run_id>" in files["system_prompt.md"]
@@ -417,6 +419,23 @@ def test_workspace_skills_encode_image_and_office_files(tmp_path, monkeypatch):
 
     assert files["topology.png"] == {"encoding": "base64", "data": "iVBORw0KGg=="}
     assert files["runbook.docx"] == {"encoding": "base64", "data": "UEsDBG9mZmljZQ=="}
+
+
+def test_workspace_skills_encode_extensionless_officecli_binary(tmp_path, monkeypatch):
+    monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
+    skill_dir = tmp_path / "tenant-1" / "officecli"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: officecli\ndescription: d\n---\n", encoding="utf-8"
+    )
+    (skill_dir / "officecli-linux-x64").write_bytes(b"ELF\x00binary")
+
+    employee = SimpleNamespace(id="e1", tenant_id="tenant-1", metadata={})
+    skill = SimpleNamespace(skill_key="officecli", skill_dir="tenant-1/officecli")
+
+    files = render_workspace_files(employee, None, [skill])["skills"]["officecli"]
+
+    assert files["officecli-linux-x64"]["encoding"] == "base64"
 
 
 def test_system_prompt_has_no_skill_listing(tmp_path, monkeypatch):
