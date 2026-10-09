@@ -1,7 +1,9 @@
 # coding=utf-8
 """Agent 面隔离行为（SPEC §3.1、§3.3）。"""
 
+import base64
 import inspect
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -155,6 +157,96 @@ async def test_write_goes_to_configured_space(monkeypatch):
     assert captured["source"] == "agent"
     assert captured["source_ref"] == "emp-1"
     assert captured["filename"].endswith(".md")
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_stores_in_tenant_prefix_and_appends_task_attachment(monkeypatch):
+    from services.knowledge import agent_views
+
+    employee = _FakeEmployee(space_keys=["ops"], write_space="ops")
+    task = SimpleNamespace(
+        id="task-1",
+        tenant_id="t1",
+        assigned_agent_id="emp-1",
+        status="running",
+        payload={"attachments": []},
+        utime=None,
+        save_calls=[],
+    )
+
+    async def fake_task(**filters):
+        assert filters == {"id": "task-1", "tenant_id": "t1", "deleted": False}
+        return task
+
+    uploaded = {}
+
+    async def fake_upload(body, bucket, file_id, prefix, mime_type):
+        uploaded.update(body=body, bucket=bucket, file_id=file_id, prefix=prefix, mime_type=mime_type)
+        return f"/files/{bucket}/{prefix}/{file_id}"
+
+    async def fake_save(**kwargs):
+        task.save_calls.append(kwargs)
+
+    async def fake_publish(*args, **kwargs):
+        return None
+
+    task.save = fake_save
+    monkeypatch.setattr(agent_views.CommandTask, "get_or_none", fake_task)
+    monkeypatch.setattr(agent_views, "upload_to_s3", fake_upload)
+    monkeypatch.setattr(agent_views, "publish_command_center_update", fake_publish)
+
+    result = await agent_views.do_upload_attachment(
+        employee,
+        task_id="task-1",
+        filename="report.txt",
+        content_base64=base64.b64encode(b"hello").decode(),
+        mime_type="text/plain",
+    )
+
+    assert uploaded["body"] == b"hello"
+    assert uploaded["bucket"] == "user"
+    assert uploaded["prefix"] == "command_center/t1"
+    assert result["filename"] == "report.txt"
+    assert result["size"] == 5
+    assert task.payload["attachments"][0]["file_id"] == result["file_id"]
+    assert task.save_calls == [{"update_fields": ["payload", "utime"]}]
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_does_not_append_when_s3_write_fails(monkeypatch):
+    from core.error_code import ErrorCode
+    from services.knowledge import agent_views
+
+    employee = _FakeEmployee(space_keys=["ops"], write_space="ops")
+    task = SimpleNamespace(
+        id="task-1", tenant_id="t1", assigned_agent_id="emp-1",
+        status="running",
+        payload={"attachments": []}, save_calls=0,
+    )
+
+    async def fake_task(**_filters):
+        return task
+
+    async def fake_upload(*_args, **_kwargs):
+        return ""
+
+    async def fake_save(**_kwargs):
+        task.save_calls += 1
+
+    task.save = fake_save
+    monkeypatch.setattr(agent_views.CommandTask, "get_or_none", fake_task)
+    monkeypatch.setattr(agent_views, "upload_to_s3", fake_upload)
+
+    with pytest.raises(CustomError) as excinfo:
+        await agent_views.do_upload_attachment(
+            employee,
+            task_id="task-1",
+            filename="report.txt",
+            content_base64=base64.b64encode(b"hello").decode(),
+        )
+    assert excinfo.value.enum is ErrorCode.KNOWLEDGE_SERVICE_UNAVAILABLE
+    assert task.payload["attachments"] == []
+    assert task.save_calls == 0
 
 
 def test_write_signature_has_no_path():

@@ -5,7 +5,11 @@
 员工只能通过 document_id 接触文档，空间键是唯一的过滤坐标。
 """
 
+import base64
+import binascii
+import os
 import re
+import uuid
 from datetime import datetime
 
 from sanic import Blueprint, Request
@@ -14,7 +18,12 @@ from sanic.log import logger
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from models.command_center import CommandAgent
+from models.command_center import (
+    COMMAND_TASK_STATUS_DISPATCHED,
+    COMMAND_TASK_STATUS_RUNNING,
+    CommandAgent,
+    CommandTask,
+)
 from models.digital_employee import EmployeeApiCredential
 from models.tenant_embedding import get_embedding_payload
 from services.knowledge import object_store, scope
@@ -25,6 +34,12 @@ from services.knowledge.manager import (
     get_document_or_404,
     upsert_document,
 )
+from services.command_center.manager import (
+    MAX_TASK_ATTACHMENTS,
+    normalize_task_attachments,
+)
+from services.command_center.realtime import publish_command_center_update
+from libs.utils import upload_to_s3
 from settings import TZ
 
 
@@ -33,6 +48,8 @@ knowledge_agent_bp = Blueprint("knowledge_agent", url_prefix="/knowledge/agent")
 EXCERPT_LIMIT = 500
 DEFAULT_TOP_K = 5
 MAX_TOP_K = 20
+TASK_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
+MAX_ATTACHMENT_FILENAME_LENGTH = 255
 
 
 async def resolve_employee(request: Request) -> CommandAgent:
@@ -168,6 +185,84 @@ async def do_write(employee, *, title: str, content: str) -> dict:
     return {"document_id": result.get("id"), "status": result.get("status")}
 
 
+def _attachment_filename(value) -> str:
+    if not isinstance(value, str):
+        return "attachment"
+    filename = os.path.basename(value.replace("\\", "/")).strip()
+    return filename[:MAX_ATTACHMENT_FILENAME_LENGTH] or "attachment"
+
+
+async def do_upload_attachment(
+    employee,
+    *,
+    task_id: str,
+    filename: str,
+    content_base64: str,
+    mime_type: str = "application/octet-stream",
+) -> dict:
+    """把数字伙伴生成的文件挂到当前指挥中心任务并写入租户 S3 前缀。"""
+    _write_space(employee)
+    if not task_id or not isinstance(content_base64, str) or not content_base64:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if len(content_base64) > ((TASK_ATTACHMENT_MAX_BYTES * 4 + 2) // 3 + 4):
+        raise CustomError(ErrorCode.FILE_TOO_LARGE)
+
+    task = await CommandTask.get_or_none(
+        id=str(task_id), tenant_id=employee.tenant_id, deleted=False
+    )
+    if (
+        not task
+        or str(getattr(task, "assigned_agent_id", "")) != str(employee.id)
+        or getattr(task, "status", None)
+        not in {COMMAND_TASK_STATUS_DISPATCHED, COMMAND_TASK_STATUS_RUNNING}
+    ):
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    current = normalize_task_attachments(
+        (task.payload or {}).get("attachments")
+        if isinstance(task.payload, dict)
+        else []
+    )
+    if len(current) >= MAX_TASK_ATTACHMENTS:
+        raise CustomError(ErrorCode.FILE_TOO_LARGE)
+
+    try:
+        content = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise CustomError(ErrorCode.PARAM_ERROR) from None
+    if not content or len(content) > TASK_ATTACHMENT_MAX_BYTES:
+        raise CustomError(ErrorCode.FILE_TOO_LARGE if content else ErrorCode.PARAM_ERROR)
+
+    safe_filename = _attachment_filename(filename)
+    extension = os.path.splitext(safe_filename)[1].lower()
+    file_id = f"{uuid.uuid4()}{extension}"
+    safe_mime_type = str(mime_type or "application/octet-stream")[:128]
+    stored_url = await upload_to_s3(
+        content,
+        "user",
+        file_id,
+        f"command_center/{employee.tenant_id}",
+        safe_mime_type,
+    )
+    if not stored_url:
+        raise CustomError(ErrorCode.KNOWLEDGE_SERVICE_UNAVAILABLE)
+    attachment = {
+        "file_id": file_id,
+        "filename": safe_filename,
+        "size": len(content),
+        "mime_type": safe_mime_type,
+        "kind": "image" if safe_mime_type.lower().startswith("image/") else "file",
+        "url": f"/command_center/tasks/attachments/{file_id}",
+    }
+    payload = dict(task.payload) if isinstance(task.payload, dict) else {}
+    payload["attachments"] = [*current, attachment]
+    task.payload = payload
+    task.utime = datetime.now(TZ)
+    await task.save(update_fields=["payload", "utime"])
+    await publish_command_center_update(task.tenant_id, "task_attachment_uploaded", task.id)
+    return attachment
+
+
 async def do_delete(employee, document_id: str) -> dict:
     """只能删除员工配置的可写空间里的文档。"""
     write_space = _write_space(employee)
@@ -224,6 +319,23 @@ async def agent_write(request: Request):
             employee,
             title=str(params.get("title") or ""),
             content=str(params["content"]),
+        )
+    )
+
+
+@knowledge_agent_bp.post("/upload")
+async def agent_upload(request: Request):
+    employee = await resolve_employee(request)
+    params = _json(request)
+    if not params.get("task_id") or not params.get("filename") or not params.get("content_base64"):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return response_ok(
+        await do_upload_attachment(
+            employee,
+            task_id=str(params["task_id"]),
+            filename=str(params["filename"]),
+            content_base64=str(params["content_base64"]),
+            mime_type=str(params.get("mime_type") or "application/octet-stream"),
         )
     )
 
