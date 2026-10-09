@@ -3,6 +3,7 @@ import asyncio
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -571,6 +572,95 @@ def test_runtime_event_normalization_updates_run_and_approval_wait_state():
     assert approval.status == "pending"
     assert approval.policy_snapshot == {"approval": {"default": "allow"}}
     assert approval.requested_action == {"tool": "write_file", "risk_level": "high"}
+
+
+def test_runtime_progress_omits_binary_output_and_bounds_persisted_event():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    payload = {
+        "message": "Read result received",
+        "type": "TOOL_RESULT_TEXT_DELTA",
+        "data": {"tool": "Read", "output": "\x7fELF\x00" + "x" * 200_000},
+    }
+
+    normalized = asyncio.run(run_manager.record_runtime_event(task, run, "progress", payload))
+    event_type, message, _, metadata = RECORDED_EVENTS[-1]
+
+    assert event_type == "runtime_progress"
+    assert message == "Read result received"
+    assert "\\u0000" not in json.dumps(normalized, allow_nan=False)
+    persisted = json.dumps(metadata, allow_nan=False)
+    assert "ELF" not in persisted
+    assert "\\u0000" not in persisted
+    assert len(persisted) < 65_536
+
+
+def test_runtime_tool_call_removes_nul_from_message_metadata_and_run_history():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    payload = {
+        "status": "started",
+        "data": {"tool_call_name": "Read\x00", "input": {"path": "notes.txt", "raw": "\x7fELF\x00payload"}},
+    }
+
+    normalized = asyncio.run(run_manager.record_runtime_event(task, run, "tool_call", payload))
+    _, message, _, metadata = RECORDED_EVENTS[-1]
+
+    assert "\x00" not in message
+    assert "\\u0000" not in json.dumps(metadata, ensure_ascii=False, allow_nan=False)
+    assert "\\u0000" not in json.dumps(run.tool_calls, ensure_ascii=False, allow_nan=False)
+    assert "ELF" not in json.dumps(normalized, ensure_ascii=False, allow_nan=False)
+    assert normalized["tool_call"]["data"]["input"]["path"] == "notes.txt"
+
+
+def test_runtime_event_bounds_large_plain_text_without_changing_short_text():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+
+    normalized = asyncio.run(run_manager.record_runtime_event(
+        task,
+        run,
+        "progress",
+        {"message": "ordinary status", "details": {"summary": "kept", "output": "x" * 200_000}},
+    ))
+
+    assert normalized["message"] == "ordinary status"
+    assert normalized["metadata"]["payload"]["details"]["summary"] == "kept"
+    assert len(json.dumps(RECORDED_EVENTS[-1][3], allow_nan=False)) < 65_536
+
+
+def test_runtime_event_converts_non_finite_numbers_before_jsonb_insert():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+
+    normalized = asyncio.run(run_manager.record_runtime_event(
+        task,
+        run,
+        "progress",
+        {"metrics": {"nan": float("nan"), "infinity": float("inf")}},
+    ))
+
+    metrics = normalized["metadata"]["payload"]["metrics"]
+    assert metrics == {"nan": None, "infinity": None}
+
+
+def test_runtime_tool_call_history_keeps_recent_entries():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    run.tool_calls = [{"tool_name": str(index), "status": "started"} for index in range(100)]
+
+    asyncio.run(run_manager.record_runtime_event(
+        task, run, "tool_call", {"data": {"tool_call_name": "Read"}},
+    ))
+
+    assert len(run.tool_calls) == 100
+    assert run.tool_calls[0]["tool_name"] == "1"
+    assert run.tool_calls[-1]["tool_name"] == "Read"
 
 
 def test_late_approval_event_is_ignored_after_run_is_terminal():

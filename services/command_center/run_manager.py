@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
+import math
+from itertools import islice
 from typing import Any
 from tortoise.transactions import in_transaction
 
@@ -63,6 +65,14 @@ FINALIZABLE_RUN_STATUSES = {
 }
 RuntimeEventHandler = Callable[[str, dict], Awaitable[dict | None]]
 RunCheckedOutHandler = Callable[[CommandTaskRun], Awaitable[None]]
+RUNTIME_EVENT_MAX_BYTES = 64 * 1024
+RUNTIME_EVENT_MAX_STRING_BYTES = 16 * 1024
+RUNTIME_EVENT_MAX_COLLECTION_ITEMS = 100
+RUNTIME_EVENT_MAX_NODES = 512
+RUNTIME_TOOL_CALLS_MAX = 100
+RUNTIME_DIAGNOSTICS_MAX = 100
+RUNTIME_BINARY_MARKER = "[binary runtime output omitted]"
+RUNTIME_TRUNCATION_MARKER = "[runtime event truncated]"
 RUN_SYNC_FIELDS = (
     "status",
     "heartbeat_at",
@@ -97,6 +107,94 @@ def _event_payload(payload: Any) -> dict:
     return payload if isinstance(payload, dict) else {"value": payload}
 
 
+def _runtime_text(value: str) -> str:
+    """Keep runtime text JSON-safe without persisting binary tool output."""
+    if any(
+        (ord(character) < 32 and character not in "\t\r\n") or ord(character) == 127
+        for character in value
+    ):
+        return RUNTIME_BINARY_MARKER
+    raw = value.encode("utf-8")
+    if len(raw) <= RUNTIME_EVENT_MAX_STRING_BYTES:
+        return value
+    marker = RUNTIME_TRUNCATION_MARKER
+    available = max(0, RUNTIME_EVENT_MAX_STRING_BYTES - len(marker.encode("utf-8")))
+    return raw[:available].decode("utf-8", "ignore") + marker
+
+
+def _sanitize_runtime_value(value: Any, depth: int = 0, remaining_nodes: list[int] | None = None) -> Any:
+    """Recursively normalize values before they reach JSONB/event history."""
+    if remaining_nodes is None:
+        remaining_nodes = [RUNTIME_EVENT_MAX_NODES]
+    if depth > 12 or remaining_nodes[0] <= 0:
+        return RUNTIME_TRUNCATION_MARKER
+    remaining_nodes[0] -= 1
+    if isinstance(value, str):
+        return _runtime_text(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return RUNTIME_BINARY_MARKER
+    if isinstance(value, dict):
+        return {
+            _runtime_text(str(key)): _sanitize_runtime_value(item, depth + 1, remaining_nodes)
+            for key, item in islice(value.items(), RUNTIME_EVENT_MAX_COLLECTION_ITEMS)
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [
+            _sanitize_runtime_value(item, depth + 1, remaining_nodes)
+            for item in islice(iter(value), RUNTIME_EVENT_MAX_COLLECTION_ITEMS)
+        ]
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return _runtime_text(str(value))
+
+
+def _json_size(value: Any) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    except (TypeError, ValueError):
+        return RUNTIME_EVENT_MAX_BYTES + 1
+
+
+def _bound_runtime_value(value: Any, limit: int = RUNTIME_EVENT_MAX_BYTES) -> Any:
+    """Fit a sanitized value into a bounded JSON document, preserving early fields."""
+    if _json_size(value) <= limit:
+        return value
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        marker = RUNTIME_TRUNCATION_MARKER
+        available = max(0, limit - len(marker.encode("utf-8")))
+        return raw[:available].decode("utf-8", "ignore") + marker
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            remaining = limit - _json_size(result) - len(json.dumps(str(key), ensure_ascii=False).encode("utf-8")) - 4
+            if remaining <= 0:
+                break
+            candidate = {**result, key: _bound_runtime_value(item, remaining)}
+            if _json_size(candidate) > limit:
+                break
+            result = candidate
+        return result
+    if isinstance(value, list):
+        result: list[Any] = []
+        for item in value:
+            remaining = limit - _json_size(result) - 2
+            if remaining <= 0:
+                break
+            candidate = [*result, _bound_runtime_value(item, remaining)]
+            if _json_size(candidate) > limit:
+                break
+            result = candidate
+        return result
+    return RUNTIME_TRUNCATION_MARKER
+
+
+def _sanitize_runtime_event(event: dict) -> dict:
+    return _bound_runtime_value(_sanitize_runtime_value(event))
+
+
 def _runtime_control_action(payload: dict) -> dict:
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     action = data.get("requested_action") if isinstance(data.get("requested_action"), dict) else data
@@ -112,7 +210,7 @@ def _merge_runtime_diagnostics(metadata: Any, diagnostic: Any) -> dict:
     items = list(current.get("runtime_diagnostics") or [])
     if isinstance(diagnostic, dict):
         items.append(diagnostic)
-    return {**current, "runtime_diagnostics": items}
+    return {**current, "runtime_diagnostics": items[-RUNTIME_DIAGNOSTICS_MAX:]}
 
 
 def _safe_runtime_error(exc: BaseException) -> dict:
@@ -566,7 +664,7 @@ async def record_runtime_event(
         record_task_event,
     )
 
-    normalized = normalize_runtime_event(event_type, payload)
+    normalized = _sanitize_runtime_event(normalize_runtime_event(event_type, payload))
     task_transition = None
     async with in_transaction() as connection:
         locked_run = (
@@ -609,7 +707,9 @@ async def record_runtime_event(
             locked_run.status = COMMAND_RUN_STATUS_RUNNING
             update_fields.append("status")
         if normalized.get("tool_call"):
-            locked_run.tool_calls = [*(locked_run.tool_calls or []), normalized["tool_call"]]
+            locked_run.tool_calls = _sanitize_runtime_value(
+                [*(locked_run.tool_calls or []), normalized["tool_call"]][-RUNTIME_TOOL_CALLS_MAX:]
+            )
             update_fields.append("tool_calls")
         if normalized.get("error"):
             locked_run.error = normalized["error"]
