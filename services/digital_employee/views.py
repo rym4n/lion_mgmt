@@ -1,4 +1,6 @@
 # coding=utf-8
+from pathlib import Path
+
 from sanic import Blueprint, Request, response
 from tortoise.expressions import Q
 
@@ -17,7 +19,6 @@ from .aioe_credential_manager import delete_employee_api_account
 from .employee_report import compose
 from .lion_agent_client import LionAgentClient
 from .manager import (
-    BUILTIN_TENANT_ID,
     clone_builtin_skill_to_tenant,
     create_employee,
     ensure_employee_can_delete,
@@ -41,7 +42,6 @@ from .package_importer import (
 )
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 from .skill_storage import (
-    OFFICECLI_BINARY_MAX_BYTES,
     OFFICECLI_BINARY_NAMES,
     SKILL_BINARY_MAX_BYTES,
     is_binary_skill_asset,
@@ -632,7 +632,7 @@ async def skill_files(request: Request):
     names = [
         path.relative_to(root).as_posix()
         for path in sorted(root.rglob("*"))
-        if path.is_file()
+        if path.is_file() and path.name not in OFFICECLI_BINARY_NAMES
     ]
     return response_ok(data={"files": names, "is_builtin": skill.is_builtin})
 
@@ -644,11 +644,9 @@ async def skill_file_read(request: Request):
     tenant_id = _tenant_id(request)
     skill = (await get_visible_skills(tenant_id, [data.get("skill_key")], enabled=None))[0]
     target = resolve_skill_file(skill.skill_dir, str(data.get("path") or ""), tenant_id)
-    max_bytes = (
-        OFFICECLI_BINARY_MAX_BYTES if target.name in OFFICECLI_BINARY_NAMES
-        else SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(target)
-        else SKILL_FILE_MAX_BYTES
-    )
+    if target.name in OFFICECLI_BINARY_NAMES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    max_bytes = SKILL_BINARY_MAX_BYTES if is_binary_skill_asset(target) else SKILL_FILE_MAX_BYTES
     if not target.is_file() or target.stat().st_size > max_bytes:
         raise CustomError(ErrorCode.PARAM_ERROR)
     if is_binary_skill_asset(target):
@@ -672,6 +670,8 @@ async def skill_file_write(request: Request):
     tenant_id = _tenant_id(request)
     content = data.get("content")
     if not isinstance(content, str) or len(content.encode("utf-8")) > SKILL_FILE_MAX_BYTES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if Path(str(data.get("path") or "")).name in OFFICECLI_BINARY_NAMES:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     skill = (await get_visible_skills(tenant_id, [data.get("skill_key")], enabled=None))[0]

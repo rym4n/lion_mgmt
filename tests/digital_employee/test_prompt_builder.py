@@ -421,7 +421,7 @@ def test_workspace_skills_encode_image_and_office_files(tmp_path, monkeypatch):
     assert files["runbook.docx"] == {"encoding": "base64", "data": "UEsDBG9mZmljZQ=="}
 
 
-def test_workspace_skills_encode_extensionless_officecli_binary(tmp_path, monkeypatch):
+def test_workspace_skills_do_not_sync_officecli_binary(tmp_path, monkeypatch):
     monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
     skill_dir = tmp_path / "tenant-1" / "officecli"
     skill_dir.mkdir(parents=True)
@@ -435,7 +435,8 @@ def test_workspace_skills_encode_extensionless_officecli_binary(tmp_path, monkey
 
     files = render_workspace_files(employee, None, [skill])["skills"]["officecli"]
 
-    assert files["officecli-linux-x64"]["encoding"] == "base64"
+    assert "officecli-linux-x64" not in files
+    assert "SKILL.md" in files
 
 
 def test_system_prompt_has_no_skill_listing(tmp_path, monkeypatch):

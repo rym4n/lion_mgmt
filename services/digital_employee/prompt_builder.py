@@ -6,7 +6,6 @@ from typing import Any
 
 from .skill_storage import (
     ALLOWED_SKILL_SUFFIXES,
-    OFFICECLI_BINARY_MAX_BYTES,
     OFFICECLI_BINARY_NAMES,
     SKILL_BINARY_MAX_BYTES,
     SKILL_BINARY_SUFFIXES,
@@ -29,19 +28,13 @@ def _read_skill_files(skill: Any) -> dict[str, Any]:
         return {}
     files: dict[str, Any] = {}
     for path in sorted(root.rglob("*")):
-        is_officecli_binary = (
-            path.parent.name == "officecli" and path.name in OFFICECLI_BINARY_NAMES
-        )
-        if not path.is_file() or (
-            path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES and not is_officecli_binary
-        ):
+        if path.name in OFFICECLI_BINARY_NAMES:
+            continue
+        if not path.is_file() or path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES:
             continue
         size = path.stat().st_size
-        if path.suffix.lower() in SKILL_BINARY_SUFFIXES or is_officecli_binary:
-            max_binary_bytes = (
-                OFFICECLI_BINARY_MAX_BYTES if is_officecli_binary else SKILL_BINARY_MAX_BYTES
-            )
-            if size > max_binary_bytes:
+        if path.suffix.lower() in SKILL_BINARY_SUFFIXES:
+            if size > SKILL_BINARY_MAX_BYTES:
                 continue
             files[path.relative_to(root).as_posix()] = {
                 "encoding": "base64",

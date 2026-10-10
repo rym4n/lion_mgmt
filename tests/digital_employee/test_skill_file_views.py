@@ -27,6 +27,13 @@ def test_read_endpoint_allows_binary_asset_limit():
     assert "SKILL_BINARY_MAX_BYTES" in source
 
 
+def test_legacy_officecli_executables_are_hidden_from_skill_files():
+    assert "OFFICECLI_BINARY_NAMES" in _source("skill_files")
+    assert "OFFICECLI_BINARY_NAMES" in _source("skill_file_read")
+    write = _source("skill_file_write")
+    assert write.index("OFFICECLI_BINARY_NAMES") < write.index("clone_builtin_skill_to_tenant")
+
+
 def test_write_endpoint_requires_update_permission():
     source = _source("skill_file_write")
     assert "digital_employee_skill:u" in source or "_require_save_permission" in source

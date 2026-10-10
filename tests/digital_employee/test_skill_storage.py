@@ -22,9 +22,10 @@ def test_resolves_file_inside_skill_dir():
     assert str(tenant_skill_root(TENANT)) in str(path)
 
 
-def test_officecli_binary_is_accepted_as_binary_skill_asset():
-    assert is_binary_skill_asset("officecli-linux-x64")
-    validate_skill_asset("officecli-linux-x64", 34 * 1024 * 1024)
+@pytest.mark.parametrize("name", ["officecli", "officecli-linux-x64", "officecli-linux-arm64"])
+def test_officecli_binary_cannot_be_uploaded_as_skill_asset(name):
+    with pytest.raises(CustomError):
+        validate_skill_asset(name, 1)
 
 
 @pytest.mark.parametrize(

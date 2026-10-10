@@ -716,6 +716,22 @@ def test_stage_files_lists_nested_payload(tmp_path):
     assert _stage_files(tmp_path / "playbooks") == ["nested/tool.zip", "workflow.json"]
 
 
+def test_export_skips_legacy_officecli_executable(tmp_path):
+    source = tmp_path / "officecli"
+    source.mkdir()
+    (source / "SKILL.md").write_text("# officecli", encoding="utf-8")
+    (source / "officecli-linux-x64").write_bytes(b"\x7fELF")
+    (source / "bin").mkdir()
+    (source / "bin" / "officecli").write_bytes(b"\x7fELF")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        package_importer._archive_package_directory(archive, source, "skills/officecli")
+
+    with zipfile.ZipFile(buffer) as archive:
+        assert archive.namelist() == ["skills/officecli/SKILL.md"]
+
+
 def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
     role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
     alert_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
