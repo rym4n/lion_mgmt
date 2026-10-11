@@ -383,6 +383,14 @@ def normalize_runtime_event(event_type: str, payload: Any) -> dict:
             "tool_call": {"tool_name": tool_name, "status": status, "data": tool_data},
             "metadata": {"runtime_event": event_type, "payload": data},
         }
+    if event_type == "tool_error":
+        tool_data = data.get("data") if isinstance(data.get("data"), dict) else data
+        return {
+            "event_type": "runtime_tool_call",
+            "message": tool_data.get("message") or "工具调用被拒绝",
+            "tool_call": {"tool_name": _runtime_tool_name(tool_data), "status": "denied", "data": tool_data},
+            "metadata": {"runtime_event": event_type, "payload": data},
+        }
     if event_type == "approval_required":
         requested_action = _runtime_control_action(data)
         return {

@@ -784,6 +784,36 @@ def test_runtime_tool_call_normalization_accepts_agentscope_tool_call_name():
     assert normalized["tool_call"]["tool_name"] == "aioe_cli"
 
 
+def test_denied_tool_result_is_recorded_without_failing_task():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+
+    normalized = asyncio.run(run_manager.record_runtime_event(
+        task,
+        run,
+        "tool_error",
+        {
+            "data": {
+                "type": "TOOL_RESULT_END",
+                "tool_call_id": "read-xlsx",
+                "tool_call_name": "Read",
+                "state": "denied",
+                "message": "Office documents must be read with the officecli tool",
+            },
+            "blocking": False,
+            "retryable": True,
+        },
+    ))
+
+    assert normalized["event_type"] == "runtime_tool_call"
+    assert normalized["message"] == "Office documents must be read with the officecli tool"
+    assert run.tool_calls[-1]["status"] == "denied"
+    assert run.status == "running"
+    assert task.status == "running"
+    assert RECORDED_EVENTS[-1][0] == "runtime_tool_call"
+
+
 def test_runtime_approval_uses_agentscope_requested_action_shape():
     run_manager = _load_run_manager()
     task = _task()

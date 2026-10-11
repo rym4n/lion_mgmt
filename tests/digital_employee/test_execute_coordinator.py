@@ -680,6 +680,47 @@ def test_non_blocking_runtime_events_do_not_abort_command_run():
     ]
 
 
+def test_denied_tool_result_allows_officecli_recovery_in_same_run():
+    progress_calls = []
+    _install_stubs(progress_calls)
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+
+    async def recovery_stream(**payload):
+        yield "tool_error", {
+            "data": {"tool_call_name": "Read", "state": "denied", "message": "Use officecli"},
+            "blocking": False,
+            "retryable": True,
+        }
+        yield "tool_call", {"data": {"tool_call_name": "officecli"}, "status": "completed"}
+        yield "end", {"content": "report complete"}
+
+    execute_coordinator.stream_prompt_events = recovery_stream
+    task = FakeTask(
+        id="task-1", tenant_id="tenant-1", run_id="run-1", room_id=None,
+        creator_id="creator-1", source="manual", progress=0, status="pending",
+        title="report", description="create report", payload={}, result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="ops")
+    seen = []
+
+    async def on_runtime_event(event_type, event):
+        seen.append(event_type)
+        return {"event_type": event_type}
+
+    result = asyncio.run(execute_coordinator.run(
+        task, employee, command_run=SimpleNamespace(run_id="run-1"),
+        on_runtime_event=on_runtime_event,
+    ))
+
+    assert result["content"] == "report complete"
+    assert "policy" not in result
+    assert seen == ["tool_error", "tool_call", "end"]
+
+
 def test_memory_owner_is_employee_not_continuation_workspace():
     """SPEC §5.5：continuation 执行的记忆必须仍归员工本体。
 
