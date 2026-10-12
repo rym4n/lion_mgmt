@@ -27,6 +27,7 @@ KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 ASSET_MODEL_STATUSES = {"active", "disabled"}
 ASSET_STATUSES = {"active", "disabled", "archived"}
 RISK_STATUSES = {"normal", "low", "medium", "high"}
+ASSET_BULK_DELETE_MAX_IDS = 100
 
 
 def require_dict(data) -> dict:
@@ -1468,6 +1469,69 @@ async def delete_asset_instance(
         )
         await asset.delete(using_db=connection)
         return {"id": asset.id}
+
+
+async def delete_asset_instances(tenant: str, asset_ids: list[str]) -> dict:
+    """Delete selected instances atomically, preserving external-reference guards."""
+    if (
+        not isinstance(asset_ids, list)
+        or not asset_ids
+        or len(asset_ids) > ASSET_BULK_DELETE_MAX_IDS
+        or any(
+            not isinstance(asset_id, str) or not asset_id.strip()
+            for asset_id in asset_ids
+        )
+        or len(asset_ids) != len(set(asset_ids))
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    async with structure_write_transaction(tenant) as connection:
+        assets = (
+            await AssetInstance.filter(
+                id__in=asset_ids,
+                tenant_id=tenant,
+                deleted=False,
+            )
+            .using_db(connection)
+            .order_by("id")
+            .select_for_update()
+            .all()
+        )
+        if len(assets) != len(asset_ids):
+            raise CustomError(ErrorCode.NOT_FOUND)
+        if len({asset.asset_model_id for asset in assets}) != 1:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        incoming_references = (
+            await AssetReference.filter(
+                tenant_id=tenant,
+                target_asset_id__in=asset_ids,
+                deleted=False,
+            )
+            .exclude(source_asset_id__in=asset_ids)
+            .using_db(connection)
+            .all()
+        )
+        blocked_ids = {item.target_asset_id for item in incoming_references}
+        blocked = [
+            {"id": asset.id, "name": asset.name}
+            for asset in assets
+            if asset.id in blocked_ids
+        ]
+        if blocked:
+            return {"deleted_ids": [], "blocked": blocked}
+
+        await (
+            AssetReference.filter(
+                tenant_id=tenant,
+                source_asset_id__in=asset_ids,
+            )
+            .using_db(connection)
+            .delete()
+        )
+        for asset_id in asset_ids:
+            await delete_asset_instance(tenant, asset_id, connection=connection)
+        return {"deleted_ids": asset_ids, "blocked": []}
 
 
 async def delete_asset_model(

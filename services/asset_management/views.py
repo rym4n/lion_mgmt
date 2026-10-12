@@ -37,6 +37,7 @@ from services.asset_management.manager import (
     asset_directory_options,
     build_reference_graph,
     delete_asset_instance,
+    delete_asset_instances,
     delete_asset_model,
     delete_field,
     export_asset_model_package,
@@ -891,6 +892,18 @@ async def asset_delete(request: Request):
         await delete_asset_instance(
             tenant_id(request),
             data.get("id") or data.get("asset_id"),
+        )
+    )
+
+
+@asset_management_bp.post("/asset/delete-batch")
+@openapi.definition(summary="批量删除资产实例")
+@requires_permission("asset_management:d")
+async def asset_delete_batch(request: Request):
+    return response_ok(
+        await delete_asset_instances(
+            tenant_id(request),
+            _json(request).get("ids"),
         )
     )
 
