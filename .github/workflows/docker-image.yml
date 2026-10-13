@@ -22,6 +22,7 @@ jobs:
 
     env:
       REGISTRY_IMAGE: reg.hongcloud.net/lion_mgmt
+      IMAGE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
 
     steps:
       - name: Checkout code
@@ -43,31 +44,17 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push image by digest
-        id: build
+      - name: Build and push architecture image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          push: true
+          tags: ${{ env.REGISTRY_IMAGE }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }}
           cache-from: type=gha,scope=lion_mgmt-${{ matrix.arch }}
           cache-to: type=gha,scope=lion_mgmt-${{ matrix.arch }},mode=max
           provenance: false
-
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.arch }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
 
   merge-manifest:
     name: Merge multi-arch manifest
@@ -75,6 +62,7 @@ jobs:
     needs: build-images
     env:
       REGISTRY_IMAGE: reg.hongcloud.net/lion_mgmt
+      IMAGE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
 
     steps:
       - name: Set up Docker Buildx
@@ -87,39 +75,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: digests-*
-          merge-multiple: true
-
-      - name: Extract image tag
-        id: meta
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "tag=latest" >> "${GITHUB_OUTPUT}"
-          fi
-
       - name: Create multi-arch manifest
-        working-directory: /tmp/digests
         run: |
-          mapfile -t digests < <(find . -maxdepth 1 -type f -printf '%f\n' | sort)
-          if [[ "${#digests[@]}" -ne 2 ]]; then
-            echo "Expected 2 architecture digests, found ${#digests[@]}" >&2
-            exit 1
-          fi
-
-          sources=()
-          for digest in "${digests[@]}"; do
-            sources+=("${REGISTRY_IMAGE}@sha256:${digest}")
-          done
-
           docker buildx imagetools create \
-            --tag "${REGISTRY_IMAGE}:${{ steps.meta.outputs.tag }}" \
-            "${sources[@]}"
+            --tag "${REGISTRY_IMAGE}:${IMAGE_TAG}" \
+            "${REGISTRY_IMAGE}:${IMAGE_TAG}-amd64" \
+            "${REGISTRY_IMAGE}:${IMAGE_TAG}-arm64"
 
       - name: Inspect multi-arch manifest
-        run: docker buildx imagetools inspect "${REGISTRY_IMAGE}:${{ steps.meta.outputs.tag }}"
+        run: docker buildx imagetools inspect "${REGISTRY_IMAGE}:${IMAGE_TAG}"
