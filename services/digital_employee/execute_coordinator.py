@@ -1,5 +1,6 @@
 import base64
 import orjson
+from contextlib import aclosing
 from aiocache import caches
 from sanic.log import logger
 from typing import Awaitable, Callable
@@ -292,45 +293,46 @@ async def run(
     content = []
     saw_delta = False
     usage = _zero_usage()
-    await update_task_progress(task, {"status": "running", "progress": max(task.progress or 0, 1), "message": "数字伙伴开始执行"}, operator_id)
-    async for event_type, event in stream_prompt_events(**payload):
-        runtime_event: dict | None = None
-        if on_runtime_event:
-            runtime_event = await on_runtime_event(event_type, event)
-            if runtime_event and runtime_event.get("event_type") in {"approval_required", "policy_denied"}:
-                return {
-                    "content": "".join(content),
-                    "usage": usage,
-                    "policy": runtime_event["event_type"],
-                    "run_id": getattr(command_run, "run_id", None) or task.run_id,
-                    "runtime_event": runtime_event,
-                }
-        if event_type in {"delta", "end"}:
-            value = event.get("content") or event.get("delta")
-            if event_type == "delta" and value:
-                saw_delta = True
-                content.append(str(value))
-                await _publish_room_event(task, event_type, event, operator_id)
-            elif event_type == "end":
-                usage = _normalize_usage(event.get("usage"))
-                if value and not saw_delta:
+    await update_task_progress(task, {"status": "running", "message": "数字伙伴开始执行"}, operator_id)
+    async with aclosing(stream_prompt_events(**payload)) as stream:
+        async for event_type, event in stream:
+            runtime_event: dict | None = None
+            if on_runtime_event:
+                runtime_event = await on_runtime_event(event_type, event)
+                if runtime_event and runtime_event.get("event_type") in {"approval_required", "policy_denied"}:
+                    return {
+                        "content": "".join(content),
+                        "usage": usage,
+                        "policy": runtime_event["event_type"],
+                        "run_id": getattr(command_run, "run_id", None) or task.run_id,
+                        "runtime_event": runtime_event,
+                    }
+            if event_type in {"delta", "end"}:
+                value = event.get("content") or event.get("delta")
+                if event_type == "delta" and value:
+                    saw_delta = True
                     content.append(str(value))
-                    await _publish_room_event(task, "delta", {"content": value}, operator_id)
-                await _publish_room_end(task, operator_id)
-        elif event_type == "error":
-            # The callback has already persisted the structured runtime error.
-            # Non-blocking errors are diagnostics and must not abort the task;
-            # only an explicitly blocking event ends the business execution.
-            if event.get("blocking", True) is False:
-                await _publish_room_event(task, "runtime_degraded", event, operator_id)
-                continue
-            raise RuntimeEventError(event)
-        elif event_type == "runtime_degraded":
-            # Compression/memory degradation is recorded by the callback and
-            # remains visible to the operator, but does not change task status.
-            await _publish_room_event(task, event_type, event, operator_id)
-        else:
-            await _publish_room_event(task, event_type, event, operator_id)
+                    await _publish_room_event(task, event_type, event, operator_id)
+                elif event_type == "end":
+                    usage = _normalize_usage(event.get("usage"))
+                    if value and not saw_delta:
+                        content.append(str(value))
+                        await _publish_room_event(task, "delta", {"content": value}, operator_id)
+                    await _publish_room_end(task, operator_id)
+            elif event_type == "error":
+                # The callback has already persisted the structured runtime error.
+                # Non-blocking errors are diagnostics and must not abort the task;
+                # only an explicitly blocking event ends the business execution.
+                if event.get("blocking", True) is False:
+                    await _publish_room_event(task, "runtime_degraded", event, operator_id)
+                    continue
+                raise RuntimeEventError(event)
+            elif event_type == "runtime_degraded":
+                # Compression/memory degradation is recorded by the callback and
+                # remains visible to the operator, but does not change task status.
+                await _publish_room_event(task, event_type, event, operator_id)
+            else:
+                await _publish_room_event(task, event_type, event, operator_id)
     result_content = "".join(content)
     if command_run is None:
         task.result = result_content

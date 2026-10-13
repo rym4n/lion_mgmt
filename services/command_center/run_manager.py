@@ -73,6 +73,9 @@ RUNTIME_TOOL_CALLS_MAX = 100
 RUNTIME_DIAGNOSTICS_MAX = 100
 RUNTIME_BINARY_MARKER = "[binary runtime output omitted]"
 RUNTIME_TRUNCATION_MARKER = "[runtime event truncated]"
+RUNTIME_EVENT_BUFFER_TTL_SECONDS = 24 * 60 * 60
+RUNTIME_EVENT_BUFFER_KEY_PREFIX = "command_center:runtime_events"
+RUNTIME_EVENT_PERSISTED_COUNT_KEY = "_runtime_event_persisted_count"
 RUN_SYNC_FIELDS = (
     "status",
     "heartbeat_at",
@@ -96,6 +99,31 @@ class RunRetryConflict(ValueError):
 
 def _now() -> datetime:
     return datetime.now(TZ)
+
+
+class TaskExecutionDeadlineExceeded(TimeoutError):
+    """Only the command run's own execution deadline expired."""
+
+
+def _remaining_task_execution_seconds(task: CommandTask) -> float:
+    timeout_seconds = getattr(task, "timeout_seconds", 3600)
+    started_at = getattr(task, "started_at", None)
+    if started_at is None:
+        return float(timeout_seconds)
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=TZ)
+    return max(0.0, float(timeout_seconds) - (_now() - started_at).total_seconds())
+
+
+async def _run_with_execution_deadline(task: CommandTask, work):
+    timeout_scope = asyncio.timeout(_remaining_task_execution_seconds(task))
+    try:
+        async with timeout_scope:
+            return await work()
+    except TimeoutError as exc:
+        if timeout_scope.expired():
+            raise TaskExecutionDeadlineExceeded("command run execution deadline exceeded") from exc
+        raise
 
 
 def _sync_run(run: CommandTaskRun, locked_run: CommandTaskRun) -> None:
@@ -193,6 +221,178 @@ def _bound_runtime_value(value: Any, limit: int = RUNTIME_EVENT_MAX_BYTES) -> An
 
 def _sanitize_runtime_event(event: dict) -> dict:
     return _bound_runtime_value(_sanitize_runtime_value(event))
+
+
+def runtime_event_buffer_key(task: CommandTask, run: CommandTaskRun) -> str:
+    """Return the Redis key for one isolated execution transcript."""
+    return ":".join(
+        (
+            RUNTIME_EVENT_BUFFER_KEY_PREFIX,
+            str(task.tenant_id),
+            str(task.id),
+            str(run.run_id),
+        )
+    )
+
+
+def _runtime_event_cache():
+    from aiocache import caches
+
+    return caches.get("redis_mgmt")
+
+
+def _runtime_event_envelope(
+    task: CommandTask,
+    run: CommandTaskRun,
+    normalized: dict,
+    operator_id: str | None,
+) -> dict:
+    return {
+        "event_id": uuid.uuid4().hex,
+        "task_id": str(task.id),
+        "tenant_id": str(task.tenant_id),
+        "run_id": str(run.run_id),
+        "ctime": _now().isoformat(),
+        "status": normalized.get("task_status") or getattr(task, "status", None),
+        "progress": getattr(task, "progress", None),
+        "agent_key": getattr(task, "assigned_agent_key", None),
+        "operator_id": operator_id,
+        "event": normalized,
+    }
+
+
+async def _buffer_runtime_event(
+    task: CommandTask,
+    run: CommandTaskRun,
+    envelope: dict,
+) -> bool:
+    """Append a sanitized runtime event to Redis without touching PostgreSQL."""
+    key = runtime_event_buffer_key(task, run)
+    try:
+        client = _runtime_event_cache().client
+        await client.rpush(
+            key,
+            json.dumps(
+                envelope,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ),
+        )
+    except Exception as exc:
+        logger.warning(
+            "command-center runtime event Redis buffer failed: task_id=%s run_id=%s error=%s",
+            getattr(task, "id", None),
+            getattr(run, "run_id", None),
+            exc,
+        )
+        return False
+    try:
+        await client.expire(key, RUNTIME_EVENT_BUFFER_TTL_SECONDS)
+    except Exception as exc:
+        logger.warning(
+            "command-center runtime event Redis buffer expiry failed: task_id=%s run_id=%s error=%s",
+            getattr(task, "id", None),
+            getattr(run, "run_id", None),
+            exc,
+        )
+    return True
+
+
+async def _read_runtime_event_buffer(task: CommandTask, run: CommandTaskRun) -> list[dict]:
+    try:
+        values = await _runtime_event_cache().client.lrange(runtime_event_buffer_key(task, run), 0, -1)
+    except Exception as exc:
+        logger.warning(
+            "command-center runtime event Redis buffer read failed: task_id=%s run_id=%s error=%s",
+            getattr(task, "id", None),
+            getattr(run, "run_id", None),
+            exc,
+        )
+        raise
+    events = []
+    for value in values or []:
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "replace")
+        try:
+            envelope = json.loads(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid runtime event buffer entry for run {run.run_id}") from exc
+        if not isinstance(envelope, dict) or not isinstance(envelope.get("event"), dict):
+            raise ValueError(f"invalid runtime event buffer entry for run {run.run_id}")
+        events.append(envelope)
+    return events
+
+
+async def _clear_runtime_event_buffer(task: CommandTask, run: CommandTaskRun) -> None:
+    try:
+        await _runtime_event_cache().client.delete(runtime_event_buffer_key(task, run))
+    except Exception as exc:
+        logger.warning(
+            "command-center runtime event Redis buffer cleanup failed: task_id=%s run_id=%s error=%s",
+            getattr(task, "id", None),
+            getattr(run, "run_id", None),
+            exc,
+        )
+
+
+def _runtime_event_row(task: CommandTask, run: CommandTaskRun, envelope: dict):
+    from models.command_center import CommandTaskEvent
+
+    event = envelope["event"]
+    metadata = dict(event.get("metadata") or {})
+    metadata["run_id"] = envelope.get("run_id") or run.run_id
+    for field in ("code", "blocking", "tool_call", "requested_action"):
+        if field in event:
+            metadata[field] = event[field]
+    created_at = envelope.get("ctime")
+    try:
+        created_at = datetime.fromisoformat(created_at) if created_at else None
+    except (TypeError, ValueError):
+        created_at = None
+    kwargs = {
+        "id": envelope.get("event_id") or uuid.uuid4().hex,
+        "tenant_id": envelope.get("tenant_id") or task.tenant_id,
+        "task": task,
+        "event_type": event.get("event_type") or "runtime_progress",
+        "status": envelope.get("status") or getattr(task, "status", None),
+        "progress": envelope.get("progress"),
+        "agent_key": envelope.get("agent_key"),
+        "message": event.get("message"),
+        "metadata": metadata,
+        "operator_id": envelope.get("operator_id"),
+    }
+    if created_at is not None:
+        kwargs["ctime"] = created_at
+        kwargs["utime"] = created_at
+    return CommandTaskEvent(**kwargs)
+
+
+async def _persist_runtime_event_buffer(
+    task: CommandTask,
+    run: CommandTaskRun,
+    connection,
+) -> int:
+    """Persist a run's buffered stream in one database batch."""
+    envelopes = await _read_runtime_event_buffer(task, run)
+    metadata = run.metadata if isinstance(run.metadata, dict) else {}
+    persisted_count = metadata.get(RUNTIME_EVENT_PERSISTED_COUNT_KEY, 0)
+    if not isinstance(persisted_count, int) or persisted_count < 0:
+        raise ValueError(f"invalid runtime event persistence cursor for run {run.run_id}")
+    if len(envelopes) <= persisted_count:
+        return 0
+    from models.command_center import CommandTaskEvent
+
+    rows = [_runtime_event_row(task, run, envelope) for envelope in envelopes[persisted_count:]]
+    await CommandTaskEvent.bulk_create(
+        rows,
+        batch_size=500,
+        ignore_conflicts=True,
+        using_db=connection,
+    )
+    run.metadata = {**metadata, RUNTIME_EVENT_PERSISTED_COUNT_KEY: len(envelopes)}
+    await run.save(using_db=connection, update_fields=["metadata", "utime"])
+    return len(rows)
 
 
 def _runtime_control_action(payload: dict) -> dict:
@@ -666,14 +866,64 @@ async def record_runtime_event(
     payload: Any,
     operator_id: str | None = None,
 ) -> dict | None:
+    normalized = _sanitize_runtime_event(normalize_runtime_event(event_type, payload))
+
+    # Runtime stream data stays in Redis while the run is active. Keep the
+    # bounded run-local aggregates in memory so the terminal write can save
+    # them together with the final state.
+    if normalized.get("tool_call"):
+        run.tool_calls = _sanitize_runtime_value(
+            [*(getattr(run, "tool_calls", None) or []), normalized["tool_call"]][-RUNTIME_TOOL_CALLS_MAX:]
+        )
+        run._runtime_tool_calls_dirty = True
+    if normalized.get("error"):
+        run.error = normalized["error"]
+        run._runtime_error_dirty = True
+    if normalized["event_type"] == "runtime_degraded":
+        run.metadata = _merge_runtime_diagnostics(
+            getattr(run, "metadata", None),
+            normalized.get("metadata", {}).get("payload"),
+        )
+        run._runtime_metadata_dirty = True
+    elif normalized["event_type"] == "runtime_memory":
+        metadata = getattr(run, "metadata", None) if isinstance(getattr(run, "metadata", None), dict) else {}
+        run.metadata = {
+            **metadata,
+            "memory_status": normalized.get("metadata", {}).get("memory_status"),
+        }
+        run._runtime_metadata_dirty = True
+
+    if getattr(run, "status", None) not in RECOVERABLE_RUN_STATUSES:
+        return None
+    if getattr(task, "run_id", None) != getattr(run, "run_id", None):
+        return None
+    if getattr(task, "status", None) not in {COMMAND_TASK_STATUS_DISPATCHED, COMMAND_TASK_STATUS_RUNNING}:
+        return None
+    if run.status == COMMAND_RUN_STATUS_CHECKED_OUT:
+        run.status = COMMAND_RUN_STATUS_RUNNING
+
+    envelope = _runtime_event_envelope(task, run, normalized, operator_id)
+    buffered = await _buffer_runtime_event(task, run, envelope)
+    # Normal stream events do not open a PostgreSQL transaction. Lease renewal
+    # is maintained independently by _maintain_run_lease().
+    if not buffered:
+        logger.warning(
+            "command-center runtime event falling back to PostgreSQL: task_id=%s run_id=%s event_type=%s",
+            getattr(task, "id", None),
+            getattr(run, "run_id", None),
+            normalized.get("event_type"),
+        )
+    elif not normalized.get("run_status") and not normalized.get("task_status"):
+        return normalized
+
     from services.command_center.manager import (
         apply_task_progress_in_transaction,
         complete_task_progress_after_commit,
         record_task_event,
     )
 
-    normalized = _sanitize_runtime_event(normalize_runtime_event(event_type, payload))
     task_transition = None
+    buffer_persisted = False
     async with in_transaction() as connection:
         locked_run = (
             await CommandTaskRun.filter(id=run.id, deleted=False)
@@ -704,6 +954,15 @@ async def record_runtime_event(
         locked_run.heartbeat_at = now
         locked_run.lease_expires_at = now + timedelta(seconds=DEFAULT_LEASE_SECONDS)
         update_fields = ["heartbeat_at", "lease_expires_at", "utime"]
+        if normalized.get("tool_call"):
+            locked_run.tool_calls = run.tool_calls
+            update_fields.append("tool_calls")
+        if normalized.get("error"):
+            locked_run.error = run.error
+            update_fields.append("error")
+        if normalized["event_type"] == "runtime_degraded" or normalized["event_type"] == "runtime_memory":
+            locked_run.metadata = run.metadata
+            update_fields.append("metadata")
         run_status = normalized.get("run_status")
         if run_status:
             locked_run.status = run_status
@@ -714,27 +973,6 @@ async def record_runtime_event(
         elif locked_run.status == COMMAND_RUN_STATUS_CHECKED_OUT:
             locked_run.status = COMMAND_RUN_STATUS_RUNNING
             update_fields.append("status")
-        if normalized.get("tool_call"):
-            locked_run.tool_calls = _sanitize_runtime_value(
-                [*(locked_run.tool_calls or []), normalized["tool_call"]][-RUNTIME_TOOL_CALLS_MAX:]
-            )
-            update_fields.append("tool_calls")
-        if normalized.get("error"):
-            locked_run.error = normalized["error"]
-            update_fields.append("error")
-        if normalized["event_type"] == "runtime_degraded":
-            locked_run.metadata = _merge_runtime_diagnostics(
-                locked_run.metadata,
-                normalized.get("metadata", {}).get("payload"),
-            )
-            update_fields.append("metadata")
-        elif normalized["event_type"] == "runtime_memory":
-            metadata = locked_run.metadata if isinstance(locked_run.metadata, dict) else {}
-            locked_run.metadata = {
-                **metadata,
-                "memory_status": normalized.get("metadata", {}).get("memory_status"),
-            }
-            update_fields.append("metadata")
         await locked_run.save(using_db=connection, update_fields=sorted(set(update_fields)))
 
         task_status = normalized.get("task_status")
@@ -758,14 +996,17 @@ async def record_runtime_event(
             locked_task.status = task_status
             await locked_task.save(using_db=connection, update_fields=["status", "utime"])
 
-        await record_task_event(
-            locked_task,
-            normalized["event_type"],
-            normalized.get("message"),
-            operator_id,
-            {"run_id": locked_run.run_id, **(normalized.get("metadata") or {})},
-            using_db=connection,
-        )
+        if buffered:
+            await _persist_runtime_event_buffer(locked_task, locked_run, connection)
+            buffer_persisted = True
+        else:
+            from models.command_center import CommandTaskEvent
+
+            await CommandTaskEvent.bulk_create(
+                [_runtime_event_row(locked_task, locked_run, envelope)],
+                ignore_conflicts=True,
+                using_db=connection,
+            )
         if normalized["event_type"] == "approval_required":
             from services.command_center.approval_service import create_approval_request
 
@@ -781,6 +1022,8 @@ async def record_runtime_event(
             )
 
     _sync_run(run, locked_run)
+    if buffer_persisted:
+        await _clear_runtime_event_buffer(task, locked_run)
     if task_transition is not None:
         await complete_task_progress_after_commit(
             task,
@@ -816,6 +1059,15 @@ async def _finalize_run_in_transaction(
     if locked_run.status in COMMAND_RUN_TERMINAL_STATUSES:
         return locked_run, False
 
+    if getattr(run, "_runtime_metadata_dirty", False):
+        persisted_metadata = locked_run.metadata if isinstance(locked_run.metadata, dict) else {}
+        local_metadata = run.metadata if isinstance(getattr(run, "metadata", None), dict) else {}
+        locked_run.metadata = {**persisted_metadata, **local_metadata}
+    if getattr(run, "_runtime_tool_calls_dirty", False):
+        locked_run.tool_calls = list(getattr(run, "tool_calls", None) or [])
+    if getattr(run, "_runtime_error_dirty", False) and error is None:
+        locked_run.error = run.error
+
     locked_run.status = status
     locked_run.finished_at = _now()
     locked_run.heartbeat_at = locked_run.finished_at
@@ -835,6 +1087,7 @@ async def _finalize_run_in_transaction(
             "finished_at",
             "heartbeat_at",
             "metadata",
+            "tool_calls",
             "error",
             "usage",
             "evidence_refs",
@@ -853,6 +1106,7 @@ async def finalize_run(
     usage: dict | None = None,
     evidence_refs: list[str] | None = None,
 ) -> CommandTaskRun:
+    task = None
     async with in_transaction() as connection:
         locked_run, _changed = await _finalize_run_in_transaction(
             connection,
@@ -863,8 +1117,18 @@ async def finalize_run(
             usage=usage,
             evidence_refs=evidence_refs,
         )
+        if locked_run:
+            task = await (
+                CommandTask.filter(id=run.task_id, tenant_id=run.tenant_id, deleted=False)
+                .using_db(connection)
+                .first()
+            )
+            if task:
+                await _persist_runtime_event_buffer(task, locked_run, connection)
     if locked_run:
         _sync_run(run, locked_run)
+    if locked_run and task and locked_run.status in COMMAND_RUN_TERMINAL_STATUSES:
+        await _clear_runtime_event_buffer(task, locked_run)
     return run
 
 
@@ -904,9 +1168,13 @@ async def finalize_run_and_task(
                 operator_id,
                 expected_run_id=locked_run.run_id,
             )
+        if locked_run:
+            await _persist_runtime_event_buffer(task, locked_run, connection)
 
     if locked_run:
         _sync_run(run, locked_run)
+    if locked_run and locked_run.status in COMMAND_RUN_TERMINAL_STATUSES:
+        await _clear_runtime_event_buffer(task, locked_run)
     if task_transition is not None:
         await complete_task_progress_after_commit(task, task_transition, task_data)
     return run
@@ -954,45 +1222,50 @@ async def execute_task_run(
     )
     lease_heartbeat_task = None
     try:
-        if on_run_checked_out:
-            await on_run_checked_out(run)
-        if continuation_approval_id:
-            from services.command_center.manager import record_task_event
-
-            await record_task_event(
-                task,
-                "continuation_started",
-                "审批已通过，重新启动数字伙伴运行",
-                operator_id,
-                {
-                    "approval_id": continuation_approval_id,
-                    "run_id": run.run_id,
-                    "continued_from_run_id": continued_from_run_id,
-                    "policy_mutation": approved_policy_mutation,
-                },
-            )
-        from services.command_center.approval_service import enforce_pre_run_policy
-
-        if not skip_pre_run_policy:
-            policy_result = await enforce_pre_run_policy(task, run, operator_id=operator_id)
-            if policy_result["decision"] != "allow":
-                return {"content": "", "policy": policy_result["decision"], "run_id": run.run_id}
-
         async def _on_runtime_event(event_type: str, payload: dict) -> dict | None:
             return await record_runtime_event(task, run, event_type, payload, operator_id)
 
         lease_heartbeat_task = asyncio.create_task(_maintain_run_lease(run))
         from services.digital_employee.execute_coordinator import run as execute_run
 
-        result = await execute_run(
-            task,
-            employee,
-            operator_id=operator_id,
-            command_run=run,
-            on_runtime_event=_on_runtime_event,
-            continuation_workspace=continuation_workspace,
-        )
+        async def _execute_task():
+            if on_run_checked_out:
+                await on_run_checked_out(run)
+            if continuation_approval_id:
+                from services.command_center.manager import record_task_event
+
+                await record_task_event(
+                    task,
+                    "continuation_started",
+                    "审批已通过，重新启动数字伙伴运行",
+                    operator_id,
+                    {
+                        "approval_id": continuation_approval_id,
+                        "run_id": run.run_id,
+                        "continued_from_run_id": continued_from_run_id,
+                        "policy_mutation": approved_policy_mutation,
+                    },
+                )
+            from services.command_center.approval_service import enforce_pre_run_policy
+
+            if not skip_pre_run_policy:
+                policy_result = await enforce_pre_run_policy(task, run, operator_id=operator_id)
+                if policy_result["decision"] != "allow":
+                    return {"content": "", "policy": policy_result["decision"], "run_id": run.run_id}, True
+            result = await execute_run(
+                task,
+                employee,
+                operator_id=operator_id,
+                command_run=run,
+                on_runtime_event=_on_runtime_event,
+                continuation_workspace=continuation_workspace,
+            )
+            return result, False
+
+        result, pre_run_stopped = await _run_with_execution_deadline(task, _execute_task)
         result = {**(result or {}), "run_id": run.run_id}
+        if pre_run_stopped:
+            return result
         if result.get("policy") == "approval_required":
             return result
         if result.get("policy") == "policy_denied":
@@ -1027,6 +1300,26 @@ async def execute_task_run(
             usage=result.get("usage"),
         )
         return result
+    except TaskExecutionDeadlineExceeded:
+        error = {
+            "layer": "runtime",
+            "code": "task_timeout",
+            "message": "任务执行超过设定时限",
+            "timeout_seconds": getattr(task, "timeout_seconds", 3600),
+        }
+        await finalize_run_and_task(
+            run,
+            task,
+            COMMAND_RUN_STATUS_FAILED,
+            {
+                "status": COMMAND_TASK_STATUS_FAILED,
+                "message": error["message"],
+                "metadata": {"run_id": run.run_id, "code": "task_timeout", "timeout_seconds": error["timeout_seconds"]},
+            },
+            operator_id=operator_id,
+            error=error,
+        )
+        return {"content": "", "run_id": run.run_id, "error": error}
     except Exception as exc:
         failure_layers = await _collect_failure_layers(run, exc)
         try:

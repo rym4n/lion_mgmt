@@ -73,6 +73,7 @@ class CommandAgent(BaseModel):
     status = fields.CharField(max_length=20, default="idle", description="状态: idle,busy,offline,error")
     load = fields.IntField(default=0, description="当前任务负载")
     max_concurrent = fields.IntField(default=1, description="最大并发任务数")
+    max_iters = fields.IntField(default=200, description="单次执行最大轮次")
     current_task_id = fields.CharField(max_length=36, null=True, description="当前主任务ID")
     heartbeat_at = fields.DatetimeField(null=True, description="最近心跳时间")
     metadata = fields.JSONField(default=dict, description="扩展元数据")
@@ -123,6 +124,7 @@ class CommandAgent(BaseModel):
             "status": self.status,
             "load": self.load,
             "max_concurrent": self.max_concurrent,
+            "max_iters": self.max_iters,
             "current_task_id": self.current_task_id,
             "heartbeat_at": strip_timezone_to_seconds(self.heartbeat_at),
             "metadata": self.metadata,
@@ -161,6 +163,7 @@ class CommandTask(BaseModel):
     priority = fields.IntField(default=3, description="优先级，数值越小优先级越高")
     status = fields.CharField(max_length=30, default="pending_dispatch", description="任务状态")
     progress = fields.IntField(default=0, description="任务进度 0-100")
+    timeout_seconds = fields.IntField(default=3600, description="任务执行超时时间，秒")
 
     required_capabilities = fields.JSONField(default=list, description="任务所需能力标签")
     payload = fields.JSONField(default=dict, description="任务载荷")
@@ -211,6 +214,7 @@ class CommandTask(BaseModel):
             "priority": self.priority,
             "status": self.status,
             "progress": self.progress,
+            "timeout_seconds": self.timeout_seconds,
             "required_capabilities": self.required_capabilities,
             "payload": self.payload,
             "requested_agent_id": self.requested_agent_id,

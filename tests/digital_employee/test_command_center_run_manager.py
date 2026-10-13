@@ -19,6 +19,9 @@ RECORDED_EVENTS = []
 UPDATED_PROGRESS = []
 FINALIZED_SAVES = []
 PERSISTED_RUN_METADATA = {}
+RUNTIME_EVENT_BUFFER = {}
+RUNTIME_EVENT_BULK_CREATES = []
+PERSISTED_RUNTIME_EVENTS = {}
 STUB_MODULES = [
     "models",
     "models.command_center",
@@ -35,6 +38,7 @@ STUB_MODULES = [
     "services.digital_employee.execute_coordinator",
     "tortoise",
     "tortoise.transactions",
+    "aiocache",
 ]
 _MISSING_MODULE = object()
 
@@ -58,6 +62,9 @@ def _install_stubs():
     UPDATED_PROGRESS.clear()
     FINALIZED_SAVES.clear()
     PERSISTED_RUN_METADATA.clear()
+    RUNTIME_EVENT_BUFFER.clear()
+    RUNTIME_EVENT_BULK_CREATES.clear()
+    PERSISTED_RUNTIME_EVENTS.clear()
     for name in STUB_MODULES:
         sys.modules.pop(name, None)
 
@@ -279,10 +286,23 @@ def _install_stubs():
             cls.created.append(approval)
             return approval
 
+    class CommandTaskEvent(SimpleNamespace):
+        @classmethod
+        async def bulk_create(cls, events, ignore_conflicts=False, **_kwargs):
+            inserted = []
+            for event in events:
+                if ignore_conflicts and event.id in PERSISTED_RUNTIME_EVENTS:
+                    continue
+                PERSISTED_RUNTIME_EVENTS[event.id] = event
+                inserted.append(event)
+            RUNTIME_EVENT_BULK_CREATES.append(inserted)
+            return inserted
+
     command_center.CommandAgent = CommandAgent
     command_center.CommandTask = CommandTask
     command_center.CommandTaskRun = CommandTaskRun
     command_center.CommandApproval = CommandApproval
+    command_center.CommandTaskEvent = CommandTaskEvent
     sys.modules["models.command_center"] = command_center
 
     tortoise = types.ModuleType("tortoise")
@@ -299,6 +319,26 @@ def _install_stubs():
 
     transactions.in_transaction = Transaction
     sys.modules["tortoise.transactions"] = transactions
+
+    class RedisClient:
+        async def rpush(self, key, value):
+            RUNTIME_EVENT_BUFFER.setdefault(key, []).append(value)
+            return len(RUNTIME_EVENT_BUFFER[key])
+
+        async def expire(self, _key, _ttl):
+            return True
+
+        async def lrange(self, key, start, end):
+            values = RUNTIME_EVENT_BUFFER.get(key, [])
+            return values[start:] if end == -1 else values[start : end + 1]
+
+        async def delete(self, key):
+            RUNTIME_EVENT_BUFFER.pop(key, None)
+            return 1
+
+    aiocache = types.ModuleType("aiocache")
+    aiocache.caches = SimpleNamespace(get=lambda _name: SimpleNamespace(client=RedisClient()))
+    sys.modules["aiocache"] = aiocache
 
     settings = types.ModuleType("settings")
     settings.COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS = 300
@@ -476,6 +516,7 @@ def _task():
         deleted=False,
         status="dispatched",
         progress=0,
+        timeout_seconds=3600,
         run_id=None,
         started_at=None,
         finished_at=None,
@@ -545,6 +586,187 @@ def test_checkout_run_rejects_second_checkout_for_same_task():
     assert RECORDED_EVENTS == initial_events
 
 
+def test_stream_runtime_event_is_buffered_without_postgres_event_insert():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+
+    normalized = asyncio.run(
+        run_manager.record_runtime_event(task, run, "delta", {"content": "hello"})
+    )
+
+    assert normalized["event_type"] == "runtime_delta"
+    assert [event for event in RECORDED_EVENTS if event[0] == "runtime_delta"] == []
+    key = run_manager.runtime_event_buffer_key(task, run)
+    assert len(RUNTIME_EVENT_BUFFER[key]) == 1
+    assert json.loads(RUNTIME_EVENT_BUFFER[key][0])["event"]["event_type"] == "runtime_delta"
+
+
+def test_terminal_finalize_bulk_persists_buffered_runtime_events_and_clears_redis():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(run_manager.record_runtime_event(task, run, "thinking", {"content": "working"}))
+    asyncio.run(run_manager.record_runtime_event(task, run, "delta", {"content": "done"}))
+
+    asyncio.run(
+        run_manager.finalize_run_and_task(
+            run,
+            task,
+            "completed",
+            {"status": "completed", "message": "完成"},
+        )
+    )
+
+    assert len(RUNTIME_EVENT_BULK_CREATES) == 1
+    assert [event.event_type for event in RUNTIME_EVENT_BULK_CREATES[0]] == [
+        "runtime_thinking",
+        "runtime_delta",
+    ]
+    assert run_manager.runtime_event_buffer_key(task, run) not in RUNTIME_EVENT_BUFFER
+
+
+def test_runtime_event_falls_back_to_one_database_event_when_redis_is_unavailable():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+
+    class FailingRedis:
+        async def rpush(self, *_args):
+            raise RuntimeError("redis unavailable")
+
+        async def lrange(self, *_args):
+            raise RuntimeError("redis unavailable")
+
+    sys.modules["aiocache"].caches = SimpleNamespace(
+        get=lambda _name: SimpleNamespace(client=FailingRedis())
+    )
+
+    normalized = asyncio.run(run_manager.record_runtime_event(task, run, "progress", {"message": "fallback"}))
+
+    assert normalized["event_type"] == "runtime_progress"
+    assert next(iter(PERSISTED_RUNTIME_EVENTS.values())).event_type == "runtime_progress"
+
+
+def test_ambiguous_redis_append_and_database_fallback_share_one_event_id():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+
+    class AppendThenTimeout:
+        async def rpush(self, key, value):
+            RUNTIME_EVENT_BUFFER.setdefault(key, []).append(value)
+            raise RuntimeError("response lost after append")
+
+        async def expire(self, *_args):
+            return True
+
+        async def lrange(self, key, start, end):
+            values = RUNTIME_EVENT_BUFFER.get(key, [])
+            return values[start:] if end == -1 else values[start : end + 1]
+
+        async def delete(self, key):
+            RUNTIME_EVENT_BUFFER.pop(key, None)
+            return 1
+
+    redis_client = AppendThenTimeout()
+    sys.modules["aiocache"].caches = SimpleNamespace(
+        get=lambda _name: SimpleNamespace(client=redis_client)
+    )
+
+    asyncio.run(run_manager.record_runtime_event(task, run, "delta", {"content": "hello"}))
+    event_id = next(iter(PERSISTED_RUNTIME_EVENTS))
+    envelope = json.loads(RUNTIME_EVENT_BUFFER[run_manager.runtime_event_buffer_key(task, run)][0])
+
+    asyncio.run(run_manager.finalize_run_and_task(run, task, "completed", {"status": "completed"}))
+
+    assert envelope["event_id"] == event_id
+    assert len(PERSISTED_RUNTIME_EVENTS) == 1
+    assert next(iter(PERSISTED_RUNTIME_EVENTS.values())).event_type == "runtime_delta"
+
+
+def test_runtime_event_expire_failure_does_not_duplicate_successful_append():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+
+    class ExpireFails:
+        async def rpush(self, key, value):
+            RUNTIME_EVENT_BUFFER.setdefault(key, []).append(value)
+            return 1
+
+        async def expire(self, *_args):
+            raise RuntimeError("expire unavailable")
+
+    sys.modules["aiocache"].caches = SimpleNamespace(
+        get=lambda _name: SimpleNamespace(client=ExpireFails())
+    )
+
+    asyncio.run(run_manager.record_runtime_event(task, run, "delta", {"content": "hello"}))
+
+    assert len(RUNTIME_EVENT_BUFFER[run_manager.runtime_event_buffer_key(task, run)]) == 1
+    assert [event for event in RECORDED_EVENTS if event[0] == "runtime_delta"] == []
+
+
+def test_terminal_finalize_does_not_commit_when_redis_buffer_read_fails():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(run_manager.record_runtime_event(task, run, "delta", {"content": "hello"}))
+
+    class ReadFails:
+        async def lrange(self, *_args):
+            raise RuntimeError("redis unavailable")
+
+    sys.modules["aiocache"].caches = SimpleNamespace(
+        get=lambda _name: SimpleNamespace(client=ReadFails())
+    )
+
+    with pytest.raises(RuntimeError, match="redis unavailable"):
+        asyncio.run(run_manager.finalize_run_and_task(run, task, "completed", {"status": "completed"}))
+
+    assert RUNTIME_EVENT_BULK_CREATES == []
+    assert len(RUNTIME_EVENT_BUFFER[run_manager.runtime_event_buffer_key(task, run)]) == 1
+
+
+def test_approval_required_flushes_buffer_at_state_checkpoint():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(run_manager.record_runtime_event(task, run, "delta", {"content": "hello"}))
+
+    asyncio.run(run_manager.record_runtime_event(task, run, "approval_required", {"tool": "write_file"}))
+
+    assert len(RUNTIME_EVENT_BULK_CREATES) == 1
+    assert [event.event_type for event in RUNTIME_EVENT_BULK_CREATES[0]] == [
+        "runtime_delta",
+        "approval_required",
+    ]
+    assert run_manager.runtime_event_buffer_key(task, run) not in RUNTIME_EVENT_BUFFER
+
+
+def test_terminal_finalize_does_not_repeat_database_batch_when_redis_cleanup_fails():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(run_manager.record_runtime_event(task, run, "delta", {"content": "hello"}))
+
+    redis_client = sys.modules["aiocache"].caches.get("redis_mgmt").client
+
+    async def failed_delete(_key):
+        raise RuntimeError("delete unavailable")
+
+    redis_client.delete = failed_delete
+    sys.modules["aiocache"].caches = SimpleNamespace(
+        get=lambda _name: SimpleNamespace(client=redis_client)
+    )
+
+    asyncio.run(run_manager.finalize_run_and_task(run, task, "cancelled", {"status": "cancelled"}))
+    asyncio.run(run_manager.finalize_run_and_task(run, task, "cancelled", {"status": "cancelled"}))
+
+    assert sum(len(batch) for batch in RUNTIME_EVENT_BULK_CREATES) == 1
+
+
 def test_runtime_event_normalization_updates_run_and_approval_wait_state():
     run_manager = _load_run_manager()
     task = _task()
@@ -567,7 +789,7 @@ def test_runtime_event_normalization_updates_run_and_approval_wait_state():
     assert run.status == "waiting_approval"
     assert run.lease_expires_at > initial_lease_expires_at
     assert task.status == "pending_approval"
-    assert RECORDED_EVENTS[-1][0] == "approval_required"
+    assert [event.event_type for event in RUNTIME_EVENT_BULK_CREATES[0]] == ["approval_required"]
     approval = sys.modules["models.command_center"].CommandApproval.created[-1]
     assert approval.status == "pending"
     assert approval.policy_snapshot == {"approval": {"default": "allow"}}
@@ -585,7 +807,10 @@ def test_runtime_progress_omits_binary_output_and_bounds_persisted_event():
     }
 
     normalized = asyncio.run(run_manager.record_runtime_event(task, run, "progress", payload))
-    event_type, message, _, metadata = RECORDED_EVENTS[-1]
+    buffered = json.loads(RUNTIME_EVENT_BUFFER[run_manager.runtime_event_buffer_key(task, run)][0])["event"]
+    event_type = buffered["event_type"]
+    message = buffered["message"]
+    metadata = buffered["metadata"]
 
     assert event_type == "runtime_progress"
     assert message == "Read result received"
@@ -606,7 +831,9 @@ def test_runtime_tool_call_removes_nul_from_message_metadata_and_run_history():
     }
 
     normalized = asyncio.run(run_manager.record_runtime_event(task, run, "tool_call", payload))
-    _, message, _, metadata = RECORDED_EVENTS[-1]
+    buffered = json.loads(RUNTIME_EVENT_BUFFER[run_manager.runtime_event_buffer_key(task, run)][0])["event"]
+    message = buffered["message"]
+    metadata = buffered["metadata"]
 
     assert "\x00" not in message
     assert "\\u0000" not in json.dumps(metadata, ensure_ascii=False, allow_nan=False)
@@ -629,7 +856,8 @@ def test_runtime_event_bounds_large_plain_text_without_changing_short_text():
 
     assert normalized["message"] == "ordinary status"
     assert normalized["metadata"]["payload"]["details"]["summary"] == "kept"
-    assert len(json.dumps(RECORDED_EVENTS[-1][3], allow_nan=False)) < 65_536
+    buffered = json.loads(RUNTIME_EVENT_BUFFER[run_manager.runtime_event_buffer_key(task, run)][0])["event"]
+    assert len(json.dumps(buffered["metadata"], allow_nan=False)) < 65_536
 
 
 def test_runtime_event_converts_non_finite_numbers_before_jsonb_insert():
@@ -727,7 +955,7 @@ def test_runtime_error_finalizes_task_through_progress_manager():
     assert task.status == "failed"
     assert UPDATED_PROGRESS[-1][0]["status"] == "failed"
     assert UPDATED_PROGRESS[-1][0]["metadata"]["run_id"] == run.run_id
-    assert RECORDED_EVENTS[-1][0] == "runtime_error"
+    assert [event.event_type for event in RUNTIME_EVENT_BULK_CREATES[0]] == ["runtime_error"]
 
 
 def test_persisted_runtime_error_code_survives_generic_wrapper_exception():
@@ -811,7 +1039,8 @@ def test_denied_tool_result_is_recorded_without_failing_task():
     assert run.tool_calls[-1]["status"] == "denied"
     assert run.status == "running"
     assert task.status == "running"
-    assert RECORDED_EVENTS[-1][0] == "runtime_tool_call"
+    buffered = json.loads(RUNTIME_EVENT_BUFFER[run_manager.runtime_event_buffer_key(task, run)][0])["event"]
+    assert buffered["event_type"] == "runtime_tool_call"
 
 
 def test_runtime_approval_uses_agentscope_requested_action_shape():
@@ -1271,6 +1500,44 @@ def test_execute_task_run_stops_when_runtime_requests_approval():
     assert all(save[0] != "completed" for save in FINALIZED_SAVES)
 
 
+@pytest.mark.parametrize("decision", ["deny", "approval_required"])
+def test_execute_task_run_preserves_pre_run_policy_stop(monkeypatch, decision):
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    finalized = []
+    runtime_started = []
+
+    async def enforce_pre_run_policy(task_arg, run_arg, **_kwargs):
+        task_arg.status = "failed" if decision == "deny" else "pending_approval"
+        run_arg.status = "failed" if decision == "deny" else "waiting_approval"
+        return {"decision": decision}
+
+    async def finalize(*args, **kwargs):
+        finalized.append((args, kwargs))
+
+    async def run(*args, **kwargs):
+        runtime_started.append(True)
+        return {"content": "unexpected"}
+
+    monkeypatch.setattr(
+        sys.modules["services.command_center.approval_service"],
+        "enforce_pre_run_policy", enforce_pre_run_policy,
+    )
+    monkeypatch.setattr(run_manager, "finalize_run_and_task", finalize)
+    execute_coordinator = types.ModuleType("services.digital_employee.execute_coordinator")
+    execute_coordinator.run = run
+    sys.modules["services.digital_employee.execute_coordinator"] = execute_coordinator
+
+    result = asyncio.run(run_manager.execute_task_run(task, employee))
+
+    assert result["policy"] == decision
+    assert runtime_started == []
+    assert finalized == []
+    assert task.status == ("failed" if decision == "deny" else "pending_approval")
+    assert CREATED_RUNS[-1].status == ("failed" if decision == "deny" else "waiting_approval")
+
+
 def test_execute_task_run_renews_lease_during_silent_execution():
     run_manager = _load_run_manager()
     task = _task()
@@ -1300,6 +1567,92 @@ def test_execute_task_run_renews_lease_during_silent_execution():
     assert result["content"] == "done"
     assert heartbeat_observed is True
     assert CREATED_RUNS[-1].status == "completed"
+
+
+def test_execute_task_run_fails_when_task_execution_deadline_expires():
+    run_manager = _load_run_manager()
+    task = _task()
+    task.timeout_seconds = 1
+    task.started_at = datetime.now(timezone.utc) - timedelta(seconds=2)
+    employee = _employee()
+    execute_coordinator = types.ModuleType("services.digital_employee.execute_coordinator")
+
+    async def run(_task_arg, _employee_arg, **_kwargs):
+        await asyncio.sleep(10)
+        return {"content": "too late"}
+
+    execute_coordinator.run = run
+    sys.modules["services.digital_employee.execute_coordinator"] = execute_coordinator
+
+    result = asyncio.run(run_manager.execute_task_run(task, employee))
+
+    assert result["error"]["code"] == "task_timeout"
+    assert task.status == "failed"
+    assert CREATED_RUNS[-1].status == "failed"
+    assert CREATED_RUNS[-1].error["code"] == "task_timeout"
+    assert UPDATED_PROGRESS[-1][0]["metadata"]["code"] == "task_timeout"
+
+
+def test_execute_task_run_does_not_misclassify_runtime_timeout_as_task_deadline():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    execute_coordinator = types.ModuleType("services.digital_employee.execute_coordinator")
+
+    async def run(_task_arg, _employee_arg, **_kwargs):
+        raise TimeoutError("one tool request timed out")
+
+    execute_coordinator.run = run
+    sys.modules["services.digital_employee.execute_coordinator"] = execute_coordinator
+
+    with pytest.raises(TimeoutError, match="one tool request timed out"):
+        asyncio.run(run_manager.execute_task_run(task, employee))
+
+    assert task.status == "failed"
+    assert CREATED_RUNS[-1].status == "failed"
+    assert CREATED_RUNS[-1].error["code"] == "runtime_internal_error"
+    assert UPDATED_PROGRESS[-1][0]["metadata"].get("code") != "task_timeout"
+
+
+def test_task_deadline_covers_run_setup_and_releases_employee_load_once():
+    run_manager = _load_run_manager()
+    task = _task()
+    task.timeout_seconds = 1
+    task.started_at = datetime.now(timezone.utc) - timedelta(seconds=2)
+    employee = _employee()
+    employee.load = 1
+    employee.status = "busy"
+    employee.current_task_id = task.id
+    task.assigned_agent = employee
+    setup_cancelled = []
+    runtime_started = []
+
+    async def setup(_run):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            setup_cancelled.append(True)
+
+    execute_coordinator = types.ModuleType("services.digital_employee.execute_coordinator")
+
+    async def run(_task_arg, _employee_arg, **_kwargs):
+        runtime_started.append(True)
+        return {"content": "unexpected"}
+
+    execute_coordinator.run = run
+    sys.modules["services.digital_employee.execute_coordinator"] = execute_coordinator
+    result = asyncio.run(run_manager.execute_task_run(task, employee, on_run_checked_out=setup))
+
+    assert result["error"]["code"] == "task_timeout"
+    assert setup_cancelled == [True]
+    assert runtime_started == []
+    assert employee.load == 0
+    assert employee.current_task_id is None
+    assert employee.status == "idle"
+    asyncio.run(run_manager.finalize_run_and_task(
+        CREATED_RUNS[-1], task, "failed", {"status": "failed"},
+    ))
+    assert employee.load == 0
 
 
 def test_maintain_run_lease_retries_after_heartbeat_database_error():

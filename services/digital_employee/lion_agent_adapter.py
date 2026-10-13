@@ -1,6 +1,7 @@
 # coding=utf-8
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
 import orjson
@@ -159,19 +160,20 @@ async def stream_prompt_events(
     if response_format is not None:
         payload["response_format"] = response_format
     event_name = "message"
-    async for line in LionAgentClient().stream_execute(payload):
-        if line.startswith("event:"):
-            event_name = line[6:].strip() or "message"
-            continue
-        if not line.startswith("data:"):
-            continue
-        raw = line[5:].strip()
-        if not raw or raw == "[DONE]":
-            continue
-        try:
-            data = orjson.loads(raw)
-        except orjson.JSONDecodeError:
-            data = {"content": raw}
-        if not isinstance(data, dict):
-            data = {"content": data}
-        yield event_name, data
+    async with aclosing(LionAgentClient().stream_execute(payload)) as stream:
+        async for line in stream:
+            if line.startswith("event:"):
+                event_name = line[6:].strip() or "message"
+                continue
+            if not line.startswith("data:"):
+                continue
+            raw = line[5:].strip()
+            if not raw or raw == "[DONE]":
+                continue
+            try:
+                data = orjson.loads(raw)
+            except orjson.JSONDecodeError:
+                data = {"content": raw}
+            if not isinstance(data, dict):
+                data = {"content": data}
+            yield event_name, data

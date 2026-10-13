@@ -114,6 +114,40 @@ def test_employee_dispatch_normalizes_rich_content_and_attachments_into_payload(
     assert task.json == {"id": "task-1"}
     assert captured[0][2]["payload"]["content_html"] == "<p>检查 <strong>图片</strong></p>"
     assert captured[0][2]["payload"]["attachments"] == [{"file_id": "attach-1.png", "kind": "image"}]
+    assert captured[0][2]["timeout_seconds"] == 3600
+
+
+def test_employee_dispatch_forwards_requested_timeout_seconds(monkeypatch):
+    captured = []
+
+    async def fake_create_command_task(tenant_id, account_info, data):
+        captured.append(data)
+        return SimpleNamespace(json={"id": "task-1"})
+
+    monkeypatch.setattr(views, "create_command_task", fake_create_command_task)
+    asyncio.run(views._dispatch_employee_task(
+        _request(body={"description": "Check", "timeout_seconds": 7200}),
+        "tenant-1", None,
+    ))
+    assert captured[0]["timeout_seconds"] == 7200
+
+
+def test_employee_dispatch_maps_invalid_timeout_to_parameter_error(monkeypatch):
+    from services.command_center.manager import InvalidTaskTimeout
+
+    async def fake_create_command_task(tenant_id, account_info, data):
+        assert data["timeout_seconds"] == 0
+        raise InvalidTaskTimeout("timeout_seconds must be a positive integer")
+
+    monkeypatch.setattr(views, "create_command_task", fake_create_command_task)
+
+    with pytest.raises(views.CustomError) as exc:
+        asyncio.run(views._dispatch_employee_task(
+            _request(body={"description": "Check", "timeout_seconds": 0}),
+            "tenant-1", None,
+        ))
+
+    assert exc.value.enum == views.ErrorCode.PARAM_VALUE_ERROR
 
 
 def test_employee_list_payload_attaches_visible_role_meta(monkeypatch):
@@ -590,6 +624,7 @@ def test_employee_create_forwards_llm_config_id_and_normalizes_blank_value(
                     "role_key": "ops",
                     "name": "Operations",
                     "llm_config_id": submitted_config_id,
+                    "max_iters": 500,
                 }
             )
         )
@@ -597,6 +632,7 @@ def test_employee_create_forwards_llm_config_id_and_normalizes_blank_value(
 
     assert out == {"id": "employee-1"}
     assert create_calls[0]["llm_config_id"] == expected_config_id
+    assert create_calls[0]["max_iters"] == 500
     assert events == [("tenant-1", "employee_created", "employee-1")]
 
 
@@ -638,6 +674,7 @@ def test_employee_update_delegates_llm_config_id_and_normalizes_blank_value(
                     "employee_id": "employee-1",
                     "name": "Updated operations",
                     "llm_config_id": submitted_config_id,
+                    "max_iters": 500,
                 }
             )
         )
@@ -650,6 +687,7 @@ def test_employee_update_delegates_llm_config_id_and_normalizes_blank_value(
             {
                 "name": "Updated operations",
                 "llm_config_id": expected_config_id,
+                "max_iters": 500,
             },
         )
     ]

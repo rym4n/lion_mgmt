@@ -168,4 +168,16 @@ def test_existing_command_task_json_remains_backward_compatible():
         "creator_id",
         "started_at",
         "finished_at",
+        "timeout_seconds",
     }
+    assert out["timeout_seconds"] == 3600
+
+
+def test_employee_json_exposes_default_execution_round_limit():
+    employee = command_center.CommandAgent(
+        id="employee-1", tenant_id="tenant-1", agent_key="ops-1", name="Operations"
+    )
+    employee.role_id = None
+    employee.llm_config_id = None
+
+    assert employee.json["max_iters"] == 200

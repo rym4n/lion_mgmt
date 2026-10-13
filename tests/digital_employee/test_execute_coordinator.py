@@ -292,6 +292,7 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert task.result == "AB"
     assert task.saved_update_fields == [["result", "utime"]]
     assert [call[0]["status"] for call in progress_calls] == ["running", "completed"]
+    assert "progress" not in progress_calls[0][0]
     assert [call[1] for call in progress_calls] == ["operator-1", "operator-1"]
     assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
 
@@ -605,6 +606,45 @@ def test_run_returns_control_event_without_marking_task_completed():
     assert task.result is None
     assert task.saved_update_fields == []
     assert [call[0]["status"] for call in progress_calls] == ["running"]
+
+
+def test_run_closes_runtime_stream_before_returning_approval():
+    progress_calls = []
+    _install_stubs(progress_calls)
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    closed = []
+
+    async def stream(**_payload):
+        try:
+            yield "approval_required", {"tool": "write_file"}
+            await asyncio.Event().wait()
+        finally:
+            closed.append(True)
+
+    execute_coordinator.stream_prompt_events = stream
+    task = FakeTask(
+        id="task-1", tenant_id="tenant-1", run_id=None, room_id=None,
+        creator_id="creator-1", source="manual", progress=0, status="pending",
+        title="report", description="create report", payload={}, result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="ops")
+
+    async def on_runtime_event(event_type, _event):
+        return {"event_type": event_type}
+
+    async def check_before_loop_shutdown():
+        result = await execute_coordinator.run(
+            task, employee, command_run=SimpleNamespace(run_id="run-1"),
+            on_runtime_event=on_runtime_event,
+        )
+        assert result["policy"] == "approval_required"
+        assert closed == [True]
+
+    asyncio.run(check_before_loop_shutdown())
 
 
 def test_run_room_tool_message_uses_agentscope_tool_call_name():

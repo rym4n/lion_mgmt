@@ -91,6 +91,7 @@ def _load_manager(agent, scheduled_reports):
                 run_id=None,
                 saved=False,
             )
+            task.timeout_seconds = kwargs.get("timeout_seconds")
             cls.created.append(task)
             return task
 
@@ -721,6 +722,25 @@ def test_create_command_task_preserves_full_content_and_returns_before_dispatch(
     assert task.assigned_agent_key is None
     assert len(scheduled_tasks) == 1
     assert manager.realtime_events == [("tenant-1", "task_created", "created-task-1")]
+
+
+def test_create_command_task_persists_default_and_custom_execution_timeout():
+    manager = _load_manager(_agent("ops"), [])
+    creator = SimpleNamespace(id="operator-1")
+
+    default = asyncio.run(manager.create_command_task("tenant-1", creator, {"description": "默认时限"}))
+    custom = asyncio.run(manager.create_command_task("tenant-1", creator, {"description": "自定义时限", "timeout_seconds": 90}))
+
+    assert default.timeout_seconds == 3600
+    assert custom.timeout_seconds == 90
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, "abc", True])
+def test_create_command_task_rejects_invalid_execution_timeout(value):
+    manager = _load_manager(_agent("ops"), [])
+
+    with pytest.raises(ValueError):
+        asyncio.run(manager.create_command_task("tenant-1", SimpleNamespace(id="operator-1"), {"description": "任务", "timeout_seconds": value}))
 
 
 def test_create_command_task_keeps_long_content_outside_compatibility_title():

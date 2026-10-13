@@ -26,6 +26,7 @@ def test_task_read_dto_summarizes_payload_and_result_without_raw_values():
             "priority": 1,
             "status": "pending_approval",
             "progress": 30,
+            "timeout_seconds": 7200,
             "required_capabilities": ["ops"],
             "payload": {
                 "secret": "hidden",
@@ -59,6 +60,7 @@ def test_task_read_dto_summarizes_payload_and_result_without_raw_values():
     }
     assert out["result_summary"] == {"present": True, "length": 30}
     assert out["title"] == "Restart database"
+    assert out["timeout_seconds"] == 7200
     assert "clarifications" not in out
     assert "credential-like-secret" not in str(out)
 
@@ -540,6 +542,7 @@ def test_command_task_openapi_enums_include_clarification_state():
     assert "payload" not in views.TASK_SCHEMA["properties"]
     assert "payload_summary" in views.TASK_SCHEMA["properties"]
     assert "result_summary" in views.TASK_SCHEMA["properties"]
+    assert views.TASK_SCHEMA["properties"]["timeout_seconds"]["default"] == 3600
     assert views.TASK_PROGRESS_WRITE_STATUSES == {"running", "completed", "failed", "cancelled"}
     assert "pending_clarification" not in views.TASK_PROGRESS_WRITE_STATUS_ENUM
     assert '"enum": TASK_PROGRESS_WRITE_STATUS_ENUM' in inspect.getsource(views.task_progress)

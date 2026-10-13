@@ -900,6 +900,7 @@ def test_export_employee_package_uses_persisted_role_and_instance_config(tmp_pat
         role_key="monitor",
         skill_keys=["alert_triage"],
         max_concurrent=3,
+        max_iters=400,
         enabled=False,
         rbac_role_id="role-7",
         llm_config_id="llm-2",
@@ -965,6 +966,7 @@ def test_export_employee_package_uses_persisted_role_and_instance_config(tmp_pat
         "role_key": "monitor",
         "skill_keys": ["alert_triage"],
         "max_concurrent": 3,
+        "max_iters": 400,
         "enabled": False,
         "rbac_role_id": "role-7",
         "llm_config_id": "llm-2",
@@ -973,8 +975,12 @@ def test_export_employee_package_uses_persisted_role_and_instance_config(tmp_pat
     }
 
 
+@pytest.mark.parametrize(
+    ("max_iters_payload", "expected_max_iters"),
+    [({"max_iters": 450}, 450), ({}, 200)],
+)
 def test_import_employee_bundle_restores_instance_without_reusing_agent_key(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, max_iters_payload, expected_max_iters
 ):
     resources_root = tmp_path / "resources"
     skill_root = tmp_path / "skill-storage"
@@ -997,6 +1003,7 @@ def test_import_employee_bundle_restores_instance_without_reusing_agent_key(
                     "role_key": "monitor",
                     "skill_keys": ["alert_triage"],
                     "max_concurrent": 3,
+                    **max_iters_payload,
                     "enabled": False,
                     "rbac_role_id": "role-7",
                     "llm_config_id": "llm-2",
@@ -1093,6 +1100,7 @@ def test_import_employee_bundle_restores_instance_without_reusing_agent_key(
             "name": "Night monitor",
             "skill_keys": ["alert_triage"],
             "max_concurrent": 3,
+            "max_iters": expected_max_iters,
             "rbac_role_id": "role-7",
             "llm_config_id": "llm-2",
             "knowledge_space_keys": ["runbooks"],
@@ -1106,6 +1114,24 @@ def test_import_employee_bundle_restores_instance_without_reusing_agent_key(
         "employee",
     }
     assert result.skipped == []
+
+
+@pytest.mark.parametrize("max_iters", [None, True, 0, 1.5, "300", 2_147_483_648])
+def test_import_employee_manifest_rejects_invalid_max_iters(tmp_path, max_iters):
+    manifest = {
+        "schema_version": 1,
+        "name": "Night monitor",
+        "role_key": "monitor",
+        "skill_keys": [],
+        "knowledge_space_keys": [],
+        "max_iters": max_iters,
+    }
+    (tmp_path / "employee.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    with pytest.raises(CustomError) as exc:
+        asyncio.run(package_importer._create_employee_from_manifest(
+            tmp_path, {"employee_manifest": "employee.yaml"}, "tenant-1"
+        ))
+    assert exc.value.enum == package_importer.ErrorCode.PACKAGE_INVALID
 
 
 def test_export_tenant_skill_includes_disabled_management_record(tmp_path):

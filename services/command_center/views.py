@@ -29,6 +29,7 @@ from settings import TZ
 from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
 from .manager import (
     MAX_CLARIFICATION_ANSWER_LENGTH,
+    InvalidTaskTimeout,
     InvalidClarificationAnswer,
     TERMINAL_TASK_STATUS,
     TaskClarificationConflict,
@@ -134,6 +135,7 @@ TASK_SCHEMA = {
             "enum": TASK_STATUS_ENUM,
         },
         "progress": {"type": "integer", "description": "任务进度，范围0-100", "minimum": 0, "maximum": 100},
+        "timeout_seconds": {"type": "integer", "description": "任务执行超时时间，秒", "minimum": 1, "default": 3600},
         "required_capabilities": {
             "type": "array",
             "description": "任务所需能力标签",
@@ -487,6 +489,7 @@ def _task_detail_json(task: CommandTask, actor: dict | None = None) -> dict:
         "priority",
         "status",
         "progress",
+        "timeout_seconds",
         "required_capabilities",
         "requested_agent_id",
         "assigned_agent_id",
@@ -1024,6 +1027,7 @@ async def update_agent_status(request: Request):
                 },
                 "source": {"type": "string", "description": "任务来源", "default": "manual"},
                 "priority": {"type": "integer", "description": "优先级，数值越小优先级越高", "default": 3},
+                "timeout_seconds": {"type": "integer", "description": "任务执行超时时间，秒", "minimum": 1, "default": 3600},
                 "required_capabilities": {
                     "type": "array",
                     "description": "任务所需能力标签；候选智能体必须完整覆盖",
@@ -1045,7 +1049,10 @@ async def create_task(request: Request):
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     creator = request.ctx.session["account_info"]
-    task = await create_command_task(tenant_id, creator, data)
+    try:
+        task = await create_command_task(tenant_id, creator, data)
+    except InvalidTaskTimeout as exc:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from exc
     return response_ok(_task_detail_json(task))
 
 

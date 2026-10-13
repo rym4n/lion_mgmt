@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 STUB_MODULES = [
     "core",
@@ -29,6 +31,8 @@ STUB_MODULES = [
     "services.digital_employee.rbac",
     "services.digital_employee.skill_storage",
     "services.digital_employee.manager_workspace_sync_test",
+    "services.llm_config",
+    "services.llm_config.manager",
 ]
 _MISSING_MODULE = object()
 
@@ -39,6 +43,7 @@ def _load_manager(sync_calls: list[dict]):
         sys.modules.pop(name, None)
 
     class ErrorCode:
+        PARAM_ERROR = "PARAM_ERROR"
         DATA_ALREADY_EXISTS = "DATA_ALREADY_EXISTS"
         DIGITAL_EMPLOYEE_ROLE_NOT_FOUND = "DIGITAL_EMPLOYEE_ROLE_NOT_FOUND"
         DIGITAL_EMPLOYEE_SKILL_NOT_FOUND = "DIGITAL_EMPLOYEE_SKILL_NOT_FOUND"
@@ -147,6 +152,12 @@ def _load_manager(sync_calls: list[dict]):
     services_module = types.ModuleType("services")
     services_module.__path__ = []
     sys.modules["services"] = services_module
+    llm_config_pkg = types.ModuleType("services.llm_config")
+    llm_config_pkg.__path__ = []
+    sys.modules["services.llm_config"] = llm_config_pkg
+    llm_config_manager = types.ModuleType("services.llm_config.manager")
+    llm_config_manager.assert_bindable_config = lambda config_id: _async_value(None)
+    sys.modules["services.llm_config.manager"] = llm_config_manager
     digital_employee_pkg = types.ModuleType("services.digital_employee")
     digital_employee_pkg.__path__ = []
     sys.modules["services.digital_employee"] = digital_employee_pkg
@@ -274,7 +285,13 @@ def test_sync_employee_workspace_resolves_visible_role_by_role_key():
         _restore_modules(original_modules)
 
 
-def test_create_employee_does_not_inherit_role_default_rbac_and_persists_only_selected_skills():
+@pytest.mark.parametrize(
+    ("max_iters_kwargs", "expected_max_iters"),
+    [({}, 200), ({"max_iters": 500}, 500)],
+)
+def test_create_employee_does_not_inherit_role_default_rbac_and_persists_only_selected_skills(
+    max_iters_kwargs, expected_max_iters
+):
     sync_calls = []
     manager, original_modules = _load_manager(sync_calls)
     try:
@@ -316,7 +333,7 @@ def test_create_employee_does_not_inherit_role_default_rbac_and_persists_only_se
 
         employee = asyncio.run(
             manager.create_employee(
-                "tenant-1", "ops", "Ops", llm_config_id="llm-config-1"
+                "tenant-1", "ops", "Ops", llm_config_id="llm-config-1", **max_iters_kwargs
             )
         )
 
@@ -324,6 +341,7 @@ def test_create_employee_does_not_inherit_role_default_rbac_and_persists_only_se
         assert created[0]["rbac_role_id"] is None
         assert created[0]["llm_config_id"] == "llm-config-1"
         assert created[0]["skill_keys"] == ["triage"]
+        assert created[0]["max_iters"] == expected_max_iters
         assert "aioe-cli" not in created[0]["capabilities"]
         assert employee.workspace_etag == "runtime-etag"
     finally:
@@ -343,6 +361,7 @@ def test_update_employee_persists_llm_binding_and_preserves_workspace_sync():
             workspace_etag="old-etag",
             workspace_synced_at=datetime.now(timezone.utc),
             llm_config_id="old-config",
+            max_iters=350,
             saved_update_fields=[],
         )
 
@@ -367,9 +386,80 @@ def test_update_employee_persists_llm_binding_and_preserves_workspace_sync():
         assert result is employee
         assert employee.name == "Updated"
         assert employee.max_concurrent == 1
+        assert employee.max_iters == 350
         assert employee.llm_config_id is None
         assert employee.saved_update_fields[0] is None
         assert sync_calls[0]["workspace_id"] == "employee-1"
+    finally:
+        _restore_modules(original_modules)
+
+
+@pytest.mark.parametrize("value", [None, True, False, 0, -1, 1.5, "5", 2_147_483_648])
+def test_employee_max_iters_rejects_invalid_or_out_of_range_values(value):
+    manager, original_modules = _load_manager([])
+    try:
+        with pytest.raises(manager.CustomError) as exc:
+            manager.validate_employee_max_iters(value)
+        assert exc.value.enum == manager.ErrorCode.PARAM_ERROR
+    finally:
+        _restore_modules(original_modules)
+
+
+def test_employee_max_iters_accepts_int_field_bounds():
+    manager, original_modules = _load_manager([])
+    try:
+        assert manager.validate_employee_max_iters(1) == 1
+        assert manager.validate_employee_max_iters(2_147_483_647) == 2_147_483_647
+    finally:
+        _restore_modules(original_modules)
+
+
+def test_create_employee_rejects_invalid_max_iters_before_loading_dependencies():
+    manager, original_modules = _load_manager([])
+    try:
+        with pytest.raises(manager.CustomError) as exc:
+            asyncio.run(manager.create_employee("tenant-1", "ops", "Ops", max_iters=False))
+        assert exc.value.enum == manager.ErrorCode.PARAM_ERROR
+    finally:
+        _restore_modules(original_modules)
+
+
+def test_update_employee_changes_max_iters_and_syncs_workspace():
+    sync_calls = []
+    manager, original_modules = _load_manager(sync_calls)
+    try:
+        employee = FakeEmployee(
+            id="employee-1", tenant_id="tenant-1", role_key="ops", skill_keys=[],
+            workspace_etag="old-etag", workspace_synced_at=None,
+            max_iters=200, saved_update_fields=[],
+        )
+        role = SimpleNamespace(role_key="ops", version=1)
+
+        async def fake_get_visible_role(tenant_id, role_key):
+            return role
+
+        async def fake_get_visible_skills(tenant_id, skill_keys):
+            return []
+
+        manager.get_visible_role = fake_get_visible_role
+        manager.get_visible_skills = fake_get_visible_skills
+        asyncio.run(manager.update_employee(employee, max_iters=500))
+
+        assert employee.max_iters == 500
+        assert sync_calls[0]["workspace_id"] == "employee-1"
+    finally:
+        _restore_modules(original_modules)
+
+
+def test_update_employee_rejects_invalid_max_iters_before_saving():
+    manager, original_modules = _load_manager([])
+    try:
+        employee = FakeEmployee(tenant_id="tenant-1", max_iters=200, saved_update_fields=[])
+        with pytest.raises(manager.CustomError) as exc:
+            asyncio.run(manager.update_employee(employee, max_iters=True))
+        assert exc.value.enum == manager.ErrorCode.PARAM_ERROR
+        assert employee.max_iters == 200
+        assert employee.saved_update_fields == []
     finally:
         _restore_modules(original_modules)
 

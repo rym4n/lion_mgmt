@@ -12,13 +12,14 @@ from models.command_center import CommandAgent, CommandTask, CommandTaskRun
 from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models.employee_report import EmployeeReport
 from models.report import ReportDocument
-from services.command_center.manager import create_command_task
+from services.command_center.manager import DEFAULT_TASK_TIMEOUT_SECONDS, InvalidTaskTimeout, create_command_task
 from services.command_center.realtime import publish_command_center_update
 
 from .aioe_credential_manager import delete_employee_api_account
 from .employee_report import compose
 from .lion_agent_client import LionAgentClient
 from .manager import (
+    BUILTIN_TENANT_ID,
     clone_builtin_skill_to_tenant,
     create_employee,
     ensure_employee_can_delete,
@@ -237,6 +238,7 @@ async def employee_create(request: Request):
         name=data.get("name"),
         skill_keys=data.get("skill_keys"),
         max_concurrent=data.get("max_concurrent", 1),
+        max_iters=data.get("max_iters", 200),
         agent_key=data.get("agent_key"),
         rbac_role_id=data.get("rbac_role_id"),
         llm_config_id=data.get("llm_config_id") or None,
@@ -313,7 +315,7 @@ async def employee_update(request: Request):
     employee = await _employee_or_404(tenant_id, data.get("employee_id"))
     update_fields = {
         field: data[field]
-        for field in ("name", "rbac_role_id", "max_concurrent")
+        for field in ("name", "rbac_role_id", "max_concurrent", "max_iters")
         if field in data
     }
     if "llm_config_id" in data:
@@ -423,10 +425,14 @@ async def _dispatch_employee_task(request: Request, tenant_id: str, account_info
         "agent_id": employee.agent_key if employee else data.get("agent_id") or data.get("requested_agent_id"),
         "room_id": data.get("room_id"),
         "required_capabilities": data.get("required_capabilities") or (employee.capabilities if employee else []),
+        "timeout_seconds": data.get("timeout_seconds", DEFAULT_TASK_TIMEOUT_SECONDS),
     }
     if data.get("title"):
         command_task_data["title"] = data["title"]
-    return await create_command_task(tenant_id, account_info, command_task_data)
+    try:
+        return await create_command_task(tenant_id, account_info, command_task_data)
+    except InvalidTaskTimeout as exc:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from exc
 
 
 @digital_employee_bp.post("/employee/tasks/list")

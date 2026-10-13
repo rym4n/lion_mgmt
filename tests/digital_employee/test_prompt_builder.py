@@ -80,6 +80,7 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
     assert '"agent_key": "monitor-1"' in files["manifest.json"]
     manifest = json.loads(files["manifest.json"])
     assert manifest["role"]["tool_usage_notes"] == "只用授权工具"
+    assert manifest["employee"]["max_iters"] == 200
     assert manifest["skills"] == [
         {
             "description": "判断告警优先级",
@@ -379,6 +380,41 @@ def test_workspace_skills_are_verbatim_files(tmp_path, monkeypatch):
     assert files["skills"]["db_backup_check"]["SKILL.md"].startswith("---")
     assert files["skills"]["db_backup_check"]["references/note.md"] == "ref"
     assert "instructions.md" not in files["skills"]["db_backup_check"]
+
+
+def test_rendered_skill_name_matches_manifest_key_without_modifying_source(tmp_path, monkeypatch):
+    import yaml
+
+    monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
+    skill_dir = tmp_path / "tenant-1" / "ops_check"
+    skill_dir.mkdir(parents=True)
+    source = "---\nname: 中文技能名称\ndescription: 描述\nmetadata:\n  owner: 值班组\n---\n\n# 正文\n保留内容。\n"
+    (skill_dir / "SKILL.md").write_text(source, encoding="utf-8")
+    skill = SimpleNamespace(
+        skill_key="ops_check", skill_dir="tenant-1/ops_check", name="中文技能名称",
+        description="描述", version=1,
+    )
+    employee = SimpleNamespace(name="员工", agent_key="ops-1", max_iters=450, metadata={})
+    files = render_workspace_files(employee, None, [skill])
+    rendered = files["skills"]["ops_check"]["SKILL.md"]
+    frontmatter, body = rendered.split("---\n", 2)[1:]
+
+    assert yaml.safe_load(frontmatter) == {
+        "name": "ops_check", "description": "描述", "metadata": {"owner": "值班组"},
+    }
+    assert body == "\n# 正文\n保留内容。\n"
+    assert (skill_dir / "SKILL.md").read_text(encoding="utf-8") == source
+    manifest = json.loads(files["manifest.json"])
+    assert manifest["skills"][0]["skill_key"] == "ops_check"
+    assert manifest["employee"]["max_iters"] == 450
+
+
+def test_workspace_etag_changes_when_employee_max_iters_changes():
+    employee = SimpleNamespace(name="员工", agent_key="ops-1", max_iters=200, metadata={})
+    role = SimpleNamespace(role_key="ops", meta={"identity": "operator"}, version=1)
+    before = workspace_etag(role, [], employee)
+    employee.max_iters = 300
+    assert workspace_etag(role, [], employee) != before
 
 
 def test_workspace_skills_encode_image_and_office_files(tmp_path, monkeypatch):

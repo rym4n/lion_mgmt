@@ -27,10 +27,22 @@ MAX_CLARIFICATION_HISTORY = 10
 MAX_TASK_CONTENT_HTML_LENGTH = 200_000
 MAX_TASK_ATTACHMENTS = 20
 MAX_TASK_ATTACHMENT_FILENAME_LENGTH = 255
+DEFAULT_TASK_TIMEOUT_SECONDS = 60 * 60
+MAX_TASK_TIMEOUT_SECONDS = 2_147_483_647
 
 
 class InvalidClarificationAnswer(ValueError):
     pass
+
+
+class InvalidTaskTimeout(ValueError):
+    pass
+
+
+def validate_task_timeout(value) -> int:
+    if type(value) is not int or not 1 <= value <= MAX_TASK_TIMEOUT_SECONDS:
+        raise InvalidTaskTimeout("timeout_seconds must be a positive integer")
+    return value
 
 
 class TaskClarificationConflict(ValueError):
@@ -461,12 +473,14 @@ async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTas
     compatibility_title = content[:MAX_COMPAT_TASK_TITLE_LENGTH] or DEFAULT_TASK_TITLE
     payload = normalize_task_payload(data)
     payload.pop("clarifications", None)
+    timeout_seconds = validate_task_timeout(data.get("timeout_seconds", DEFAULT_TASK_TIMEOUT_SECONDS))
     task = await CommandTask.create(
         tenant_id=tenant_id,
         title=compatibility_title,
         description=content or None,
         source=data.get("source", "manual"),
         priority=data.get("priority", 3),
+        timeout_seconds=timeout_seconds,
         required_capabilities=data.get("required_capabilities", []),
         payload=payload,
         requested_agent_id=data.get("agent_id") or data.get("requested_agent_id"),

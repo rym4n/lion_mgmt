@@ -32,6 +32,8 @@ from .skill_storage import (
 
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 2000
+DEFAULT_EMPLOYEE_MAX_ITERS = 200
+MAX_EMPLOYEE_MAX_ITERS = 2_147_483_647
 ROLE_PROMPT_TEXT_FIELDS = ("identity", "responsibilities", "workflows", "tools_notes")
 
 RBAC_PACKAGE_FIELDS = (
@@ -256,6 +258,12 @@ def _strip_rbac_payload(root: Path) -> None:
 
 def _package_skill_keys(skill_keys: list[Any]) -> list[str]:
     return [str(key) for key in skill_keys if key]
+
+
+def _package_max_iters(value: Any) -> int:
+    if type(value) is not int or not 1 <= value <= MAX_EMPLOYEE_MAX_ITERS:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    return value
 
 
 def _iter_child_dirs(path: Path) -> list[Path]:
@@ -695,6 +703,7 @@ async def _create_employee_from_manifest(root: Path, package: dict, tenant_id: s
         skill_keys = manifest.get("skill_keys") or []
         knowledge_space_keys = manifest.get("knowledge_space_keys") or []
         max_concurrent = int(manifest.get("max_concurrent") or 1)
+        max_iters = _package_max_iters(manifest.get("max_iters", DEFAULT_EMPLOYEE_MAX_ITERS))
     except (TypeError, ValueError) as exc:
         raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
     if (
@@ -714,6 +723,7 @@ async def _create_employee_from_manifest(root: Path, package: dict, tenant_id: s
         name=name,
         skill_keys=_package_skill_keys(skill_keys),
         max_concurrent=max_concurrent,
+        max_iters=max_iters,
         rbac_role_id=manifest.get("rbac_role_id") or None,
         llm_config_id=manifest.get("llm_config_id") or None,
         knowledge_space_keys=_package_skill_keys(knowledge_space_keys),
@@ -895,6 +905,7 @@ async def export_employee_package_for_tenant(tenant_id: str, employee) -> bytes:
         "role_key": role_key,
         "skill_keys": employee_skill_keys,
         "max_concurrent": max(1, int(getattr(employee, "max_concurrent", 1) or 1)),
+        "max_iters": _package_max_iters(getattr(employee, "max_iters", DEFAULT_EMPLOYEE_MAX_ITERS)),
         "enabled": bool(getattr(employee, "enabled", True)),
         "rbac_role_id": getattr(employee, "rbac_role_id", None),
         "llm_config_id": getattr(employee, "llm_config_id", None),

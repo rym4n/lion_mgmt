@@ -22,6 +22,14 @@ from .skill_storage import relative_skill_dir, skill_storage_root, tenant_skill_
 BUILTIN_TENANT_ID = "__builtin__"
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled"}
 _UNSET = object()
+DEFAULT_EMPLOYEE_MAX_ITERS = 200
+MAX_EMPLOYEE_MAX_ITERS = 2_147_483_647
+
+
+def validate_employee_max_iters(value: int) -> int:
+    if type(value) is not int or not 1 <= value <= MAX_EMPLOYEE_MAX_ITERS:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return value
 
 
 async def _require_default_tenant_config(config_id: str | None) -> None:
@@ -148,12 +156,14 @@ async def create_employee(
     name: str,
     skill_keys: list[str] | None = None,
     max_concurrent: int = 1,
+    max_iters: int = DEFAULT_EMPLOYEE_MAX_ITERS,
     agent_key: str | None = None,
     rbac_role_id: str | None = None,
     llm_config_id: str | None = None,
     knowledge_space_keys: list[str] | None = None,
     knowledge_write_space: str | None = None,
 ) -> CommandAgent:
+    max_iters = validate_employee_max_iters(max_iters)
     from services.llm_config.manager import assert_bindable_config
 
     role = await get_visible_role(tenant_id, role_key)
@@ -175,6 +185,7 @@ async def create_employee(
         capabilities=derive_capabilities(role, skills),
         status="idle",
         max_concurrent=max(1, int(max_concurrent or 1)),
+        max_iters=max_iters,
         runtime="lion_agent",
         metadata={"digital_employee": True},
         role=role,
@@ -197,10 +208,13 @@ async def update_employee(
     name=_UNSET,
     rbac_role_id=_UNSET,
     max_concurrent=_UNSET,
+    max_iters=_UNSET,
     llm_config_id=_UNSET,
     knowledge_space_keys=_UNSET,
     knowledge_write_space=_UNSET,
 ) -> CommandAgent:
+    if max_iters is not _UNSET:
+        max_iters = validate_employee_max_iters(max_iters)
     if rbac_role_id is not _UNSET:
         await require_existing_platform_role(rbac_role_id, employee.tenant_id)
     if name is not _UNSET:
@@ -209,6 +223,8 @@ async def update_employee(
         employee.rbac_role_id = rbac_role_id
     if max_concurrent is not _UNSET:
         employee.max_concurrent = max(1, int(max_concurrent or 1))
+    if max_iters is not _UNSET:
+        employee.max_iters = max_iters
     if llm_config_id is not _UNSET:
         from services.llm_config.manager import assert_bindable_config
         await assert_bindable_config(llm_config_id)

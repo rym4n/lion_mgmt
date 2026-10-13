@@ -4,6 +4,8 @@ import hashlib
 import json
 from typing import Any
 
+import yaml
+
 from .skill_storage import (
     ALLOWED_SKILL_SUFFIXES,
     OFFICECLI_BINARY_NAMES,
@@ -16,6 +18,34 @@ from .skill_storage import (
 WORKSPACE_TEXT_FILES = ("system_prompt.md",)
 WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
 MAX_SKILL_FILE_BYTES = 512 * 1024
+
+
+def _normalize_rendered_skill_md(content: str, skill_key: str) -> str:
+    """Align the workspace copy with its manifest key; leave stored files untouched."""
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return content
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() != "---":
+            continue
+        try:
+            frontmatter = yaml.safe_load("".join(lines[1:index]))
+        except yaml.YAMLError:
+            return content
+        if not isinstance(frontmatter, dict):
+            return content
+        frontmatter["name"] = skill_key
+        body = "".join(lines[index + 1:])
+        return "---\n" + yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False) + "---\n" + body
+    return content
+
+
+def _rendered_skill_files(skill: Any) -> dict[str, Any]:
+    files = _read_skill_files(skill)
+    skill_md = files.get("SKILL.md")
+    if isinstance(skill_md, str):
+        files["SKILL.md"] = _normalize_rendered_skill_md(skill_md, str(skill.skill_key))
+    return files
 
 
 def _read_skill_files(skill: Any) -> dict[str, Any]:
@@ -152,6 +182,7 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
             "name": getattr(employee, "name", ""),
             "role_key": getattr(employee, "role_key", None) or getattr(role, "role_key", None),
             "rbac_role_id": rbac_role_id,
+            "max_iters": getattr(employee, "max_iters", 200),
         },
         "role": {
             "role_key": getattr(role, "role_key", None),
@@ -302,7 +333,7 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
     system_prompt.extend(["## Runtime", "\n".join(runtime_lines), ""])
 
     rendered_skills = {
-        getattr(skill, "skill_key"): _read_skill_files(skill)
+        getattr(skill, "skill_key"): _rendered_skill_files(skill)
         for skill in (skills or [])
     }
     rendered_skills = {key: value for key, value in rendered_skills.items() if value}

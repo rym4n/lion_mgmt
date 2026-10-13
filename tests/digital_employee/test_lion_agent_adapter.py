@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import importlib.util
+from contextlib import aclosing
 from pathlib import Path
 import sys
 import types
@@ -156,6 +157,30 @@ def test_stream_prompt_events_sends_model_override():
     assert asyncio.run(consume()) == []
     assert client.payloads[-1]["model"] == "aioe-lite"
     assert client.payloads[-1]["system_prompt"] == "stream role override"
+
+
+def test_stream_prompt_events_closes_agent_stream_on_early_return():
+    adapter, client = _load_adapter()
+    closed = []
+
+    async def stream_execute(_self, _payload):
+        try:
+            yield 'event: approval_required'
+            yield 'data: {"tool":"write_file"}'
+            await asyncio.Event().wait()
+        finally:
+            closed.append(True)
+
+    client.stream_execute = stream_execute
+
+    async def stop_early():
+        async with aclosing(adapter.stream_prompt_events(
+            workspace_id="employee-1", session_id="run-1", message="execute task",
+        )) as events:
+            assert await anext(events) == ("approval_required", {"tool": "write_file"})
+        assert closed == [True]
+
+    asyncio.run(stop_early())
 
 
 def test_stream_prompt_events_omits_model_without_override():
