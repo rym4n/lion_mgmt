@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import orjson
 from sanic import Blueprint
 from sanic.request import Request
 from sanic_ext import openapi
@@ -11,6 +12,7 @@ import settings
 from core.response import response_ok
 from libs.security.authorization import check_permissions, requires_permission
 from models.network_topology import NetworkTopology, NetworkTopologyVersion
+from models.network_topology_v2 import TopologyProfileRevision
 from services.network_topology import (
     analysis_runs,
     config_sync_views,
@@ -625,8 +627,22 @@ async def get_topology(request: Request):
     if _v2_view_disabled(topology):
         return _err("v2 拓扑查看入口未启用", status=503)
     payload = _topology_payload(topology)
+    payload["resource_revision"] = getattr(topology, "resource_revision", None) or 0
+    payload["topology_profile_revision"] = getattr(topology, "topology_profile_revision", None)
+    payload["profile"] = None
+    collection = await collection_plans.collection_summaries(tenant_id, [str(topology.id)])
+    payload["collection"] = collection.get(str(topology.id))
     if topology.document_schema_version == compatibility.V2_SCHEMA_VERSION:
         payload = enrich_v2_payload(payload, topology.topology_json or {})
+        if topology.topology_profile_revision is not None:
+            profile = await TopologyProfileRevision.filter(
+                tenant_id=tenant_id, topology_row_id=topology.id,
+                revision=topology.topology_profile_revision, deleted=False,
+            ).first()
+            if profile is not None:
+                # Expose only the profile document, never encrypted source
+                # configuration, revision-row internals or actor metadata.
+                payload["profile"] = orjson.loads(profile.profile_json)
     return response_ok(payload)
 
 
