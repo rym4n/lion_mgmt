@@ -119,6 +119,39 @@
         "l3.connected_networks": "fixture_contract_only"
       },
       "connector_evidence": []
+    },
+    {
+      "capability_profile_id": "aioe-action-collection/v1",
+      "target_package": "aioe-action-collection",
+      "planned_action_id": "aioe_action_collection",
+      "delivery_status": "planned",
+      "planned_minimum_package_version": "1.0.0",
+      "verified_current_package_version": null,
+      "kind_action_map": {
+        "raw.action_output": "aioe_action_collection",
+        "system.identity": "aioe_action_collection",
+        "system.virtual_contexts": "aioe_action_collection",
+        "system.cluster_members": "aioe_action_collection",
+        "interface.inventory": "aioe_action_collection",
+        "l2.vlans": "aioe_action_collection",
+        "l2.link_aggregation": "aioe_action_collection",
+        "l2.neighbors": "aioe_action_collection",
+        "l2.stp_summary": "aioe_action_collection",
+        "l3.vrfs": "aioe_action_collection",
+        "l3.connected_networks": "aioe_action_collection",
+        "routing.connected_static_default": "aioe_action_collection",
+        "routing.dynamic_neighbors": "aioe_action_collection",
+        "routing.first_hop_redundancy": "aioe_action_collection",
+        "security.zones": "aioe_action_collection",
+        "security.zone_bindings": "aioe_action_collection",
+        "overlay.tunnels": "aioe_action_collection",
+        "overlay.vxlan_evpn": "aioe_action_collection",
+        "wan.sdwan": "aioe_action_collection",
+        "ipam.subnets": "aioe_action_collection",
+        "service.virtual_addresses": "aioe_action_collection",
+        "l3.neighbor_cache": "aioe_action_collection"
+      },
+      "connector_evidence": []
     }
   ]
 }

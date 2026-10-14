@@ -35,8 +35,8 @@ def test_all_four_versioned_registries_load_and_validate() -> None:
 
     assert result == {
         "registry_count": 4,
-        "observation_kind_count": 22,
-        "capability_count": 6,
+        "observation_kind_count": 23,
+        "capability_count": 7,
     }
     assert {item["schema_version"] for item in contracts.iter_registries()} == {
         OBSERVATION_URI,
@@ -172,7 +172,10 @@ def test_capabilities_have_full_match_keys_and_required_base_kinds() -> None:
             "platform",
             "os_family",
         }
-        assert BASE_REQUIRED <= set(profile["required_kinds"])
+        if profile["id"] == "aioe-action-collection/v1":
+            assert profile["required_kinds"] == ["raw.action_output"]
+        else:
+            assert BASE_REQUIRED <= set(profile["required_kinds"])
         assert not set(profile["required_kinds"]) & set(profile["optional_kinds"])
 
 
@@ -263,15 +266,18 @@ def test_vendor_mappings_are_planned_and_fail_closed_until_delivery() -> None:
     runtime_mappings = [
         item for item in registry["mappings"] if item["delivery_status"] == "planned"
     ]
-    assert len(runtime_mappings) == 5
+    assert len(runtime_mappings) == 6
     for mapping in runtime_mappings:
+        expected_action = (
+            "aioe_action_collection"
+            if mapping["capability_profile_id"] == "aioe-action-collection/v1"
+            else "collect_topology_observations_v2"
+        )
         assert mapping["delivery_status"] == "planned"
         assert mapping["planned_minimum_package_version"] == "1.0.0"
         assert mapping["verified_current_package_version"] is None
-        assert mapping["planned_action_id"] == "collect_topology_observations_v2"
-        assert set(mapping["kind_action_map"].values()) == {
-            "collect_topology_observations_v2"
-        }
+        assert mapping["planned_action_id"] == expected_action
+        assert set(mapping["kind_action_map"].values()) == {expected_action}
         assert all(
             item["classification"] == "connector_material_only"
             for item in mapping["connector_evidence"]
@@ -285,7 +291,7 @@ def test_vendor_mappings_are_planned_and_fail_closed_until_delivery() -> None:
             mapping["capability_profile_id"], kind, require_ready=False
         )
         assert planned["observation_kind"] == kind
-        assert planned["action_id"] == "collect_topology_observations_v2"
+        assert planned["action_id"] == expected_action
 
 
 def test_fixture_only_action_mapping_cannot_claim_runtime_delivery() -> None:
@@ -355,7 +361,7 @@ def test_public_loaders_and_resolvers_return_defensive_copies() -> None:
 
     summary = contracts.validate_registry_integrity()
     summary["capability_count"] = 999
-    assert contracts.validate_registry_integrity()["capability_count"] == 6
+    assert contracts.validate_registry_integrity()["capability_count"] == 7
 
 
 @pytest.mark.parametrize(

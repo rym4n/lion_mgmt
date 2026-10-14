@@ -18,7 +18,7 @@ from .parsers.registry import ParserRegistry
 from .parsers.structured import FACT_FAMILIES, PARSER_ID, PARSER_VERSION
 
 
-DOMAIN_ORDER = ("identity", "interface", "l2", "l3", "zone", "tunnel")
+DOMAIN_ORDER = ("identity", "interface", "l2", "l3", "zone", "tunnel", "raw")
 KIND_DOMAIN = {
     "system.identity": "identity",
     "system.virtual_contexts": "identity",
@@ -41,6 +41,7 @@ KIND_DOMAIN = {
     "overlay.vxlan_evpn": "tunnel",
     "wan.sdwan": "tunnel",
     "service.virtual_addresses": "tunnel",
+    "raw.action_output": "raw",
 }
 
 

@@ -14,6 +14,14 @@
       "parser_version": 1,
       "implementation_status": "planned",
       "observation_kinds": ["legacy.running_config"]
+    },
+    {
+      "parser_id": "aioe.network-topology.parser/agent/v1",
+      "parser_version": 1,
+      "implementation_status": "contract_only",
+      "observation_kinds": [
+        "raw.action_output"
+      ]
     }
   ],
   "llm_policy": {

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/raw.action_output/v1",
+  "x-max-bytes": 4194304,
+  "x-allowed-source-methods": [
+    "aioe_action"
+  ],
+  "x-fact-planes": [
+    "operational"
+  ],
+  "allOf": [
+    {
+      "$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "raw.action_output"
+        },
+        "source_method": {
+          "const": "aioe_action"
+        },
+        "content_type": {
+          "const": "application/json"
+        },
+        "data_schema": {
+          "const": "aioe.network-topology.observation/raw.action_output/v1"
+        },
+        "fact_plane": {
+          "const": "operational"
+        }
+      },
+      "if": {
+        "properties": {
+          "observation_status": {
+            "const": "success"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "app_name",
+              "action_func",
+              "app_version",
+              "resource_id",
+              "output"
+            ],
+            "properties": {
+              "app_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action_func": {
+                "type": "string",
+                "minLength": 1
+              },
+              "app_version": {
+                "type": "string"
+              },
+              "resource_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "output": {}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

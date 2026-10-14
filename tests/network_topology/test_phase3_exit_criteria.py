@@ -70,11 +70,11 @@ def test_registry_proves_more_than_ninety_percent_deterministic_coverage():
     all_kinds = {item["kind"] for item in kinds}
     deterministic = StructuredParser().supported_kinds
 
-    assert len(all_kinds) == 22
+    assert len(all_kinds) == 23
     assert len(deterministic) == 21
     assert deterministic <= all_kinds
     assert deterministic / all_kinds if False else len(deterministic) / len(all_kinds) >= 0.9
-    assert all_kinds - deterministic == {"legacy.running_config"}
+    assert all_kinds - deterministic == {"legacy.running_config", "raw.action_output"}
 
 
 @pytest.mark.asyncio

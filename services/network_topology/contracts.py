@@ -344,7 +344,21 @@ def _validate_capability_registry(
         _validate_fixture_capability(profile, match)
         required = set(profile.get("required_kinds", []))
         optional = set(profile.get("optional_kinds", []))
-        if not {"system.identity", "interface.inventory"}.issubset(required):
+        if profile["id"] == "aioe-action-collection/v1":
+            if (
+                match != {
+                    "device_type": "aioe-action",
+                    "vendor": "aioe-action",
+                    "platform": "*",
+                    "os_family": "*",
+                }
+                or profile.get("required_kinds") != ["raw.action_output"]
+                or optional != kinds - {"legacy.running_config", "raw.action_output"}
+            ):
+                raise ContractError(
+                    "Action collection capability must match its frozen contract"
+                )
+        elif not {"system.identity", "interface.inventory"}.issubset(required):
             raise ContractError(
                 f"Identity/interfaces must be required: {profile['id']}"
             )

@@ -58,6 +58,41 @@
       "match": {"device_type": "switch", "vendor": "synthetic", "platform": "contract-neutral", "os_family": "synthetic-os"},
       "required_kinds": ["system.identity", "interface.inventory", "l2.vlans", "l2.link_aggregation", "l2.neighbors"],
       "optional_kinds": ["l3.connected_networks"]
+    },
+    {
+      "id": "aioe-action-collection/v1",
+      "match": {
+        "device_type": "aioe-action",
+        "vendor": "aioe-action",
+        "platform": "*",
+        "os_family": "*"
+      },
+      "required_kinds": [
+        "raw.action_output"
+      ],
+      "optional_kinds": [
+        "system.identity",
+        "system.virtual_contexts",
+        "system.cluster_members",
+        "interface.inventory",
+        "l2.vlans",
+        "l2.link_aggregation",
+        "l2.neighbors",
+        "l2.stp_summary",
+        "l3.vrfs",
+        "l3.connected_networks",
+        "routing.connected_static_default",
+        "routing.dynamic_neighbors",
+        "routing.first_hop_redundancy",
+        "security.zones",
+        "security.zone_bindings",
+        "overlay.tunnels",
+        "overlay.vxlan_evpn",
+        "wan.sdwan",
+        "ipam.subnets",
+        "service.virtual_addresses",
+        "l3.neighbor_cache"
+      ]
     }
   ]
 }

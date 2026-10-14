@@ -81,7 +81,7 @@
           "enum": ["success", "not_supported", "not_applicable", "failed"]
         },
         "source_method": {
-          "enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]
+          "enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api", "aioe_action"]
         },
         "content_type": {"enum": ["application/json", "application/xml", "text/plain"]},
         "data_schema": {"type": "string", "minLength": 1},

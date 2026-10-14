@@ -31,6 +31,7 @@ STANDARD_OBSERVATION_KINDS = {
     "service.virtual_addresses",
     "l3.neighbor_cache",
     "legacy.running_config",
+    "raw.action_output",
 }
 NEW_STANDARD_OBSERVATION_KINDS = {
     "system.virtual_contexts",

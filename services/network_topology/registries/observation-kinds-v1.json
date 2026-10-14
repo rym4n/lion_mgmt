@@ -22,7 +22,11 @@
     {"kind": "ipam.subnets", "schema_uri": "aioe.network-topology.observation/ipam.subnets/v1"},
     {"kind": "service.virtual_addresses", "schema_uri": "aioe.network-topology.observation/service.virtual_addresses/v1"},
     {"kind": "l3.neighbor_cache", "schema_uri": "aioe.network-topology.observation/l3.neighbor_cache/v1"},
-    {"kind": "legacy.running_config", "schema_uri": "aioe.network-topology.observation/legacy.running_config/v1"}
+    {"kind": "legacy.running_config", "schema_uri": "aioe.network-topology.observation/legacy.running_config/v1"},
+    {
+      "kind": "raw.action_output",
+      "schema_uri": "aioe.network-topology.observation/raw.action_output/v1"
+    }
   ],
   "vendor_extension": {
     "kind_pattern": "^vendor\\.[a-z0-9_-]+\\.[a-z0-9_.-]+$",
