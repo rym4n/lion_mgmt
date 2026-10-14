@@ -487,3 +487,9 @@ def _verify_object_payload(snapshot: Any, row: Any, payload: bytes) -> None:
 
 
 __all__ = ["AnalysisPipeline", "OrmAnalysisPipelineRepository"]
+
+
+def build_default_pipeline() -> AnalysisPipeline:
+    """Build the fail-closed pipeline for listener and standalone worker."""
+    from services.network_topology.agent_stage import build_agent_stage
+    return AnalysisPipeline(agent_stage=build_agent_stage())

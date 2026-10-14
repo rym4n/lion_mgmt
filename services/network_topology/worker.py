@@ -202,18 +202,20 @@ class TopologyAnalysisWorker:
             self.pipeline.execute_stage(run, stage, identity)
         )
         heartbeat_task = asyncio.create_task(self._heartbeat_until_stopped(identity))
-        done, _ = await asyncio.wait(
-            {pipeline_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if pipeline_task in done:
-            heartbeat_task.cancel()
-            await _consume_cancelled(heartbeat_task)
-            return pipeline_task.result()
-        pipeline_task.cancel()
-        await _consume_cancelled(pipeline_task)
-        if self.stop_event.is_set():
-            raise asyncio.CancelledError
-        raise PipelineFailure("WORKER_LEASE_LOST")
+        try:
+            done, _ = await asyncio.wait(
+                {pipeline_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if pipeline_task in done:
+                return pipeline_task.result()
+            if self.stop_event.is_set():
+                raise asyncio.CancelledError
+            raise PipelineFailure("WORKER_LEASE_LOST")
+        finally:
+            for task in (pipeline_task, heartbeat_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(pipeline_task, heartbeat_task, return_exceptions=True)
 
     async def _heartbeat_until_stopped(self, identity):
         while not self.stop_event.is_set():

@@ -331,7 +331,7 @@ async def _sync_v2_topology_snapshot(
     topology = await _tenant_topology(topology_id, tenant_id)
     if not topology:
         return _err("拓扑数据不存在", status=404)
-    return _err("v2 快照同步处理尚未启用", status=503)
+    return await config_sync_views.sync_topology_snapshot(request)
 
 
 async def _sync_legacy_topology_config(request, data, tenant_id, topology_id):

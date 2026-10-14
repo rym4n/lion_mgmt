@@ -16,12 +16,7 @@ from services.network_topology import manifest, views
 from tests.network_topology.test_phase1_compatibility import _topology, _version
 
 
-def test_topology_switch_defaults_preserve_legacy_behavior():
-    assert settings.TOPOLOGY_V2_INGRESS_ENABLED is False
-    assert settings.TOPOLOGY_V2_ANALYSIS_ENABLED is False
-    assert settings.TOPOLOGY_V2_PUBLISH_ENABLED is False
-    assert settings.TOPOLOGY_V2_VIEW_ENABLED is False
-    assert settings.TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED is False
+def test_legacy_sync_remains_enabled_by_default():
     assert settings.TOPOLOGY_LEGACY_SYNC_ENABLED is True
 
 

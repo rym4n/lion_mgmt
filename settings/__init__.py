@@ -82,13 +82,13 @@ def _strict_env_choice(name: str, default: str, allowed: frozenset[str]) -> str:
     return normalized
 
 
-# Topology v2 remains fail-closed until its global gates are open.
-TOPOLOGY_V2_INGRESS_ENABLED = _strict_env_bool("TOPOLOGY_V2_INGRESS_ENABLED", False)
-TOPOLOGY_V2_ANALYSIS_ENABLED = _strict_env_bool("TOPOLOGY_V2_ANALYSIS_ENABLED", False)
-TOPOLOGY_V2_PUBLISH_ENABLED = _strict_env_bool("TOPOLOGY_V2_PUBLISH_ENABLED", False)
-TOPOLOGY_V2_VIEW_ENABLED = _strict_env_bool("TOPOLOGY_V2_VIEW_ENABLED", False)
+# Topology v2 defaults on; explicit environment gates can disable each surface.
+TOPOLOGY_V2_INGRESS_ENABLED = _strict_env_bool("TOPOLOGY_V2_INGRESS_ENABLED", True)
+TOPOLOGY_V2_ANALYSIS_ENABLED = _strict_env_bool("TOPOLOGY_V2_ANALYSIS_ENABLED", True)
+TOPOLOGY_V2_PUBLISH_ENABLED = _strict_env_bool("TOPOLOGY_V2_PUBLISH_ENABLED", True)
+TOPOLOGY_V2_VIEW_ENABLED = _strict_env_bool("TOPOLOGY_V2_VIEW_ENABLED", True)
 TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED = _strict_env_bool(
-    "TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED", False
+    "TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED", True
 )
 TOPOLOGY_LEGACY_SYNC_ENABLED = _strict_env_bool("TOPOLOGY_LEGACY_SYNC_ENABLED", True)
 

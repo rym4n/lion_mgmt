@@ -312,11 +312,11 @@ def test_config_sync_shape_selects_exact_secondary_permission(monkeypatch):
 def test_capabilities_use_global_switches(monkeypatch):
     from services.network_topology import views
 
-    monkeypatch.setattr(views, "TOPOLOGY_V2_INGRESS_ENABLED", False)
-    monkeypatch.setattr(views, "TOPOLOGY_V2_ANALYSIS_ENABLED", False)
-    monkeypatch.setattr(views, "TOPOLOGY_V2_PUBLISH_ENABLED", False)
-    monkeypatch.setattr(views, "TOPOLOGY_V2_VIEW_ENABLED", False)
-    monkeypatch.setattr(views, "TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED", False)
+    monkeypatch.setattr(views.settings, "TOPOLOGY_V2_INGRESS_ENABLED", False)
+    monkeypatch.setattr(views.settings, "TOPOLOGY_V2_ANALYSIS_ENABLED", False)
+    monkeypatch.setattr(views.settings, "TOPOLOGY_V2_PUBLISH_ENABLED", False)
+    monkeypatch.setattr(views.settings, "TOPOLOGY_V2_VIEW_ENABLED", False)
+    monkeypatch.setattr(views.settings, "TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED", False)
 
     legacy = views._capabilities(_row())
     v2 = views._capabilities(_row("graph/v2", "playbook"))
@@ -350,7 +350,7 @@ def test_snapshot_sync_checks_sync_permission_and_ingress_gate(monkeypatch):
 
     monkeypatch.setattr(views, "check_permissions", allow)
     monkeypatch.setattr(views, "_tenant_topology", topology)
-    monkeypatch.setattr(views, "TOPOLOGY_V2_INGRESS_ENABLED", False)
+    monkeypatch.setattr(views.settings, "TOPOLOGY_V2_INGRESS_ENABLED", False)
 
     response = asyncio.run(
         inspect.unwrap(views.sync_topology_config)(

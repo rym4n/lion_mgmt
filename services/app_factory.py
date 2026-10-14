@@ -73,7 +73,10 @@ LICENSED_BLUEPRINT_SPECS: dict[str, tuple[BlueprintSpec, ...]] = {
     "network_access_control_bp": (
         ("services.network_access_control.views", "network_access_control_bp"),
     ),
-    "topology_bp": (("services.network_topology.views", "topology_bp"),),
+    "topology_bp": (
+        ("services.network_topology.views", "topology_bp"),
+        ("services.network_topology.upload_views", "upload_bp"),
+    ),
     "ticket_bp": (("services.ticket.views", "ticket_bp"),),
 }
 
