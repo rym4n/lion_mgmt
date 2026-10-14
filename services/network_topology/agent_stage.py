@@ -122,7 +122,6 @@ class AgentStage:
             if submitted is None or submitted.state != "SUBMITTED":
                 raise PipelineFailure("AGENT_SUBMIT_REJECTED")
             job = submitted
-            job.state = "SUCCEEDED"
             for field in ("cache_hits", "cache_misses", "iterations"):
                 value = body.get(field, 0)
                 if type(value) is not int or value < 0:
@@ -134,10 +133,12 @@ class AgentStage:
             job.profile_version = profile
             job.token_usage = orjson.loads(_redacted_json(body.get("usage", {}), sensitive))
             transcript = body.get("transcript", [])
+            job.transcript = _redacted_json(transcript, sensitive)
+            job.state = "SUCCEEDED"
         except httpx.TimeoutException:
             await self._fail(job, "AGENT_TIMEOUT", transcript, sensitive)
             raise PipelineFailure("AGENT_TIMEOUT") from None
-        except (httpx.RequestError, ValueError, TypeError):
+        except (httpx.RequestError, ValueError, TypeError, RecursionError):
             await self._fail(job, "AGENT_UNAVAILABLE", transcript, sensitive)
             raise PipelineFailure("AGENT_UNAVAILABLE") from None
         except PipelineFailure as exc:
@@ -146,7 +147,6 @@ class AgentStage:
         except asyncio.CancelledError:
             await self._fail(job, "AGENT_UNAVAILABLE", transcript, sensitive)
             raise
-        job.transcript = _redacted_json(transcript, sensitive)
         job.finished_at = datetime.now(timezone.utc)
         await self.repository.save_job(job)
         return ()
@@ -155,7 +155,11 @@ class AgentStage:
         job.state = "FAILED"
         job.error_code = code
         job.error_message = None
-        job.transcript = _redacted_json(transcript, sensitive)
+        try:
+            job.transcript = _redacted_json(transcript, sensitive)
+        except (ValueError, TypeError, RecursionError):
+            # Malformed diagnostic data must not block terminal persistence.
+            job.transcript = "[]"
         job.finished_at = datetime.now(timezone.utc)
         await self.repository.save_job(job)
 

@@ -183,3 +183,48 @@ async def test_transcript_cannot_persist_outbound_credentials():
     await AgentStage(client=EchoClient(), repository=repo, llm_resolver=llm).run(run, collection, None)
     assert "private-key" not in repo.jobs[0].transcript
     assert "[REDACTED]" in repo.jobs[0].transcript
+
+
+def malformed_transcript(kind):
+    if kind == "huge-integer":
+        return [{"value": 2 ** 100}]
+    value = []
+    for _ in range(600):
+        value = [value]
+    return value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["huge-integer", "deep-json"])
+@pytest.mark.parametrize("status", [200, 422])
+async def test_malformed_transcript_persists_failed_job_with_detached_rows(kind, status):
+    from copy import copy
+
+    class DetachedRepository(FakeAgentJobRepository):
+        async def create_job(self, **values):
+            return copy(await super().create_job(**values))
+
+        async def jobs_for(self, analysis_run_id, *, tenant_id):
+            return [copy(job) for job in await super().jobs_for(analysis_run_id, tenant_id=tenant_id)]
+
+        async def get_job(self, job_id, *, tenant_id):
+            return copy(await super().get_job(job_id, tenant_id=tenant_id))
+
+        async def save_job(self, job):
+            index = next(i for i, stored in enumerate(self.jobs) if stored.id == job.id)
+            self.jobs[index] = copy(job)
+
+    run, collection = context()
+    repo = DetachedRepository()
+    transcript = malformed_transcript(kind)
+    body = {"transcript": transcript} if status == 200 else {
+        "detail": {"code": "AGENT_UNAVAILABLE", "transcript": transcript},
+    }
+    stage = AgentStage(client=FakeClient(status, body, repo=repo), repository=repo, llm_resolver=llm)
+    with pytest.raises(PipelineFailure, match="^AGENT_UNAVAILABLE$"):
+        await stage.run(run, collection, None)
+    persisted = repo.jobs[0]
+    assert persisted.state == "FAILED"
+    assert persisted.error_code == "AGENT_UNAVAILABLE"
+    assert persisted.finished_at is not None
+    assert orjson.loads(persisted.transcript) == []
