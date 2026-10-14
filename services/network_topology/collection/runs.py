@@ -342,9 +342,9 @@ async def refresh_from_analysis(run, repository=None):
     # callers. Terminal transitions below still persist the collection state.
     run.analysis_state = _state(analysis.state)
     run.stage = getattr(analysis, "stage", None)
-    run.graph_revision = getattr(analysis, "graph_revision", getattr(run, "graph_revision", None))
-    run.error_code = getattr(analysis, "error_code", getattr(run, "error_code", None))
-    run.error_message = getattr(analysis, "error_message", getattr(run, "error_message", None))
+    run._analysis_graph_revision = getattr(analysis, "graph_revision", None)
+    run._analysis_error_code = getattr(analysis, "error_code", None)
+    run._analysis_error_message = getattr(analysis, "error_message", None)
     state = _state(analysis.state)
     if state == "SUCCEEDED":
         topology = None

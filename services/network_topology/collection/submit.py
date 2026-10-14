@@ -64,12 +64,6 @@ async def submit_snapshot(plan, run, *, ingest=None, now=None) -> dict[str, Any]
             target_manifest = snapshot.get("target_manifest") or {}
             authority = UploadAuthority(run.tenant_id, plan.topology_id, actor, PLAYBOOK_ID, str(run.id))
             envelope = _without_observations(snapshot)
-            if any(
-                int((resource.get("result") or {}).get("expected_observation_count", 0)) < 2
-                for source in envelope.get("sources", [])
-                for resource in source.get("resources", [])
-            ):
-                raise CollectionError("SNAPSHOT_INVALID", 422)
             started = await topology_upload.start_upload(authority, {
                 "id": plan.topology_id,
                 "manifest_id": target_manifest.get("manifest_id"),
@@ -116,10 +110,10 @@ async def status(plan, run) -> dict[str, Any]:
         "run_state": getattr(run, "state", None),
         "analysis_state": getattr(run, "analysis_state", None),
         "stage": getattr(run, "stage", None),
-        "graph_revision": getattr(run, "graph_revision", None),
+        "graph_revision": getattr(run, "_analysis_graph_revision", getattr(run, "graph_revision", None)),
         "result": getattr(run, "result", None),
-        "error_code": getattr(run, "error_code", None),
-        "error_message": getattr(run, "error_message", None),
+        "error_code": getattr(run, "_analysis_error_code", getattr(run, "error_code", None)),
+        "error_message": getattr(run, "_analysis_error_message", getattr(run, "error_message", None)),
         "terminal": getattr(run, "state", None) in {"SUCCEEDED", "FAILED"},
         "device_total": getattr(run, "device_total", 0),
         "device_succeeded": getattr(run, "device_succeeded", 0),

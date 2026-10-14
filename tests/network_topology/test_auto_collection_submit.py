@@ -99,9 +99,54 @@ async def test_status_projects_scoped_inflight_analysis(monkeypatch, state, stag
             return SimpleNamespace(state=state, stage=stage, graph_revision=8, error_code="TEMPORARY_NETWORK_FAILURE", error_message="Retry pending")
     monkeypatch.setattr(submit.runs, "_repo", lambda repository: Repo())
     run = _run(_snapshot()); run.state = "SUBMITTED"; run.analysis_run_id = "analysis-1"
+    run.graph_revision = 3; run.error_code = None; run.error_message = None
     data = await submit.status(SimpleNamespace(topology_id="topo-1"), run)
     assert data["run_state"] == "SUBMITTED" and data["terminal"] is False
     assert (data["analysis_state"], data["stage"]) == (state, stage)
     assert data["graph_revision"] == 8
+    assert run.graph_revision == 3 and run.error_code is None and run.error_message is None
     assert data["error_code"] == "TEMPORARY_NETWORK_FAILURE"
     assert data["error_message"] == "Retry pending"
+
+
+def _valid_single_snapshot():
+    from tests.network_topology.test_auto_collection_snapshot_builder import _build, _outcome
+    return _build([_outcome("item-a")])
+
+
+def test_upload_contract_accepts_one_observation_and_rejects_zero():
+    from services.network_topology import contracts
+    snapshot = _valid_single_snapshot()
+    envelope = submit._without_observations(snapshot)
+    payload = {"id": "topo-1", "manifest_id": "m1", "snapshot_envelope_without_observations": envelope,
+               "client_expected_input_hash": "sha256:" + "0" * 64}
+    contracts.validate_contract(payload, submit.topology_upload.UPLOAD_START_SCHEMA)
+    envelope["sources"][0]["resources"][0]["result"]["expected_observation_count"] = 0
+    with pytest.raises(contracts.ContractError):
+        contracts.validate_contract(payload, submit.topology_upload.UPLOAD_START_SCHEMA)
+
+
+@pytest.mark.asyncio
+async def test_single_raw_observation_uses_chunk_ingress_with_valid_contract(monkeypatch):
+    from services.network_topology import contracts
+    monkeypatch.setattr(submit.settings, "TOPOLOGY_V2_DIRECT_MAX_BYTES", 10, raising=False)
+    calls = []
+    async def start(authority, payload):
+        contracts.validate_contract(payload, submit.topology_upload.UPLOAD_START_SCHEMA)
+        assert payload["snapshot_envelope_without_observations"]["sources"][0]["resources"][0]["result"]["expected_observation_count"] == 1
+        calls.append("start")
+        return {"upload_session_id": "u1"}
+    async def stage(owner, payload):
+        contracts.validate_contract(payload, submit.topology_upload.UPLOAD_CHUNK_SCHEMA)
+        calls.append("stage")
+    async def commit(*args, **kwargs):
+        calls.append("commit")
+        return submit.topology_snapshot.SyncAccepted("a1", "s1")
+    monkeypatch.setattr(submit.topology_upload, "start_upload", start)
+    monkeypatch.setattr(submit.topology_upload, "stage_chunk", stage)
+    monkeypatch.setattr(submit.topology_upload, "commit_upload_session", commit)
+    monkeypatch.setattr(submit, "_save_run", lambda run: None)
+    run = _run(_valid_single_snapshot())
+    await submit.submit_snapshot(SimpleNamespace(topology_id="topo-1"), run)
+    assert calls == ["start", "stage", "commit"]
+    assert run.state == "SUBMITTED" and run.analysis_run_id == "a1"

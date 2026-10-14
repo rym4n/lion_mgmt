@@ -22,3 +22,9 @@ Upload start/stage/commit failures now call `runs.finish_run(..., FAILED, error_
 Added tests for all three upload failure points, malformed drafts, and RECEIVED/RUNNING analysis status. Focused suite: `9 passed`.
 
 The upload envelope contract requires `expected_observation_count >= 2`; chunked submission rejects any resource with fewer observations as `SNAPSHOT_INVALID` so it cannot send an invalid envelope.
+
+## Round 2 ledger ruling
+
+The upload envelope minimum is now 1, matching collection/v2 raw-only capability output. Chunk submission no longer rejects a valid one-observation resource; zero remains rejected by the packaged JSON Schema. Added contract validation tests for both cases and an end-to-end one-observation chunk path.
+
+Analysis graph/error values are kept as transient `_analysis_*` status projection fields, leaving persisted collection terminal accounting untouched. Focused suite: `11 passed`.

@@ -140,7 +140,7 @@
                       "required": ["status", "expected_observation_count"],
                       "properties": {
                         "status": {"const": "success"},
-                        "expected_observation_count": {"type": "integer", "minimum": 2}
+                        "expected_observation_count": {"type": "integer", "minimum": 1}
                       }
                     }
                   }
