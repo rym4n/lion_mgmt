@@ -94,6 +94,26 @@ async def test_manual_publish_failure_marks_run_failed(monkeypatch):
     assert next(iter(repo.runs.values())).state == "FAILED"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("expected", "current", "result"), [(3, 3, "unchanged"), (3, 4, "changed")])
+async def test_analysis_revision_classifies_result(expected, current, result):
+    repo = FakeRunRepository(plans=[plan("p1", enabled=True)])
+    created = await runs.start_scheduled("p1", repository=repo)
+    run = repo.runs[created["collection_run_id"]]
+    run.state = "SUBMITTED"
+    run.analysis_run_id = "analysis-1"
+    repo.topologies["topo-1"] = SimpleNamespace(
+        id="topo-1", tenant_id="t1", current_graph_revision=current, deleted=False
+    )
+    repo.analyses["analysis-1"] = SimpleNamespace(
+        id="analysis-1", tenant_id="t1", topology_id="topo-1", state="SUCCEEDED",
+        expected_current_graph_revision=expected, graph_hash="same-after-publish",
+    )
+    await runs.refresh_from_analysis(run, repository=repo)
+    assert run.result == result
+    assert run.state == "SUCCEEDED"
+
+
 async def _playbook():
     return SimpleNamespace(id="pb"), SimpleNamespace(id="pv")
 

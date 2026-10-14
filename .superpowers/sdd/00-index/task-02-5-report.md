@@ -59,3 +59,16 @@ PYTHONPATH=. uv run --project . pytest -q tests/network_topology/test_auto_colle
 ```
 
 `python3 -m py_compile` and `git diff --check` also passed.
+
+## Reopened Dependency Fix Evidence
+
+The successful analysis result now compares `analysis.expected_current_graph_revision` with `topology.current_graph_revision`. This preserves `unchanged` when publication keeps the expected revision and reports `changed` when the publisher increments it, avoiding the post-publication same-hash false positive.
+
+Focused verification:
+
+```text
+PYTHONPATH=. uv run --project . pytest -q tests/network_topology/test_auto_collection_runs.py
+10 passed, 23 warnings in 1.59s
+```
+
+`python3 -m py_compile` and `git diff --check` passed.

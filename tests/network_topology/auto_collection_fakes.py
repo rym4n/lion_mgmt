@@ -15,6 +15,8 @@ class FakeRunRepository:
     def __init__(self, plans=()):
         self.plans = {item.id: item for item in plans}
         self.runs = {}
+        self.analyses = {}
+        self.topologies = {}
         self._counter = 0
 
     async def get_plan(self, plan_id):
@@ -51,6 +53,10 @@ class FakeRunRepository:
     async def get_analysis(self, run_id, *, tenant_id=None, topology_id=None):
         row = getattr(self, "analyses", {}).get(run_id)
         return row if row is not None and row.tenant_id == tenant_id and row.topology_id == topology_id else None
+
+    async def get_topology(self, tenant_id, topology_id):
+        row = self.topologies.get(topology_id)
+        return row if row is not None and row.tenant_id == tenant_id else None
 
     async def open_runs(self):
         return [r for r in self.runs.values() if r.state not in runs.RUN_TERMINAL_STATES]

@@ -348,8 +348,13 @@ async def refresh_from_analysis(run, repository=None):
                 id=run.topology_id, tenant_id=run.tenant_id, deleted=False
             ).first()
         graph_revision = getattr(topology, "current_graph_revision", None)
-        base_hash = getattr(topology, "graph_hash", None)
-        result = "unchanged" if base_hash and getattr(analysis, "graph_hash", None) == base_hash else "changed"
+        expected_revision = getattr(analysis, "expected_current_graph_revision", None)
+        current_revision = getattr(topology, "current_graph_revision", None)
+        result = "unchanged" if (
+            expected_revision is not None
+            and current_revision is not None
+            and int(expected_revision) == int(current_revision)
+        ) else "changed"
         await finish_run(run, "SUCCEEDED", result=result, graph_revision=graph_revision, repository=repo)
     elif state in {"FAILED", "SUPERSEDED", "CANCELLED"}:
         await finish_run(run, "FAILED", error_code=getattr(analysis, "error_code", None), repository=repo)
