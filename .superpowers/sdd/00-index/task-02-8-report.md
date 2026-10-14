@@ -26,3 +26,9 @@ python3 -m compileall -q services core
 ## Concerns
 
 The full `tests/network_topology` run has two unrelated pre-existing permission-wrapper failures where test fakes reject the decorator's `refresh=` keyword; the remaining 1027 tests passed. No live database, Kafka, or production sweep execution was performed.
+
+## Round 1 review fixes
+
+Run detail now requires and validates `body.id` before looking up the run. Plan save rejects nested `tenant`/`tenant_id` fields before topology lookup. Internal status resolves plans under `DEFAULT_TENANT_ID` and scopes run lookup to the plan tenant, preventing cross-tenant plan/run-id combinations. Regression coverage was added for all three cases.
+
+Focused review-fix verification: `26 passed` across the collection views, runs, and wiring tests; `git diff --check` and `python3 -m compileall -q services core` pass.

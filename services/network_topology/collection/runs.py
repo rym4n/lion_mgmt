@@ -33,7 +33,7 @@ class ActiveRunConflict(RuntimeError):
 
 
 class RunRepository(Protocol):
-    async def get_plan(self, plan_id: str): ...
+    async def get_plan(self, plan_id: str, *, tenant_id: str | None = None): ...
     async def get_plan_for_topology(self, tenant_id: str, topology_id: str): ...
     async def get_items(self, plan_id: str): ...
     async def active_run(self, tenant_id: str, topology_id: str): ...
@@ -63,8 +63,11 @@ def _result(run) -> dict[str, Any]:
 
 
 class OrmRunRepository:
-    async def get_plan(self, plan_id):
-        return await TopologyCollectionPlan.filter(id=plan_id, deleted=False).first()
+    async def get_plan(self, plan_id, *, tenant_id=None):
+        filters = {"id": plan_id, "deleted": False}
+        if tenant_id is not None:
+            filters["tenant_id"] = tenant_id
+        return await TopologyCollectionPlan.filter(**filters).first()
 
     async def get_plan_for_topology(self, tenant_id, topology_id):
         return await TopologyCollectionPlan.filter(
@@ -417,13 +420,25 @@ async def run_detail(tenant_id, run_id, *, maintenance=False, repository=None):
     return _detail(run)
 
 
-async def get_run_for_plan(plan_id, collection_run_id, repository=None):
+async def get_run_for_plan(
+    plan_id, collection_run_id, *, tenant_id=DEFAULT_TENANT_ID, repository=None
+):
     """Resolve a run and its plan for the internal collection status API."""
     repo = _repo(repository)
-    plan = await repo.get_plan(plan_id)
+    try:
+        plan = await repo.get_plan(plan_id, tenant_id=tenant_id)
+    except TypeError:
+        # Keep compatibility with small repository fakes that predate the
+        # optional tenant filter, while still enforcing it after the lookup.
+        plan = await repo.get_plan(plan_id)
+        if plan is not None and str(getattr(plan, "tenant_id", "")) != str(tenant_id):
+            plan = None
     if plan is None:
         raise CollectionError("PLAN_NOT_FOUND", 404)
-    run = await repo.get_run(collection_run_id)
+    # The plan determines the resource tenant. Scope the run lookup by that
+    # tenant so a caller cannot combine a valid plan id with another tenant's
+    # guessed run id.
+    run = await repo.get_run(collection_run_id, tenant_id=plan.tenant_id)
     if run is None or str(run.plan_id) != str(plan.id):
         raise CollectionError("COLLECTION_RUN_NOT_FOUND", 404)
     return plan, run

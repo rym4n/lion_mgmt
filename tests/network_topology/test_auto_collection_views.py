@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from core.maintenance import DEFAULT_TENANT_ID
-from services.network_topology.collection import plans, views
+from services.network_topology.collection import plans, runs, views
+from tests.network_topology.auto_collection_fakes import FakeRunRepository, plan, run_row
 
 
 def _request(body, tenant_id):
@@ -103,3 +104,48 @@ async def test_collection_summaries_batches_queries(monkeypatch):
     assert calls[0][1]["topology_id__in"] == ["top-1"]
     assert calls[1][1]["id__in"] == ["run-1"]
     assert result["top-1"]["last_run"]["id"] == "run-1"
+
+
+def _unwrapped(handler):
+    while hasattr(handler, "__wrapped__"):
+        handler = handler.__wrapped__
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_save_rejects_tenant_before_topology_lookup(monkeypatch):
+    topology_lookup = pytest.MonkeyPatch()
+    try:
+        topology_lookup.setattr(views, "_require_topology", pytest.fail)
+        response = await _unwrapped(views.save_collection_plan)(
+            _request({"id": "top-1", "tenant_id": "spoof"}, "tenant-a")
+        )
+    finally:
+        topology_lookup.undo()
+    assert response.status == 403
+
+
+@pytest.mark.asyncio
+async def test_run_detail_requires_topology_id(monkeypatch):
+    response = await _unwrapped(views.detail_collection_run)(
+        _request({"run_id": "run-1"}, "tenant-a")
+    )
+    assert response.status == 400
+
+
+@pytest.mark.asyncio
+async def test_internal_status_scopes_run_to_plan_tenant():
+    repo = FakeRunRepository(plans=[plan("p1", tenant_id="tenant-a")])
+    repo.runs["run-other"] = run_row("run-other", plan_id="p1", tenant_id="tenant-b")
+    with pytest.raises(views.CollectionError) as exc:
+        await runs.get_run_for_plan("p1", "run-other", repository=repo)
+    assert exc.value.code == "PLAN_NOT_FOUND"
+
+    default_plan = plan("p-default", tenant_id=DEFAULT_TENANT_ID)
+    repo = FakeRunRepository(plans=[default_plan])
+    repo.runs["run-other"] = run_row(
+        "run-other", plan_id="p-default", tenant_id="tenant-b"
+    )
+    with pytest.raises(views.CollectionError) as exc:
+        await runs.get_run_for_plan("p-default", "run-other", repository=repo)
+    assert exc.value.code == "COLLECTION_RUN_NOT_FOUND"

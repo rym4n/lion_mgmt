@@ -154,6 +154,7 @@ async def get_collection_plan(request: Request):
 async def save_collection_plan(request: Request):
     try:
         data = _body(request)
+        _reject_tenant_fields(data)
         tenant_id, topology_id = await _require_topology(request, data)
         result = await plans.save_plan(
             tenant_id, topology_id, data, account_id=_actor_id(request)
@@ -217,10 +218,8 @@ async def detail_collection_run(request: Request):
     try:
         data = _body(request)
         _reject_tenant_fields(data)
-        tenant_id = _tenant_id(request)
+        tenant_id, _topology_id = await _require_topology(request, data)
         run_id = _required_string(data, "run_id")
-        if data.get("id"):
-            await _require_topology(request, data)
         result = await runs.run_detail(
             tenant_id,
             run_id,
@@ -299,7 +298,9 @@ async def status_collection_internal(request: Request):
         run_id = data.get("collection_run_id", data.get("run_id"))
         if not isinstance(run_id, str) or not run_id.strip():
             raise CollectionError("COLLECTION_INVALID_REQUEST", 400)
-        plan, run = await runs.get_run_for_plan(plan_id, run_id.strip())
+        plan, run = await runs.get_run_for_plan(
+            plan_id, run_id.strip(), tenant_id=DEFAULT_TENANT_ID
+        )
         return response_ok(await submit.status(plan, run))
     except CollectionError as error:
         return _error(error)
