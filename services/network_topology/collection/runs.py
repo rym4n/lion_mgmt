@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ from services.network_topology import analysis_runs
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.plans import BUILTIN_PLAYBOOK_NAME
 from settings import TASK_TOPIC
+
+logger = logging.getLogger(__name__)
 
 
 class ActiveRunConflict(RuntimeError):
@@ -274,6 +277,19 @@ async def notify_failure(plan, run):
                                      "run_args": params, "tenant_id": plan.tenant_id})
 
 
+async def _notify_after_commit(plan, run):
+    if plan is None or run.state != "FAILED" or not plan.notify_enabled or plan.consecutive_failures < 3:
+        return
+    try:
+        outcome = notify_failure(plan, run)
+        if inspect.isawaitable(outcome):
+            await outcome
+    except Exception:
+        # Notification delivery cannot undo committed terminal accounting or
+        # replace the caller's stable error. Do not log executor/credential text.
+        logger.warning("Collection failure notification failed for run %s", run.id)
+
+
 async def finish_run(run, state, *, error_code=None, error_message=None, result=None,
                      graph_revision=None, repository=None):
     repo = _repo(repository)
@@ -289,10 +305,7 @@ async def finish_run(run, state, *, error_code=None, error_message=None, result=
         if committed is None:
             return None
         plan = committed[1]
-        if plan is not None and run.state == "FAILED" and plan.notify_enabled and plan.consecutive_failures >= 3:
-            outcome = notify_failure(plan, run)
-            if inspect.isawaitable(outcome):
-                await outcome
+        await _notify_after_commit(plan, run)
         return None
     elif _terminal(run.state):
         return None
@@ -318,10 +331,7 @@ async def finish_run(run, state, *, error_code=None, error_message=None, result=
             plan.consecutive_failures = int(getattr(plan, "consecutive_failures", 0) or 0) + 1
         await repo.save_plan(plan)
     await repo.save_run(run)
-    if plan is not None and run.state == "FAILED" and plan.notify_enabled and plan.consecutive_failures >= 3:
-        outcome = notify_failure(plan, run)
-        if inspect.isawaitable(outcome):
-            await outcome
+    await _notify_after_commit(plan, run)
 
 
 async def refresh_from_analysis(run, repository=None):

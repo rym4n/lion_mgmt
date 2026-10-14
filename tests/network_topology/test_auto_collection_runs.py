@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -120,3 +121,42 @@ async def _playbook():
 
 async def _done():
     return None
+
+
+@pytest.mark.asyncio
+async def test_notification_failure_preserves_committed_terminal_accounting(monkeypatch, caplog):
+    collection_plan = plan("p1", notify_enabled=True, consecutive_failures=2)
+    run = SimpleNamespace(id="run-1", state="PENDING")
+
+    async def commit(actual_run, state, finished_at, **kwargs):
+        if actual_run.state == "FAILED":
+            return None
+        actual_run.state = state
+        actual_run.finished_at = finished_at
+        actual_run.error_code = kwargs["error_code"]
+        collection_plan.last_run_id = actual_run.id
+        collection_plan.consecutive_failures += 1
+        return actual_run, collection_plan
+
+    repo = SimpleNamespace(finish_terminal=commit)
+    notification = AsyncMock(side_effect=RuntimeError("INTERNAL_NOTIFICATION_SECRET"))
+    monkeypatch.setattr(runs, "notify_failure", notification)
+    await runs.finish_run(run, "FAILED", error_code="RESOURCE_NOT_FOUND", repository=repo)
+    await runs.finish_run(run, "FAILED", error_code="RESOURCE_NOT_FOUND", repository=repo)
+    assert run.state == "FAILED"
+    assert run.error_code == "RESOURCE_NOT_FOUND"
+    assert collection_plan.consecutive_failures == 3
+    assert collection_plan.last_run_id == run.id
+    notification.assert_awaited_once()
+    assert "notification failed" in caplog.text
+    assert "INTERNAL_NOTIFICATION_SECRET" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_terminal_persistence_failure_still_propagates(monkeypatch):
+    notification = AsyncMock()
+    monkeypatch.setattr(runs, "notify_failure", notification)
+    repo = SimpleNamespace(finish_terminal=AsyncMock(side_effect=RuntimeError("commit failed")))
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await runs.finish_run(SimpleNamespace(state="PENDING"), "FAILED", repository=repo)
+    notification.assert_not_awaited()

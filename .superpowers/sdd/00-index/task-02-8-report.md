@@ -40,3 +40,11 @@ The manifest endpoint now terminalizes an already resolved open run when item lo
 RED: six parameterized regressions failed before the change: known errors left runs PENDING and unexpected errors escaped. GREEN: `PYTHONPATH=. uv run --frozen --with pytest pytest -q tests/network_topology/test_auto_collection_views.py tests/network_topology/test_auto_collection_runs.py tests/network_topology/test_auto_collection_dispatch.py tests/network_topology/test_auto_collection_wiring.py` reports `41 passed`. Tests exercise real `finish_run` using the in-memory repository, verify the active-run slot is released, check stable response/persistence codes, and verify raw exception text is absent. An additional closed-run regression verifies unresolved runs are never finished. Compileall and whitespace checks pass.
 
 No live database or Kafka calls were exercised. Failure accounting still depends on successful persistence in `finish_run`; database write failure propagates rather than reporting a terminal transition that did not commit.
+
+## Dependency review: post-commit notification isolation
+
+`finish_run` now performs failure notifications after terminal persistence through an isolated helper. Notification/Kafka errors are logged with only the run id and cannot replace the stable manifest error response; persistence errors still propagate. Added regressions for a committed FAILED run with notification failure and for persistence failure propagation.
+
+RED: six new notification-failure permutations escaped with the notification exception after the run became FAILED. GREEN: `49 passed` across collection views, runs, dispatch, and wiring tests; the original 409/503 responses and public codes survive notification failure. Tests also cover the atomic repository commit path, single failure accounting under repeated finish calls, log redaction, and persistence errors propagating. `python3 -m compileall -q services core` and `git diff --check` pass.
+
+Notification delivery remains best effort with a sanitized warning on failure; this change adds no retry queue. No live notification delivery was exercised.

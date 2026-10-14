@@ -156,8 +156,14 @@ async def test_internal_status_scopes_run_to_plan_tenant():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["items", "freeze", "issue"])
 @pytest.mark.parametrize("known_error", [True, False])
-async def test_manifest_failure_terminalizes_open_run(monkeypatch, stage, known_error):
-    repo = FakeRunRepository(plans=[plan("p1")])
+@pytest.mark.parametrize("notification_fails", [False, True])
+async def test_manifest_failure_terminalizes_open_run(monkeypatch, stage, known_error, notification_fails):
+    repo = FakeRunRepository(plans=[plan(
+        "p1", notify_enabled=notification_fails,
+        consecutive_failures=2 if notification_fails else 0,
+    )])
+    notification = AsyncMock(side_effect=RuntimeError("INTERNAL_NOTIFICATION_SECRET"))
+    monkeypatch.setattr(runs, "notify_failure", notification)
     row = run_row("run-1", plan_id="p1", state="PENDING")
     repo.runs[row.id] = row
     monkeypatch.setattr(views, "_open_internal_run", AsyncMock(return_value=(repo.plans["p1"], row)))
@@ -189,6 +195,9 @@ async def test_manifest_failure_terminalizes_open_run(monkeypatch, stage, known_
     assert orjson.loads(response.body)["data"]["error_code"] == expected_code
     assert b"INTERNAL_SECRET" not in response.body
     assert "INTERNAL_SECRET" not in str(getattr(row, "error_message", ""))
+    assert b"INTERNAL_NOTIFICATION_SECRET" not in response.body
+    if notification_fails:
+        notification.assert_awaited_once()
 
 
 @pytest.mark.asyncio
