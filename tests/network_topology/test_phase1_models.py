@@ -431,6 +431,7 @@ def test_public_facade_exports_complete_model_surface() -> None:
     assert public_v2.__all__ == (
         "PresentationOverride",
         "TopologyAnalysisRun",
+        "TopologyAgentJob",
         "RUN_STATES",
         "RUN_TERMINAL_STATES",
         "TopologyCollectionItem",

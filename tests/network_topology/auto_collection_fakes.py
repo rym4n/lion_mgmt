@@ -89,3 +89,37 @@ class FakeTargetRepository:
 
     async def actions(self, tenant_id, app_name, version):
         return self.action_rows.get((app_name, version), [])
+
+
+def raw_collection(resource_outputs):
+    """Build a real auto-collection snapshot with all outputs grouped by resource."""
+    from services.network_topology.collection.snapshot_builder import ItemOutcome, asset_context_for, build_snapshot
+    manifest = {
+        "manifest_id": "m1", "manifest_hash": "sha256:" + "1" * 64,
+        "collection_sequence": 1, "base_graph_revision": 0,
+        "base_publication_revision": 0, "profile_revision": 1,
+        "issued_at": "2026-10-14T00:00:00Z", "expires_at": "2026-10-14T01:00:00Z",
+        "expected_resources": [
+            {"resource_id": resource_id, "capability_profile": "aioe-action-collection/v1",
+             "required_kinds": ["raw.action_output"], "optional_kinds": []}
+            for resource_id in resource_outputs
+        ],
+    }
+    outcomes = [
+        ItemOutcome(item_id=f"item-{index}", app_name="huawei_switch",
+                    action_func="collect_topology_observations_v2", app_version="v",
+                    resource_id=resource_id, status="success", output=output,
+                    observed_at="2026-10-14T00:10:00Z", error_code=None,
+                    error_message=None, duration_ms=5)
+        for resource_id, outputs in resource_outputs.items()
+        for index, output in enumerate(outputs)
+    ]
+    snapshot = build_snapshot(
+        collection_run_id="run-1", manifest=manifest, profile_revision=1,
+        outcomes=outcomes, asset_contexts={
+            resource_id: asset_context_for("SW1", "10.0.0.1", "huawei_switch", None, resource_id)
+            for resource_id in resource_outputs
+        }, started_at="2026-10-14T00:05:00Z", ended_at="2026-10-14T00:20:00Z",
+    )
+    from services.network_topology.run_pipeline import split_collection
+    return snapshot, list(split_collection(snapshot).agent_observation_ids)

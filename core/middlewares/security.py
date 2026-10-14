@@ -276,6 +276,9 @@ class SecurityMiddleware(BaseMiddleware):
             # ——表现为「一直 processing，30 分钟后显示索引超时」。
             # 路由自身用 _check_internal 校验 X-Internal-Token。
             "/knowledge/internal/",
+            # Internal topology agent routes authenticate their own token and job binding.
+            "/network-topology/internal/agent-jobs/",
+            "/network-topology/internal/agent-facts/",
         ]
         request_method = getattr(request, "method", "GET").upper()
         if (
