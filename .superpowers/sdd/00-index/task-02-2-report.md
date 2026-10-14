@@ -76,3 +76,20 @@ Output: `9 passed in 0.61s`.
 Relevant redaction regression command: `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology/test_auto_collection_observations.py tests/network_topology/test_phase2_payload_store.py tests/network_topology/test_phase2_upload_session.py`
 
 Output: `34 passed, 23 warnings in 2.22s`. This includes `test_raw_body_is_validated_then_redacted_before_hash_or_storage` and `test_staging_contains_only_redacted_observation_payload`.
+
+## Downstream dependency fix: schema-derived typed fact planes
+
+Removed the operational-plane constant from typed observations. Each registered schema is loaded with `contracts.load_schema`; its structured `x-fact-planes` metadata supplies candidate planes and full schema validation still determines acceptance. No kind-name heuristics are used. Invalid records continue to skip.
+
+Added `test_typed_observations_use_registered_fact_plane` parameter cases for `system.identity` (inventory), `l2.vlans` (configured), and `l3.neighbor_cache` (operational), each with an invalid sibling record to verify skip behavior.
+
+RED/GREEN command: `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology/test_auto_collection_observations.py tests/network_topology/test_auto_collection_snapshot_builder.py`
+
+- RED: `2 failed, 20 passed, 23 warnings in 1.93s`; valid inventory and configured cases were silently dropped.
+- GREEN: `22 passed, 23 warnings in 1.92s`.
+
+Full command: `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology`
+
+Output: `2 failed, 973 passed, 23 warnings in 22.00s`. Failures are the same baseline permission mocks rejecting `refresh=` in `test_thin_routes_use_expected_permissions_and_safe_error_body` and `test_route_checks_topology_update_permission`.
+
+`python3 -m compileall -q services/network_topology/collection/observations.py tests/network_topology/test_auto_collection_observations.py` and `git diff --check`: passed.

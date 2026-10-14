@@ -69,12 +69,18 @@ def typed_observations(output, *, resource_id, item_id, observed_at) -> list[dic
             "observation_id": f"{item_id}:{resource_id}:{index}", "kind": kinds[0],
             "observation_status": "success", "source_method": "vendor_api",
             "content_type": "application/json", "data_schema": schemas[kinds[0]],
-            "fact_plane": "operational", "command_or_api": str(record.get("command_or_api") or kinds[0])[:512],
+            "command_or_api": str(record.get("command_or_api") or kinds[0])[:512],
             "observed_at": observed_at, "data": record.get("data"),
         })
-        try:
-            contracts.validate_contract(candidate, schemas[kinds[0]])
-        except contracts.ContractError:
-            continue
-        result.append(candidate)
+        # The packaged schema owns the allowed planes; validate each declared
+        # option so its structural constraints remain authoritative as well.
+        schema = contracts.load_schema(schemas[kinds[0]])
+        for plane in schema.get("x-fact-planes", []):
+            candidate["fact_plane"] = plane
+            try:
+                contracts.validate_contract(candidate, schemas[kinds[0]])
+            except contracts.ContractError:
+                continue
+            result.append(candidate)
+            break
     return result

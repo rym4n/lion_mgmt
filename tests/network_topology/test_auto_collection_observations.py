@@ -56,3 +56,18 @@ def test_scrub_redacts_sensitive_xml_fragments(value):
 def test_scrub_preserves_non_sensitive_fragment_text():
     value = "status: <interface>up"
     assert scrub_action_output(value) == value
+
+
+@pytest.mark.parametrize("kind,plane,data", [
+    ("system.identity", "inventory", {"hostname": "switch", "serial": None, "chassis_id": None,
+        "vendor": "example", "model": "switch", "os_version": "1", "device_type": "switch", "aliases": []}),
+    ("l2.vlans", "configured", {"vlans": [{"vlan_id": 10, "name": "users", "state": "active"}]}),
+    ("l3.neighbor_cache", "operational", {"neighbors": []}),
+])
+def test_typed_observations_use_registered_fact_plane(kind, plane, data):
+    output = {"data": {"records": [{"kinds": [kind], "data": data}, {"kinds": [kind], "data": "invalid"}]}}
+    observations = typed_observations(output, resource_id="r", item_id="i", observed_at="2026-10-14T00:00:00Z")
+    assert len(observations) == 1
+    assert observations[0]["fact_plane"] == plane
+    contracts.validate_contract(observations[0], observations[0]["data_schema"])
+    canonicalization.validate_observation_hashes(observations[0])
