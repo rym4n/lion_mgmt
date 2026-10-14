@@ -77,6 +77,7 @@ async def test_listener_starts_once_and_awaits_shutdown(monkeypatch):
     await listener.before_server_stop(app, asyncio.get_running_loop())
     assert stopped.is_set()
     assert app.ctx.topology_analysis_task.done()
+    assert app.ctx.topology_collection_sweep_task.done()
     service.shutdown.assert_awaited_once()
 
 

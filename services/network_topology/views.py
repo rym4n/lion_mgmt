@@ -18,6 +18,7 @@ from services.network_topology import (
     query_views,
     upgrade_views,
 )
+from services.network_topology.collection import plans as collection_plans
 from services.network_topology import compatibility_manager as compatibility
 from services.network_topology import manifest as topology_manifest
 from services.network_topology.analyzer import analyze_topology
@@ -600,6 +601,11 @@ async def _topology_page(data, tenant_id, page, page_size):
             "utime",
         )
     )
+    collection_by_topology = await collection_plans.collection_summaries(
+        tenant_id, [item["id"] for item in items]
+    )
+    for item in items:
+        item["collection"] = collection_by_topology.get(item["id"])
     return total, items
 
 
@@ -788,4 +794,5 @@ async def delete_topology(request: Request):
             using_db=connection,
             update_fields=["deleted", "revision", "utime"],
         )
+    await collection_plans.delete_plan_for_topology(tenant_id, topology_id)
     return response_ok({"id": topology.id})

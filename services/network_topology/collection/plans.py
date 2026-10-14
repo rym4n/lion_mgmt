@@ -7,12 +7,17 @@ from hashlib import sha256
 
 import asyncpg
 from tortoise import connections
+from tortoise.expressions import RawSQL
 
 from tortoise.transactions import in_transaction
 from core.maintenance import DEFAULT_TENANT_ID
 from libs.kafka import aproduce
 from models import AssetInstance, Playbook, PlaybookVersion, Timed, ToolAction, ToolResources
-from models.network_topology_v2 import TopologyCollectionItem, TopologyCollectionPlan
+from models.network_topology_v2 import (
+    TopologyCollectionItem,
+    TopologyCollectionPlan,
+    TopologyCollectionRun,
+)
 from services.inspection.logic import is_valid_schedule_cron
 from services.network_topology.canonicalization import canonicalize_json
 from services.network_topology.collection.errors import CollectionError
@@ -143,6 +148,77 @@ async def get_plan(tenant_id: str, topology_id: str) -> dict:
     items = await TopologyCollectionItem.filter(tenant_id=tenant_id, plan_id=plan.id, deleted=False).order_by('order', 'id')
     return {'plan': {key: deepcopy(getattr(plan, key)) for key in PLAN_FIELDS},
             'items': [{key: deepcopy(getattr(item, key)) for key in ITEM_FIELDS} for item in items]}
+
+
+async def collection_summaries(tenant_id: str, topology_ids: list[str]) -> dict[str, dict]:
+    """Return one collection summary per topology using two batched queries."""
+    topology_ids = [str(value) for value in topology_ids if value]
+    if not topology_ids:
+        return {}
+    plan_query = TopologyCollectionPlan.filter(
+        tenant_id=tenant_id,
+        topology_id__in=topology_ids,
+        deleted=False,
+    )
+    # Collection items have no ORM relation to plans. Annotate their enabled
+    # count in the same plan query so list pages stay at two database queries.
+    try:
+        plan_query = plan_query.annotate(
+            enabled_item_count=RawSQL(
+                '(SELECT COUNT(*) FROM "network_topology_collection_item" AS item '
+                'WHERE item."plan_id" = "network_topology_collection_plan"."id" '
+                'AND item."tenant_id" = "network_topology_collection_plan"."tenant_id" '
+                'AND item."deleted" = FALSE AND item."enabled" = TRUE)'
+            )
+        )
+    except AttributeError:
+        # Small repository fakes used by direct-handler tests need only support
+        # filter/await; they may expose ``items`` on each plan instead.
+        pass
+    plans = await plan_query
+    last_run_ids = [str(plan.last_run_id) for plan in plans if getattr(plan, "last_run_id", None)]
+    runs = await TopologyCollectionRun.filter(
+        tenant_id=tenant_id,
+        id__in=last_run_ids,
+        deleted=False,
+    )
+    runs_by_id = {str(run.id): run for run in runs}
+    summaries = {}
+    for plan in plans:
+        # Older fakes and integrations may expose item rows on the plan. The
+        # ORM model stores them separately; an enabled plan is the only signal
+        # available to the list query in that case.
+        items = getattr(plan, "items", None)
+        enabled_item_count = getattr(plan, "enabled_item_count", None)
+        has_enabled_item = (
+            bool(enabled_item_count)
+            if enabled_item_count is not None
+            else
+            any(bool(getattr(item, "enabled", False)) for item in items)
+            if items is not None
+            else bool(getattr(plan, "enabled", False))
+        )
+        if not has_enabled_item:
+            continue
+        last_run = runs_by_id.get(str(plan.last_run_id)) if getattr(plan, "last_run_id", None) else None
+        last_run_payload = None
+        if last_run is not None:
+            finished_at = getattr(last_run, "finished_at", None)
+            if finished_at is not None and hasattr(finished_at, "isoformat"):
+                finished_at = finished_at.isoformat()
+            last_run_payload = {
+                "id": str(last_run.id),
+                "state": getattr(last_run, "state", None),
+                "result": getattr(last_run, "result", None),
+                "finished_at": finished_at,
+                "error_code": getattr(last_run, "error_code", None),
+            }
+        summaries[str(plan.topology_id)] = {
+            "enabled": bool(plan.enabled),
+            "schedule_cron": plan.schedule_cron,
+            "last_run": last_run_payload,
+        }
+    return summaries
 
 
 async def save_plan(tenant_id: str, topology_id: str, payload: dict, *, account_id: str) -> dict:

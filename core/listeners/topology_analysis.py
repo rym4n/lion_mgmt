@@ -10,6 +10,26 @@ from .base import BaseListener
 
 class TopologyAnalysisListener(BaseListener):
     async def after_server_start(self, app, loop) -> None:
+        async def sweep_collection_runs():
+            from services.network_topology.collection import runs
+
+            try:
+                while True:
+                    await asyncio.sleep(60)
+                    try:
+                        await runs.sweep_runs()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("拓扑采集 run sweep 异常")
+            except asyncio.CancelledError:
+                raise
+
+        sweep_task = getattr(app.ctx, "topology_collection_sweep_task", None)
+        if sweep_task is None or sweep_task.done():
+            app.ctx.topology_collection_sweep_task = asyncio.create_task(
+                sweep_collection_runs(), name="topology_collection_run_sweep"
+            )
         task = getattr(app.ctx, "topology_analysis_task", None)
         if task is not None and not task.done():
             return
@@ -35,6 +55,7 @@ class TopologyAnalysisListener(BaseListener):
     async def before_server_stop(self, app, loop) -> None:
         worker = getattr(app.ctx, "topology_analysis_worker", None)
         task = getattr(app.ctx, "topology_analysis_task", None)
+        sweep_task = getattr(app.ctx, "topology_collection_sweep_task", None)
         try:
             if worker is not None:
                 await worker.shutdown()
@@ -43,3 +64,7 @@ class TopologyAnalysisListener(BaseListener):
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
+            if sweep_task is not None:
+                sweep_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sweep_task

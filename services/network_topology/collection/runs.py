@@ -417,6 +417,18 @@ async def run_detail(tenant_id, run_id, *, maintenance=False, repository=None):
     return _detail(run)
 
 
+async def get_run_for_plan(plan_id, collection_run_id, repository=None):
+    """Resolve a run and its plan for the internal collection status API."""
+    repo = _repo(repository)
+    plan = await repo.get_plan(plan_id)
+    if plan is None:
+        raise CollectionError("PLAN_NOT_FOUND", 404)
+    run = await repo.get_run(collection_run_id)
+    if run is None or str(run.plan_id) != str(plan.id):
+        raise CollectionError("COLLECTION_RUN_NOT_FOUND", 404)
+    return plan, run
+
+
 async def sweep_runs(repository=None):
     repo = _repo(repository)
     rows = await repo.open_runs() if hasattr(repo, "open_runs") else await TopologyCollectionRun.filter(deleted=False, state__not_in=list(RUN_TERMINAL_STATES))
