@@ -338,6 +338,13 @@ async def refresh_from_analysis(run, repository=None):
         ).first()
     if analysis is None:
         return run
+    # Keep the in-flight analysis projection available to collection status
+    # callers. Terminal transitions below still persist the collection state.
+    run.analysis_state = _state(analysis.state)
+    run.stage = getattr(analysis, "stage", None)
+    run.graph_revision = getattr(analysis, "graph_revision", getattr(run, "graph_revision", None))
+    run.error_code = getattr(analysis, "error_code", getattr(run, "error_code", None))
+    run.error_message = getattr(analysis, "error_message", getattr(run, "error_message", None))
     state = _state(analysis.state)
     if state == "SUCCEEDED":
         topology = None

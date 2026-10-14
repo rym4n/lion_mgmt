@@ -10,7 +10,7 @@ import settings
 
 from services.network_topology import snapshot as topology_snapshot
 from services.network_topology import upload as topology_upload
-from services.network_topology.canonicalization import canonicalize_and_hash_snapshot, canonicalize_json
+from services.network_topology.canonicalization import CanonicalizationError, canonicalize_and_hash_snapshot, canonicalize_json
 from services.network_topology.collection import runs
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.snapshot_builder import PLAYBOOK_ID
@@ -63,10 +63,17 @@ async def submit_snapshot(plan, run, *, ingest=None, now=None) -> dict[str, Any]
             canonical = canonicalize_and_hash_snapshot(snapshot)
             target_manifest = snapshot.get("target_manifest") or {}
             authority = UploadAuthority(run.tenant_id, plan.topology_id, actor, PLAYBOOK_ID, str(run.id))
+            envelope = _without_observations(snapshot)
+            if any(
+                int((resource.get("result") or {}).get("expected_observation_count", 0)) < 2
+                for source in envelope.get("sources", [])
+                for resource in source.get("resources", [])
+            ):
+                raise CollectionError("SNAPSHOT_INVALID", 422)
             started = await topology_upload.start_upload(authority, {
                 "id": plan.topology_id,
                 "manifest_id": target_manifest.get("manifest_id"),
-                "snapshot_envelope_without_observations": _without_observations(snapshot),
+                "snapshot_envelope_without_observations": envelope,
                 "client_expected_input_hash": canonical.payload_hash,
             })
             session_id = started["upload_session_id"]
@@ -92,6 +99,15 @@ async def submit_snapshot(plan, run, *, ingest=None, now=None) -> dict[str, Any]
     except topology_snapshot.SnapshotError as error:
         await runs.finish_run(run, "FAILED", error_code=f"SNAPSHOT_{error.code}")
         raise CollectionError(error.code, error.status) from error
+    except topology_upload.UploadError as error:
+        await runs.finish_run(run, "FAILED", error_code=f"UPLOAD_{error.code}")
+        raise CollectionError(error.code, error.status) from error
+    except CollectionError as error:
+        await runs.finish_run(run, "FAILED", error_code=error.code)
+        raise
+    except (orjson.JSONDecodeError, CanonicalizationError, TypeError, ValueError) as error:
+        await runs.finish_run(run, "FAILED", error_code="SNAPSHOT_INVALID")
+        raise CollectionError("SNAPSHOT_INVALID", 422) from error
 
 
 async def status(plan, run) -> dict[str, Any]:

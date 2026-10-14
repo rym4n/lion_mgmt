@@ -43,3 +43,65 @@ async def test_large_snapshot_stages_each_observation_with_contract_envelope(mon
     assert "observations" not in envelope["sources"][0]["resources"][0]["result"]
     assert envelope["sources"][0]["resources"][0]["result"]["expected_observation_count"] == 2
     assert run.analysis_run_id == "s2" and data["sync_id"] == "s2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["start", "stage", "commit"])
+async def test_upload_failure_terminalizes_collection(monkeypatch, failure_stage):
+    from services.network_topology.collection.errors import CollectionError
+    monkeypatch.setattr(submit.settings, "TOPOLOGY_V2_DIRECT_MAX_BYTES", 10, raising=False)
+    async def start(*args, **kwargs):
+        if failure_stage == "start":
+            raise submit.topology_upload.UploadError("UPLOAD_CONFLICT")
+        return {"upload_session_id": "u1"}
+    async def stage(*args, **kwargs):
+        if failure_stage == "stage":
+            raise submit.topology_upload.UploadError("UPLOAD_CONFLICT")
+    async def commit(*args, **kwargs):
+        raise submit.topology_upload.UploadError("UPLOAD_CONFLICT")
+    async def finish(run, state, **kwargs):
+        run.state = state
+        run.error_code = kwargs["error_code"]
+    monkeypatch.setattr(submit.topology_upload, "start_upload", start)
+    monkeypatch.setattr(submit.topology_upload, "stage_chunk", stage)
+    monkeypatch.setattr(submit.topology_upload, "commit_upload_session", commit)
+    monkeypatch.setattr(submit.runs, "finish_run", finish)
+    run = _run(_snapshot()); run.state = "COLLECTED"
+    with pytest.raises(CollectionError) as exc:
+        await submit.submit_snapshot(SimpleNamespace(topology_id="topo-1"), run)
+    assert exc.value.code == "UPLOAD_CONFLICT" and exc.value.status == 409
+    assert run.state == "FAILED" and run.error_code == "UPLOAD_UPLOAD_CONFLICT"
+    assert run.snapshot_draft is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("draft", ["{invalid", '{"sources":[{}]}'])
+async def test_invalid_draft_terminalizes_collection(monkeypatch, draft):
+    from services.network_topology.collection.errors import CollectionError
+    async def finish(run, state, **kwargs):
+        run.state = state
+        run.error_code = kwargs["error_code"]
+    monkeypatch.setattr(submit.runs, "finish_run", finish)
+    monkeypatch.setattr(submit.settings, "TOPOLOGY_V2_DIRECT_MAX_BYTES", 1, raising=False)
+    run = _run(_snapshot()); run.state = "COLLECTED"; run.snapshot_draft = draft
+    with pytest.raises(CollectionError) as exc:
+        await submit.submit_snapshot(SimpleNamespace(topology_id="topo-1"), run)
+    assert exc.value.code == "SNAPSHOT_INVALID"
+    assert run.state == "FAILED" and run.error_code == "SNAPSHOT_INVALID"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state, stage", [("RECEIVED", "RECEIVED"), ("RUNNING", "PARSING")])
+async def test_status_projects_scoped_inflight_analysis(monkeypatch, state, stage):
+    class Repo:
+        async def get_analysis(self, run_id, *, tenant_id, topology_id):
+            assert (run_id, tenant_id, topology_id) == ("analysis-1", "tenant-1", "topo-1")
+            return SimpleNamespace(state=state, stage=stage, graph_revision=8, error_code="TEMPORARY_NETWORK_FAILURE", error_message="Retry pending")
+    monkeypatch.setattr(submit.runs, "_repo", lambda repository: Repo())
+    run = _run(_snapshot()); run.state = "SUBMITTED"; run.analysis_run_id = "analysis-1"
+    data = await submit.status(SimpleNamespace(topology_id="topo-1"), run)
+    assert data["run_state"] == "SUBMITTED" and data["terminal"] is False
+    assert (data["analysis_state"], data["stage"]) == (state, stage)
+    assert data["graph_revision"] == 8
+    assert data["error_code"] == "TEMPORARY_NETWORK_FAILURE"
+    assert data["error_message"] == "Retry pending"
