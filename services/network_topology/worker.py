@@ -193,6 +193,8 @@ class TopologyAnalysisWorker:
                 updates=result.updates,
             ):
                 raise PipelineFailure("WORKER_LEASE_LOST")
+            for field, value in result.updates.items():
+                setattr(run, field, value)
             run.stage = following
 
     async def _execute_with_heartbeat(self, run, stage, identity):

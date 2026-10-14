@@ -181,3 +181,43 @@ async def test_configured_agent_results_are_merged_without_requiring_raw_chunk()
     assert calls == ["run", "load"]
     assert repository.commits == 1
     assert run.facts_hash
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured_agent", [False, True])
+async def test_worker_passes_persisted_routing_to_agent_on_distinct_claimed_run(configured_agent):
+    from models._network_topology_v2_base import AnalysisRunState
+    from services.network_topology.worker import TopologyAnalysisWorker
+    from tests.network_topology.test_phase3_worker import MemoryLeaseRepository
+
+    fixture = _raw_fixture()
+    pipeline, repository = _pipeline(fixture)
+    persisted = _run(fixture)
+    persisted.stage = AnalysisRunStage.PARSING
+    persisted.state = AnalysisRunState.RUNNING
+    persisted.agent_observation_ids = []
+    claimed = deepcopy(persisted)
+    expected_ids = list(split_collection(fixture["collection"]).agent_observation_ids)
+    lease_repository = MemoryLeaseRepository([persisted])
+
+    if configured_agent:
+        class InspectingAgent:
+            async def run(self, run, collection, lease):
+                assert run is claimed
+                assert run.agent_observation_ids == expected_ids
+                raise PipelineFailure("AGENT_NOT_CONFIGURED")
+
+        pipeline.agent_stage = InspectingAgent()
+
+    service = TopologyAnalysisWorker(
+        worker_id=claimed.lease_owner, pipeline=pipeline,
+        lease_repository=lease_repository,
+    )
+    with pytest.raises(PipelineFailure, match="AGENT_NOT_CONFIGURED"):
+        await service._run_stages(claimed, _lease(claimed))
+
+    assert claimed is not persisted
+    assert persisted.agent_observation_ids == expected_ids
+    assert claimed.agent_observation_ids == expected_ids
+    assert persisted.stage == claimed.stage == AnalysisRunStage.AGENT_NORMALIZING
+    assert repository.commits == 0
