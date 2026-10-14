@@ -56,12 +56,18 @@ TEMPORARY_ERRORS = frozenset(
         "TEMPORARY_NETWORK_FAILURE",
         "TEMPORARY_DATABASE_FAILURE",
         "WORKER_LEASE_LOST",
+        "AGENT_TIMEOUT",
+        "AGENT_SUBMIT_REJECTED",
+        "AGENT_VALIDATION_EXHAUSTED",
+        "AGENT_UNAVAILABLE",
     }
 )
 PUBLIC_RUN_ERRORS = TEMPORARY_ERRORS | frozenset(
     {
         "WORKER_UNAVAILABLE",
         "AGENT_NOT_CONFIGURED",
+        "AGENT_MODEL_NOT_CONFIGURED",
+        "AGENT_INPUT_UNAVAILABLE",
         "RUN_SUPERSEDED",
         "SCHEMA_INVALID",
         "PARSER_FAILED",
@@ -75,6 +81,12 @@ PUBLIC_RUN_ERRORS = TEMPORARY_ERRORS | frozenset(
     }
 )
 _PUBLIC_SUMMARIES = {
+    "AGENT_INPUT_UNAVAILABLE": "Analysis agent input is unavailable",
+    "AGENT_TIMEOUT": "Analysis agent timed out",
+    "AGENT_SUBMIT_REJECTED": "Analysis agent submission was not accepted",
+    "AGENT_VALIDATION_EXHAUSTED": "Analysis agent validation attempts exhausted",
+    "AGENT_UNAVAILABLE": "Analysis agent is temporarily unavailable",
+    "AGENT_MODEL_NOT_CONFIGURED": "Analysis agent model is not configured",
     "AGENT_NOT_CONFIGURED": "Analysis agent is not configured",
     "RUN_SUPERSEDED": "Analysis run was superseded",
     "WORKER_UNAVAILABLE": "Analysis worker is temporarily unavailable",

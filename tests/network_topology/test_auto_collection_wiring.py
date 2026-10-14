@@ -82,12 +82,22 @@ async def test_listener_starts_once_and_awaits_shutdown(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_default_pipeline_fails_closed_for_pending_agent_observations():
+async def test_default_pipeline_installs_agent_stage():
+    from services.network_topology.agent_stage import AgentStage
     from services.network_topology.analysis_pipeline import build_default_pipeline
-    from services.network_topology.worker import PipelineFailure
+    from tests.network_topology.auto_collection_fakes import FakeAgentJobRepository, raw_collection
+    from tests.network_topology.test_auto_collection_agent_stage import FakeClient, llm
+
     pipeline = build_default_pipeline()
-    with pytest.raises(PipelineFailure, match="AGENT_NOT_CONFIGURED"):
-        await pipeline.agent_stage.run(SimpleNamespace(agent_observation_ids=["raw"]), {}, None)
+    assert isinstance(pipeline.agent_stage, AgentStage)
+    collection, ids = raw_collection({"r1": [{"code": 200, "data": {}}]})
+    repo = FakeAgentJobRepository(collection)
+    pipeline.agent_stage.repository = repo
+    pipeline.agent_stage.client = FakeClient(repo=repo)
+    pipeline.agent_stage.llm_resolver = llm
+    run = SimpleNamespace(id="a1", tenant_id="t1", topology_row_id="topo-1", agent_observation_ids=ids)
+    assert await pipeline.agent_stage.run(run, collection, None) == ()
+    assert repo.jobs[0].state == "SUCCEEDED"
 
 
 @pytest.mark.asyncio

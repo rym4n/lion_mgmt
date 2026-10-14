@@ -123,3 +123,32 @@ def raw_collection(resource_outputs):
     )
     from services.network_topology.run_pipeline import split_collection
     return snapshot, list(split_collection(snapshot).agent_observation_ids)
+
+
+class FakeAgentJobRepository:
+    def __init__(self, collection=None):
+        self.jobs = []
+        self.collection = collection
+
+    async def create_job(self, **values):
+        job = SimpleNamespace(id=f"job-{len(self.jobs) + 1}", documents=None, **values)
+        self.jobs.append(job)
+        return job
+
+    async def jobs_for(self, analysis_run_id, *, tenant_id):
+        return [j for j in self.jobs if j.analysis_run_id == analysis_run_id and j.tenant_id == tenant_id]
+
+    async def save_job(self, job):
+        pass
+
+    async def get_job(self, job_id, *, tenant_id):
+        return next(j for j in self.jobs if j.id == job_id and j.tenant_id == tenant_id)
+
+    def mark_submitted(self, job_id):
+        next(j for j in self.jobs if j.id == job_id).state = "SUBMITTED"
+
+    async def collection_run_id_for(self, analysis_run_id, *, tenant_id):
+        return "run-1"
+
+    async def load_collection(self, run):
+        return self.collection

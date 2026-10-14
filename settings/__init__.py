@@ -328,6 +328,7 @@ RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283"
 # 数字伙伴运行时服务
 LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agent:8000")
 LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
+MGMT_INTERNAL_BASE_URL = os.environ.get("MGMT_INTERNAL_BASE_URL", "http://lion-mgmt:8000")
 # 已弃用：运行时凭证改由 llm_model_config 表提供（见 services/llm_config/resolver.py）。
 # 保留定义仅为兼容 .env 文件与 lion_memory 容器；lion_mgmt 业务代码不再读取。
 RY_AI_LITE_MODEL = (
