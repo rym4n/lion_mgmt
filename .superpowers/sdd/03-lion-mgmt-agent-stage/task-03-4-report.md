@@ -48,3 +48,11 @@ Verification:
 - Changed-file compileall and git diff --check pass.
 
 No live PostgreSQL, deployed worker/agent, migration, external publication or deployment was exercised. Diagnostic identity resolution still uses the existing durable identity registry, as ordinary analysis does; this change prevents graph publication rather than introducing a wholly read-only analysis pipeline.
+
+## Review fix 3: collection detail UI projection
+
+Completed the real collection-run/detail response contract used by the Task 06.4 dialog: item_results is always an array, and analysis_state/stage are present (null before an associated analysis exists). Active SUBMITTED runs call the existing scoped refresh_from_analysis, preserving its idempotent terminal persistence/public error mapping. Terminal rows read their associated analysis for the timeline without refreshing or repeating terminal accounting. Both paths share a tenant/topology/deleted-bound analysis lookup. The collection list contract remains items/collection_run_id; Task 06.4 frontend agent confirmed its matching changes.
+
+Item rows explicitly project the ItemOutcome metadata used by the UI. Raw output, inputs, token-shaped extra fields, frozen targets, snapshot drafts and worker summaries are absent; executor failure message text is replaced with a stable error code because persisted remote messages may contain credentials. Ordinary Agent summary still contains counters only; maintenance Agent diagnostics remain gated as before.
+
+TDD: six new detail tests initially failed on absent analysis_state/stage/item_results. Final focused maintenance + collection run/submit/view suite: **72 passed**, with 23 existing Tortoise warnings. Full topology suite: **1131 passed, 2 failed**, exactly the same baseline authorization-mock refresh= failures above. Added coverage includes active/terminal timelines, failed refresh accounting only once, empty item defaults, other tenant/topology analysis refusal, actual ORM filter scoping, and no raw result/extra token/worker/ordinary transcript leak. Compileall and git diff --check pass. No live browser, database, deployment or lion_agent test was performed.

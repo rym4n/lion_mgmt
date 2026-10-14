@@ -336,21 +336,22 @@ async def finish_run(run, state, *, error_code=None, error_message=None, result=
     await _notify_after_commit(plan, run)
 
 
+async def _bound_analysis(run, repo):
+    if hasattr(repo, "get_analysis"):
+        return await repo.get_analysis(
+            run.analysis_run_id, tenant_id=run.tenant_id, topology_id=run.topology_id
+        )
+    return await TopologyAnalysisRun.filter(
+        id=run.analysis_run_id, tenant_id=run.tenant_id,
+        topology_row_id=run.topology_id, deleted=False,
+    ).first()
+
+
 async def refresh_from_analysis(run, repository=None):
     repo = _repo(repository)
     if _state(run.state) != "SUBMITTED" or not getattr(run, "analysis_run_id", None):
         return run
-    if hasattr(repo, "get_analysis"):
-        analysis = await repo.get_analysis(
-            run.analysis_run_id, tenant_id=run.tenant_id, topology_id=run.topology_id
-        )
-    else:
-        analysis = await TopologyAnalysisRun.filter(
-            id=run.analysis_run_id,
-            tenant_id=run.tenant_id,
-            topology_row_id=run.topology_id,
-            deleted=False,
-        ).first()
+    analysis = await _bound_analysis(run, repo)
     if analysis is None:
         return run
     # Keep the in-flight analysis projection available to collection status
@@ -429,12 +430,45 @@ async def run_detail(tenant_id, run_id, *, maintenance=False, repository=None):
     run = await repo.get_run(run_id, tenant_id=tenant_id)
     if run is None:
         raise CollectionError("COLLECTION_RUN_NOT_FOUND", 404)
+    analysis_state = stage = None
+    if _state(getattr(run, "state", None)) == "SUBMITTED":
+        await refresh_from_analysis(run, repository=repo)
+        analysis_state = getattr(run, "analysis_state", None)
+        stage = getattr(run, "stage", None)
+    elif _terminal(getattr(run, "state", None)) and getattr(run, "analysis_run_id", None):
+        # Terminal collection details still need the timeline, but a read must
+        # not repeat failure accounting or change a cancelled collection state.
+        analysis = await _bound_analysis(run, repo)
+        if analysis is not None:
+            analysis_state, stage = _state(analysis.state), getattr(analysis, "stage", None)
     job = None
     if getattr(run, "analysis_run_id", None):
         job = await TopologyAgentJob.filter(
             tenant_id=tenant_id, analysis_run_id=run.analysis_run_id, deleted=False
         ).order_by("-attempt", "-ctime", "-id").first()
-    return {**_detail(run), "agent": agent_summary(job, maintenance=maintenance)}
+    return {
+        **_detail(run), "item_results": _public_item_results(getattr(run, "item_results", None)),
+        "analysis_state": analysis_state, "stage": _state(stage),
+        "agent": agent_summary(job, maintenance=maintenance),
+    }
+
+
+def _public_item_results(items):
+    # Action outputs/inputs and executor diagnostic messages are not part of
+    # this projection. Persisted failure text can contain remote credentials.
+    fields = ("item_id", "app_name", "app_version", "action_func", "resource_id",
+              "status", "observed_at", "error_code", "duration_ms")
+    if not isinstance(items, list):
+        return []
+    results = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        result = {name: item.get(name) for name in fields}
+        result["error_message"] = (item.get("error_code") or "COLLECTION_ACTION_FAILED"
+                                   if item.get("status") == "failed" else None)
+        results.append(result)
+    return results
 
 
 def agent_summary(job, *, maintenance):

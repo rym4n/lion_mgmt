@@ -220,3 +220,82 @@ async def test_rerun_stale_cas_conflict_is_returned_safely(monkeypatch, views):
     response = await views.rerun_agent_job(request({"job_id": "j1"}))
     assert response.status == 409
     assert data(response)["error_code"] == "UPLOAD_CONFLICT"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,analysis_state,stage", [
+    ("SUBMITTED", "RUNNING", "PROJECTING_GRAPH"),
+    ("SUCCEEDED", "SUCCEEDED", "PUBLISHING"),
+    ("FAILED", "FAILED", "AGENT_NORMALIZING"),
+])
+async def test_collection_detail_projects_scoped_analysis_and_safe_item_results(
+    monkeypatch, state, analysis_state, stage,
+):
+    from tests.network_topology.auto_collection_fakes import FakeRunRepository, run_row
+    repo = FakeRunRepository()
+    row = run_row("cr1", state=state, analysis_run_id="ar1", item_results=[{
+        "item_id": "item1", "resource_id": "r1", "app_name": "switch", "action_func": "collect",
+        "status": "failed", "error_code": "COLLECTION_ACTION_FAILED", "duration_ms": 10,
+        "error_message": "UPSTREAM_CREDENTIAL_SECRET", "output": "RAW_DEVICE_SECRET", "token": "TOKEN_SECRET",
+    }], snapshot_draft="PRIVATE_SNAPSHOT", frozen_targets=[{"password": "PASSWORD_SECRET"}])
+    repo.runs[row.id] = row
+    repo.analyses = {"ar1": SimpleNamespace(id="ar1", tenant_id="t1", topology_id="topo-1",
+        state=analysis_state, stage=stage, error_code="AGENT_UNAVAILABLE", error_summary="WORKER_SECRET")}
+    model(monkeypatch, runs, "TopologyAgentJob", [job(tenant_id="t1", transcript='[{"secret":"TRANSCRIPT_SECRET"}]')])
+    result = await runs.run_detail("t1", "cr1", repository=repo)
+    assert result["analysis_state"] == analysis_state and result["stage"] == stage
+    assert result["item_results"][0]["resource_id"] == "r1"
+    assert result["item_results"][0]["duration_ms"] == 10
+    assert result["agent"] == {"state": "SUCCEEDED", "resources": 1, "cache_hits": 1, "cache_misses": 0}
+    assert b"SECRET" not in orjson.dumps(result)
+    assert "snapshot_draft" not in result and "frozen_targets" not in result
+    assert row.state == state  # terminal projection must not transition or mutate accounting
+
+
+@pytest.mark.asyncio
+async def test_collection_detail_active_refresh_terminalizes_once_and_defaults_items(monkeypatch):
+    from tests.network_topology.auto_collection_fakes import FakeRunRepository, plan, run_row
+    repo = FakeRunRepository(plans=[plan("p1")])
+    row = run_row("cr1", state="SUBMITTED", plan_id="p1", analysis_run_id="ar1", item_results=None)
+    repo.runs[row.id] = row
+    repo.analyses = {"ar1": SimpleNamespace(id="ar1", tenant_id="t1", topology_id="topo-1",
+        state="FAILED", stage="VALIDATING_FACTS", error_code="AGENT_UNAVAILABLE", error_summary="SECRET")}
+    model(monkeypatch, runs, "TopologyAgentJob", [])
+    first = await runs.run_detail("t1", "cr1", repository=repo)
+    second = await runs.run_detail("t1", "cr1", repository=repo)
+    assert first["state"] == second["state"] == "FAILED"
+    assert first["analysis_state"] == second["analysis_state"] == "FAILED"
+    assert first["stage"] == second["stage"] == "VALIDATING_FACTS"
+    assert first["item_results"] == second["item_results"] == []
+    assert repo.plans["p1"].consecutive_failures == 1
+    assert "SECRET" not in orjson.dumps(first).decode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign", ["tenant", "topology"])
+async def test_collection_detail_does_not_project_other_tenant_or_topology_analysis(monkeypatch, foreign):
+    from tests.network_topology.auto_collection_fakes import FakeRunRepository, run_row
+    repo = FakeRunRepository()
+    row = run_row("cr1", state="SUBMITTED", analysis_run_id="ar1")
+    repo.runs[row.id] = row
+    repo.analyses = {"ar1": SimpleNamespace(id="ar1", tenant_id="foreign" if foreign == "tenant" else "t1",
+        topology_id="foreign" if foreign == "topology" else "topo-1", state="FAILED", stage="SECRET")}
+    model(monkeypatch, runs, "TopologyAgentJob", [])
+    result = await runs.run_detail("t1", "cr1", repository=repo)
+    assert result["analysis_state"] is None and result["stage"] is None
+    assert result["state"] == "SUBMITTED" and result["item_results"] == []
+    with pytest.raises(runs.CollectionError):
+        await runs.run_detail("foreign", "cr1", repository=repo)
+
+
+@pytest.mark.asyncio
+async def test_collection_detail_analysis_orm_lookup_is_tenant_and_topology_scoped(monkeypatch):
+    from tests.network_topology.auto_collection_fakes import run_row
+    row = run_row("cr1", state="SUCCEEDED", analysis_run_id="ar1", item_results=[])
+    repo = SimpleNamespace(get_run=AsyncMock(return_value=row))
+    calls, _ = model(monkeypatch, runs, "TopologyAnalysisRun", [SimpleNamespace(
+        id="ar1", tenant_id="t1", topology_row_id="topo-1", state="SUCCEEDED", stage="PUBLISHING")])
+    model(monkeypatch, runs, "TopologyAgentJob", [])
+    result = await runs.run_detail("t1", "cr1", repository=repo)
+    assert calls == [{"id": "ar1", "tenant_id": "t1", "topology_row_id": "topo-1", "deleted": False}]
+    assert result["stage"] == "PUBLISHING" and result["analysis_state"] == "SUCCEEDED"
