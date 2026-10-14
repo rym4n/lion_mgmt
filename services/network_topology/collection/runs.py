@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
+import orjson
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
@@ -19,6 +20,7 @@ from models.network_topology_v2 import (
     RUN_STATES,
     RUN_TERMINAL_STATES,
     TopologyAnalysisRun,
+    TopologyAgentJob,
     TopologyCollectionItem,
     TopologyCollectionPlan,
     TopologyCollectionRun,
@@ -427,7 +429,29 @@ async def run_detail(tenant_id, run_id, *, maintenance=False, repository=None):
     run = await repo.get_run(run_id, tenant_id=tenant_id)
     if run is None:
         raise CollectionError("COLLECTION_RUN_NOT_FOUND", 404)
-    return _detail(run)
+    job = None
+    if getattr(run, "analysis_run_id", None):
+        job = await TopologyAgentJob.filter(
+            tenant_id=tenant_id, analysis_run_id=run.analysis_run_id, deleted=False
+        ).order_by("-attempt", "-ctime", "-id").first()
+    return {**_detail(run), "agent": agent_summary(job, maintenance=maintenance)}
+
+
+def agent_summary(job, *, maintenance):
+    """Expose bounded public counters, with diagnostics only in maintenance."""
+    if job is None:
+        return None
+    result = {
+        "state": _state(job.state), "resources": len(job.resource_ids or []),
+        "cache_hits": job.cache_hits, "cache_misses": job.cache_misses,
+    }
+    if maintenance:
+        result.update(job_id=str(job.id), **{
+            name: getattr(job, name, None)
+            for name in ("attempt", "iterations", "token_usage", "profile_version", "error_code", "error_message")
+        })
+        result["transcript"] = orjson.loads(job.transcript) if job.transcript else []
+    return result
 
 
 async def get_run_for_plan(
