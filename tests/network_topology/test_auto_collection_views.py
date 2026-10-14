@@ -1,5 +1,7 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import orjson
 import pytest
 
 from core.maintenance import DEFAULT_TENANT_ID
@@ -149,3 +151,55 @@ async def test_internal_status_scopes_run_to_plan_tenant():
     with pytest.raises(views.CollectionError) as exc:
         await runs.get_run_for_plan("p-default", "run-other", repository=repo)
     assert exc.value.code == "COLLECTION_RUN_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["items", "freeze", "issue"])
+@pytest.mark.parametrize("known_error", [True, False])
+async def test_manifest_failure_terminalizes_open_run(monkeypatch, stage, known_error):
+    repo = FakeRunRepository(plans=[plan("p1")])
+    row = run_row("run-1", plan_id="p1", state="PENDING")
+    repo.runs[row.id] = row
+    monkeypatch.setattr(views, "_open_internal_run", AsyncMock(return_value=(repo.plans["p1"], row)))
+    items = AsyncMock(return_value=[])
+    freeze = AsyncMock(return_value=[])
+    issue = AsyncMock(return_value={"manifest_id": "manifest-1"})
+    error = (
+        views.CollectionError("RESOURCE_NOT_FOUND", 409, "INTERNAL_SECRET")
+        if known_error else RuntimeError("INTERNAL_SECRET")
+    )
+    {"items": items, "freeze": freeze, "issue": issue}[stage].side_effect = error
+    monkeypatch.setattr(views.runs, "OrmRunRepository", lambda: SimpleNamespace(get_items=items))
+    monkeypatch.setattr(views.targets, "freeze_targets", freeze)
+    monkeypatch.setattr(views.manifest_issue, "issue_action_manifest", issue)
+    finish_run = runs.finish_run
+
+    async def finish(actual_run, state, **kwargs):
+        await finish_run(actual_run, state, repository=repo, **kwargs)
+
+    monkeypatch.setattr(views.runs, "finish_run", finish)
+    response = await _unwrapped(views.manifest_collection_internal)(
+        _request({"plan_id": "p1", "collection_run_id": row.id}, DEFAULT_TENANT_ID)
+    )
+    assert row.state == "FAILED"
+    assert await repo.active_run(row.tenant_id, row.topology_id) is None
+    expected_code = "RESOURCE_NOT_FOUND" if known_error else "COLLECTION_MANIFEST_FAILED"
+    assert row.error_code == expected_code
+    assert response.status == (409 if known_error else 503)
+    assert orjson.loads(response.body)["data"]["error_code"] == expected_code
+    assert b"INTERNAL_SECRET" not in response.body
+    assert "INTERNAL_SECRET" not in str(getattr(row, "error_message", ""))
+
+
+@pytest.mark.asyncio
+async def test_manifest_closed_run_does_not_finish_unresolved_run(monkeypatch):
+    monkeypatch.setattr(views, "_open_internal_run", AsyncMock(
+        side_effect=views.CollectionError("COLLECTION_RUN_CLOSED", 409)
+    ))
+    finish = AsyncMock()
+    monkeypatch.setattr(views.runs, "finish_run", finish)
+    response = await _unwrapped(views.manifest_collection_internal)(
+        _request({"plan_id": "p1", "collection_run_id": "run-1"}, DEFAULT_TENANT_ID)
+    )
+    assert response.status == 409
+    finish.assert_not_awaited()

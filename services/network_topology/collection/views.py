@@ -247,11 +247,21 @@ async def manifest_collection_internal(request: Request):
     try:
         data = _internal_body(request)
         plan, run = await _open_internal_run(data)
-        items = await runs.OrmRunRepository().get_items(plan.id)
-        frozen = await targets.freeze_targets(plan, items)
-        manifest = await manifest_issue.issue_action_manifest(
-            plan, run, frozen, now=datetime.now(timezone.utc)
-        )
+        try:
+            items = await runs.OrmRunRepository().get_items(plan.id)
+            frozen = await targets.freeze_targets(plan, items)
+            manifest = await manifest_issue.issue_action_manifest(
+                plan, run, frozen, now=datetime.now(timezone.utc)
+            )
+        except CollectionError as error:
+            await runs.finish_run(run, "FAILED", error_code=error.code)
+            # Target errors may contain resource identities or execution
+            # details; only the stable public code crosses this boundary.
+            raise CollectionError(error.code, error.status) from None
+        except Exception:
+            error = CollectionError("COLLECTION_MANIFEST_FAILED", 503)
+            await runs.finish_run(run, "FAILED", error_code=error.code)
+            raise error from None
         return response_ok(
             {
                 "collection_run_id": str(run.id),

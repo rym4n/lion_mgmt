@@ -32,3 +32,11 @@ The full `tests/network_topology` run has two unrelated pre-existing permission-
 Run detail now requires and validates `body.id` before looking up the run. Plan save rejects nested `tenant`/`tenant_id` fields before topology lookup. Internal status resolves plans under `DEFAULT_TENANT_ID` and scopes run lookup to the plan tenant, preventing cross-tenant plan/run-id combinations. Regression coverage was added for all three cases.
 
 Focused review-fix verification: `26 passed` across the collection views, runs, and wiring tests; `git diff --check` and `python3 -m compileall -q services core` pass.
+
+## Dependency review: manifest failure accounting
+
+The manifest endpoint now terminalizes an already resolved open run when item loading, target freezing, or manifest issuance fails. A `CollectionError` retains its stable code and HTTP status, with its potentially sensitive message omitted from both persisted accounting and the response. Other exceptions map to `COLLECTION_MANIFEST_FAILED` (503). Request validation and closed-run rejection remain outside this accounting boundary.
+
+RED: six parameterized regressions failed before the change: known errors left runs PENDING and unexpected errors escaped. GREEN: `PYTHONPATH=. uv run --frozen --with pytest pytest -q tests/network_topology/test_auto_collection_views.py tests/network_topology/test_auto_collection_runs.py tests/network_topology/test_auto_collection_dispatch.py tests/network_topology/test_auto_collection_wiring.py` reports `41 passed`. Tests exercise real `finish_run` using the in-memory repository, verify the active-run slot is released, check stable response/persistence codes, and verify raw exception text is absent. An additional closed-run regression verifies unresolved runs are never finished. Compileall and whitespace checks pass.
+
+No live database or Kafka calls were exercised. Failure accounting still depends on successful persistence in `finish_run`; database write failure propagates rather than reporting a terminal transition that did not commit.
