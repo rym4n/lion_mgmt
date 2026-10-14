@@ -23,6 +23,13 @@ from models._network_topology_v2_presentation import (
     TopologyLayoutSet,
     TopologyScopeLayoutVersion,
 )
+from models._network_topology_v2_auto_collection import (
+    RUN_STATES,
+    RUN_TERMINAL_STATES,
+    TopologyCollectionItem,
+    TopologyCollectionPlan,
+    TopologyCollectionRun,
+)
 
 __all__ = (
     "PresentationOverride",
