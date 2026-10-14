@@ -192,6 +192,10 @@ def timer_lock(monkeypatch):
     async def locked(plan):
         yield plan
     monkeypatch.setattr(plans, '_locked_plan', locked)
+    @asynccontextmanager
+    async def serial(plan):
+        yield
+    monkeypatch.setattr(plans, '_timer_serialization', serial)
 
 @pytest.mark.asyncio
 async def test_concurrent_stale_reconciliation_uses_latest_plan(monkeypatch):

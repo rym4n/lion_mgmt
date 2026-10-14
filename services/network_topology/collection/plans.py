@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from contextlib import asynccontextmanager
+from hashlib import sha256
+
+import asyncpg
+from tortoise import connections
 
 from tortoise.transactions import in_transaction
 from core.maintenance import DEFAULT_TENANT_ID
@@ -194,7 +198,31 @@ async def _locked_plan(plan):
         yield current
 
 
+@asynccontextmanager
+async def _timer_serialization(plan):
+    # A dedicated session avoids exhausting the ORM pool with advisory-lock
+    # waiters while the lock owner needs pooled transactions to commit state.
+    client = connections.get('default')
+    connection = await asyncpg.connect(
+        host=client.host, port=client.port, user=client.user,
+        password=client.password, database=client.database,
+        server_settings=client.server_settings, **client.extra,
+    )
+    key = int.from_bytes(sha256(f'network_topology_collection:{plan.tenant_id}:{plan.id}'.encode()).digest()[:8], 'big', signed=True)
+    try:
+        await connection.execute('SELECT pg_advisory_lock($1)', key)
+        yield
+    finally:
+        # Closing the dedicated session releases the lock even after cancellation.
+        await connection.close()
+
+
 async def sync_timer(plan) -> None:
+    async with _timer_serialization(plan):
+        await _reconcile_timer(plan)
+
+
+async def _reconcile_timer(plan) -> None:
     # Re-read under the plan row lock: older post-commit callers must reconcile
     # the latest revision, and two callers must not create separate timer rows.
     prepared = None
@@ -256,15 +284,21 @@ async def _prepare_timer_locked(plan):
 
 
 async def delete_plan_for_topology(tenant_id, topology_id) -> None:
-    async with in_transaction() as db:
-        plan = await TopologyCollectionPlan.filter(tenant_id=tenant_id, topology_id=topology_id, deleted=False).using_db(db).select_for_update().first()
-        if plan is None:
-            return
-        plan.enabled = False
-        prepared = await _prepare_timer_locked(plan)
+    plan = await TopologyCollectionPlan.filter(tenant_id=tenant_id, topology_id=topology_id, deleted=False).first()
+    if plan is None:
+        return
+    async with _timer_serialization(plan):
+        async with _locked_plan(plan) as current:
+            if current is None:
+                return
+            current.enabled = False
+            await current.save(update_fields=['enabled'])
+            prepared = await _prepare_timer_locked(current)
+        # Removal must also be outside the transaction containing retry state.
         if prepared:
             await aproduce(TASK_TOPIC, prepared[1], raise_on_error=True)
-            prepared[0].enable = 0
-            await prepared[0].save()
-        await TopologyCollectionItem.filter(tenant_id=tenant_id, plan_id=plan.id, deleted=False).using_db(db).update(deleted=True)
-        await TopologyCollectionPlan.filter(tenant_id=tenant_id, id=plan.id, deleted=False).using_db(db).update(deleted=True, enabled=False)
+        async with _locked_plan(plan) as current:
+            if current is None:
+                return
+            await TopologyCollectionItem.filter(tenant_id=tenant_id, plan_id=plan.id, deleted=False).update(deleted=True)
+            await TopologyCollectionPlan.filter(tenant_id=tenant_id, id=plan.id, deleted=False).update(deleted=True, enabled=False)
