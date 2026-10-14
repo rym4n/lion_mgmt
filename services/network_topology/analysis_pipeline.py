@@ -22,7 +22,7 @@ from services.network_topology.identity import OrmIdentityPersistence, resolve_w
 from services.network_topology.legacy import publish_upgrade_graph
 from services.network_topology.publishing import PublicationRequest, publish_graph
 from services.network_topology.scope_tree import ScopeTreeError
-from services.network_topology.versions import graph_hash
+from services.network_topology.versions import facts_hash, graph_hash
 from services.network_topology.analysis_runs import worker_write_allowed
 from services.network_topology.canonicalization import sha256_uri
 from services.network_topology.facts.candidate_conversion import (
@@ -362,7 +362,9 @@ class OrmAnalysisPipelineRepository:
 
     async def load_facts(self, run, store):
         if run.fact_graph_payload is not None:
-            return _decode_document(run.fact_graph_payload, "EVIDENCE_INVALID")
+            facts = _decode_document(run.fact_graph_payload, "EVIDENCE_INVALID")
+            _require_same_hash(facts_hash(facts), run.facts_hash)
+            return facts
         row = await TopologyPayloadObject.filter(
             id=run.fact_graph_payload_object_row_id, tenant_id=run.tenant_id,
             deleted=False, status=PayloadObjectStatus.LIVE,

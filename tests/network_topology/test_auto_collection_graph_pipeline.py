@@ -303,3 +303,28 @@ async def test_finalize_committed_publication_rejects_mismatches(change):
     assert not await leases.mark_succeeded(lease, repository=repo, clock=lambda: NOW)
     assert not repo.saved
     assert run.finished_at == NOW
+
+
+@pytest.mark.asyncio
+async def test_inline_facts_reject_changed_content_with_committed_hash():
+    from services.network_topology.versions import facts_hash
+    _, run, _ = await graph_context()
+    facts = orjson.loads(run.fact_graph_payload)
+    run.facts_hash = facts_hash(facts)
+    facts['analysis_run_id'] = 'tampered-run'
+    run.fact_graph_payload = orjson.dumps(facts).decode()
+    with pytest.raises(PipelineFailure, match='EVIDENCE_INVALID'):
+        await module.OrmAnalysisPipelineRepository().load_facts(run, None)
+
+
+@pytest.mark.asyncio
+async def test_inline_facts_accept_equivalent_escaped_representation():
+    from services.network_topology.canonicalization import sha256_uri
+    from services.network_topology.versions import facts_hash
+    _, run, _ = await graph_context()
+    facts = orjson.loads(run.fact_graph_payload)
+    run.facts_hash = facts_hash(facts)
+    run.fact_graph_payload = orjson.dumps(facts).decode().replace('analysis', 'analys\\u0069s')
+    assert '\\u0069' in run.fact_graph_payload
+    assert sha256_uri(run.fact_graph_payload.encode()) != run.facts_hash
+    assert await module.OrmAnalysisPipelineRepository().load_facts(run, None) == facts
