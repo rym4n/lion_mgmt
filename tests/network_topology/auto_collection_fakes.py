@@ -47,3 +47,10 @@ class FakeRunRepository:
 
     async def save_plan(self, row):
         self.plans[row.id] = row
+
+    async def get_analysis(self, run_id, *, tenant_id=None, topology_id=None):
+        row = getattr(self, "analyses", {}).get(run_id)
+        return row if row is not None and row.tenant_id == tenant_id and row.topology_id == topology_id else None
+
+    async def open_runs(self):
+        return [r for r in self.runs.values() if r.state not in runs.RUN_TERMINAL_STATES]

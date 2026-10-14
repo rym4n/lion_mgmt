@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
 import pytest
 
 from services.network_topology.collection import runs
@@ -51,6 +54,37 @@ async def test_three_failures_trigger_notify(monkeypatch):
         created = await runs.start_scheduled("p1", repository=repo)
         await runs.finish_run(repo.runs[created["collection_run_id"]], "FAILED", error_code="X", repository=repo)
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_finish_is_idempotent_and_rejects_nonterminal():
+    repo = FakeRunRepository(plans=[plan("p1", enabled=True, notify_enabled=True)])
+    created = await runs.start_scheduled("p1", repository=repo)
+    run = repo.runs[created["collection_run_id"]]
+    with pytest.raises(CollectionError) as exc:
+        await runs.finish_run(run, "COLLECTING", repository=repo)
+    assert exc.value.code == "COLLECTION_RUN_STATE_INVALID"
+    await runs.finish_run(run, "FAILED", error_code="X", repository=repo)
+    await runs.finish_run(run, "SUCCEEDED", repository=repo)
+    assert run.state == "FAILED"
+    assert repo.plans["p1"].consecutive_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_publish_failure_marks_run_failed(monkeypatch):
+    repo = FakeRunRepository(plans=[plan("p1", enabled=True)])
+    monkeypatch.setattr(runs, "_builtin_playbook", lambda: _playbook())
+    async def fail(*args, **kwargs):
+        raise RuntimeError("broker down")
+    monkeypatch.setattr(runs, "aproduce", fail)
+    with pytest.raises(RuntimeError):
+        await runs.trigger_manual("t1", "topo-1", account_id="acct", repository=repo)
+    assert len(repo.runs) == 1
+    assert next(iter(repo.runs.values())).state == "FAILED"
+
+
+async def _playbook():
+    return SimpleNamespace(id="pb"), SimpleNamespace(id="pv")
 
 
 async def _done():

@@ -15,6 +15,7 @@ from libs.kafka import aproduce
 from libs.utils import gen_run_id
 from models import NetworkTopology, Playbook, PlaybookVersion
 from models.network_topology_v2 import (
+    RUN_STATES,
     RUN_TERMINAL_STATES,
     TopologyAnalysisRun,
     TopologyCollectionItem,
@@ -104,6 +105,20 @@ class OrmRunRepository:
     async def save_plan(self, plan):
         await plan.save()
 
+    async def claim_terminal(self, run, state, finished_at):
+        async with in_transaction() as connection:
+            current = await TopologyCollectionRun.filter(
+                id=run.id, tenant_id=run.tenant_id, deleted=False
+            ).using_db(connection).select_for_update().first()
+            if current is None or _terminal(current.state):
+                return False
+            current.state = state
+            current.finished_at = finished_at
+            await current.save(using_db=connection, update_fields=["state", "finished_at"])
+            run.state = state
+            run.finished_at = finished_at
+            return True
+
 
 def _repo(repository):
     return repository or OrmRunRepository()
@@ -161,13 +176,17 @@ async def trigger_manual(tenant_id, topology_id, *, account_id, repository=None)
             return data
         raise CollectionError("COLLECTION_RUN_ACTIVE", 409)
     flow_run_id = gen_run_id()
-    await aproduce(TASK_TOPIC, {
-        "run_type": "flow", "run_id": flow_run_id,
-        "run_args": {"flow_id": version.id,
-                      "flow_input": {"plan_id": plan.id, "collection_run_id": run.id},
-                      "executor": account_id},
-        "tenant_id": DEFAULT_TENANT_ID,
-    })
+    try:
+        await aproduce(TASK_TOPIC, {
+            "run_type": "flow", "run_id": flow_run_id,
+            "run_args": {"flow_id": version.id,
+                          "flow_input": {"plan_id": plan.id, "collection_run_id": run.id},
+                          "executor": account_id},
+            "tenant_id": DEFAULT_TENANT_ID,
+        }, raise_on_error=True)
+    except Exception:
+        await finish_run(run, "FAILED", error_code="COLLECTION_FLOW_SUBMIT_FAILED", repository=repo)
+        raise
     run.flow_run_id = flow_run_id
     await repo.save_run(run)
     return _result(run)
@@ -235,8 +254,20 @@ async def notify_failure(plan, run):
 async def finish_run(run, state, *, error_code=None, error_message=None, result=None,
                      graph_revision=None, repository=None):
     repo = _repo(repository)
-    run.state = _state(state)
-    run.finished_at = _now()
+    state = _state(state)
+    if state not in RUN_STATES or state not in RUN_TERMINAL_STATES:
+        raise CollectionError("COLLECTION_RUN_STATE_INVALID", 400)
+    finished_at = _now()
+    if hasattr(repo, "claim_terminal"):
+        if not await repo.claim_terminal(run, state, finished_at):
+            return None
+    elif _terminal(run.state):
+        return None
+    # Set the terminal marker before the first await. This makes repeated
+    # refresh/cancel/timeout calls idempotent even for repository fakes and
+    # prevents duplicate failure accounting and notifications.
+    run.state = state
+    run.finished_at = finished_at
     if error_code is not None:
         run.error_code = error_code
     if error_message is not None:
@@ -254,7 +285,7 @@ async def finish_run(run, state, *, error_code=None, error_message=None, result=
             plan.consecutive_failures = int(getattr(plan, "consecutive_failures", 0) or 0) + 1
         await repo.save_plan(plan)
     await repo.save_run(run)
-    if plan is not None and run.state == "FAILED" and plan.notify_enabled and plan.consecutive_failures >= 3:
+    if plan is not None and run.state == "FAILED" and plan.notify_enabled and plan.consecutive_failures == 3:
         outcome = notify_failure(plan, run)
         if inspect.isawaitable(outcome):
             await outcome
@@ -264,7 +295,17 @@ async def refresh_from_analysis(run, repository=None):
     repo = _repo(repository)
     if _state(run.state) != "SUBMITTED" or not getattr(run, "analysis_run_id", None):
         return run
-    analysis = await repo.get_analysis(run.analysis_run_id) if hasattr(repo, "get_analysis") else await TopologyAnalysisRun.filter(id=run.analysis_run_id, deleted=False).first()
+    if hasattr(repo, "get_analysis"):
+        analysis = await repo.get_analysis(
+            run.analysis_run_id, tenant_id=run.tenant_id, topology_id=run.topology_id
+        )
+    else:
+        analysis = await TopologyAnalysisRun.filter(
+            id=run.analysis_run_id,
+            tenant_id=run.tenant_id,
+            topology_row_id=run.topology_id,
+            deleted=False,
+        ).first()
     if analysis is None:
         return run
     state = _state(analysis.state)
@@ -333,10 +374,11 @@ async def sweep_runs(repository=None):
     for run in rows:
         plan = await repo.get_plan(run.plan_id)
         started = getattr(run, "started_at", None)
-        if plan is not None and started is not None:
+        timeout = int(getattr(plan, "run_timeout_seconds", getattr(run, "run_timeout_seconds", 3600)) or 3600)
+        if started is not None:
             if started.tzinfo is None:
                 started = started.replace(tzinfo=timezone.utc)
-            if (_now() - started).total_seconds() > int(plan.run_timeout_seconds):
+            if (_now() - started).total_seconds() > timeout:
                 await finish_run(run, "FAILED", error_code="COLLECTION_RUN_TIMEOUT", repository=repo)
                 count += 1
                 continue
