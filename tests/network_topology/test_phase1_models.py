@@ -174,6 +174,8 @@ EXPECTED_FIELDS = {
         "validation_report",
         "facts_hash",
         "graph_hash",
+        "graph_payload",
+        "agent_observation_ids",
         "state",
         "stage",
         "blocked_by",
@@ -340,6 +342,8 @@ EXPECTED_NULLABLE = {
         "validation_report",
         "facts_hash",
         "graph_hash",
+        "graph_payload",
+        "agent_observation_ids",
         "blocked_by",
         "error_code",
         "error_summary",
@@ -479,6 +483,7 @@ def test_frozen_state_and_stage_sets_are_exact() -> None:
     assert base.ANALYSIS_RUN_STAGES == {
         "SPLITTING",
         "PARSING",
+        "AGENT_NORMALIZING",
         "VALIDATING_FACTS",
         "FACTS_READY",
         "RESOLVING_IDENTITIES",
@@ -560,13 +565,18 @@ def test_sensitive_payloads_are_encrypted_or_object_referenced() -> None:
             "cancellation_reason",
         },
     }
+    expected_json_fields = {
+        analysis.TopologyAnalysisRun: {"agent_observation_ids"},
+    }
     for model, field_names in encrypted_fields.items():
         for field_name in field_names:
             assert isinstance(model._meta.fields_map[field_name], EncryptedTextField)
-        assert not any(
-            isinstance(field, fields.JSONField)
-            for field in model._meta.fields_map.values()
-        )
+        json_fields = {
+            name
+            for name, field in model._meta.fields_map.items()
+            if isinstance(field, fields.JSONField)
+        }
+        assert json_fields == expected_json_fields.get(model, set())
         assert {"private_key", "secret"}.isdisjoint(model._meta.fields_map)
 
 

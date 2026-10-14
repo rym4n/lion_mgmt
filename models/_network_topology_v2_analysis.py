@@ -71,6 +71,8 @@ class TopologyAnalysisRun(TopologyTenantModel):
     validation_report = EncryptedTextField(null=True)
     facts_hash = fields.CharField(max_length=71, null=True)
     graph_hash = fields.CharField(max_length=71, null=True)
+    graph_payload = EncryptedTextField(null=True)
+    agent_observation_ids = fields.JSONField(null=True)
     state = fields.CharEnumField(AnalysisRunState, default=AnalysisRunState.RECEIVED)
     stage = fields.CharEnumField(AnalysisRunStage, default=AnalysisRunStage.SPLITTING)
     blocked_by = fields.CharField(max_length=64, null=True)

@@ -159,7 +159,10 @@ async def test_claim_requires_committed_inline_or_live_payload_and_fences():
 
 def test_state_machine_rejects_fact_validation_bypass_to_publishing():
     assert leases.stage_transition_allowed(
-        AnalysisRunStage.PARSING, AnalysisRunStage.VALIDATING_FACTS
+        AnalysisRunStage.PARSING, AnalysisRunStage.AGENT_NORMALIZING
+    )
+    assert leases.stage_transition_allowed(
+        AnalysisRunStage.AGENT_NORMALIZING, AnalysisRunStage.VALIDATING_FACTS
     )
     assert not leases.stage_transition_allowed(
         AnalysisRunStage.PARSING, AnalysisRunStage.PUBLISHING

@@ -41,6 +41,7 @@ MAX_FENCING_TOKEN = 2**63 - 1
 STAGE_ORDER = (
     AnalysisRunStage.SPLITTING,
     AnalysisRunStage.PARSING,
+    AnalysisRunStage.AGENT_NORMALIZING,
     AnalysisRunStage.VALIDATING_FACTS,
     AnalysisRunStage.FACTS_READY,
     AnalysisRunStage.RESOLVING_IDENTITIES,
