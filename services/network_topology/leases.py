@@ -396,7 +396,27 @@ async def mark_succeeded(
             raise InvalidTransition("success requires PUBLISHING")
         _apply_terminal(run, AnalysisRunState.SUCCEEDED, None, now)
 
-    return await _fenced_update(identity, repository, mutate, _TERMINAL_FIELDS)
+    repo = repository or OrmLeaseRepository()
+    async with repo.transaction() as connection:
+        run = await _get_locked(repo, identity.run_id, connection)
+        if run is not None and _state(run) == AnalysisRunState.SUCCEEDED.value:
+            # Publication already committed success; finalize only its original lease.
+            if not (
+                _stage(run) == AnalysisRunStage.PUBLISHING.value
+                and str(run.id) == str(identity.run_id)
+                and run.lease_owner == identity.worker_id
+                and run.lease_generation == identity.lease_generation
+                and run.fencing_token == identity.fencing_token
+            ):
+                return False
+            _clear_lease(run)
+            await repo.save_run(run, _LEASE_FIELDS, connection=connection)
+            return True
+        if not _write_allowed(run, identity):
+            return False
+        mutate(run)
+        await repo.save_run(run, _TERMINAL_FIELDS, connection=connection)
+        return True
 
 
 async def release_lease(

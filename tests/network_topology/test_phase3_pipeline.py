@@ -173,11 +173,12 @@ async def test_non_empty_collection_parsed_to_empty_fails_closed():
 
 
 @pytest.mark.asyncio
-async def test_phase3_pipeline_refuses_phase4_and_publish_stages():
+async def test_pipeline_refuses_invalid_and_mismatched_current_stages():
     fixture = _fixture()
     pipeline, _ = _pipeline(fixture)
     run = _run(fixture)
     for stage in (
+        "NOT_A_STAGE",
         AnalysisRunStage.FACTS_READY,
         AnalysisRunStage.RESOLVING_IDENTITIES,
         AnalysisRunStage.PUBLISHING,

@@ -61,6 +61,8 @@ TEMPORARY_ERRORS = frozenset(
 PUBLIC_RUN_ERRORS = TEMPORARY_ERRORS | frozenset(
     {
         "WORKER_UNAVAILABLE",
+        "AGENT_NOT_CONFIGURED",
+        "RUN_SUPERSEDED",
         "SCHEMA_INVALID",
         "PARSER_FAILED",
         "EVIDENCE_INVALID",
@@ -73,6 +75,8 @@ PUBLIC_RUN_ERRORS = TEMPORARY_ERRORS | frozenset(
     }
 )
 _PUBLIC_SUMMARIES = {
+    "AGENT_NOT_CONFIGURED": "Analysis agent is not configured",
+    "RUN_SUPERSEDED": "Analysis run was superseded",
     "WORKER_UNAVAILABLE": "Analysis worker is temporarily unavailable",
     "PROVIDER_TIMEOUT": "Analysis provider timed out",
     "TEMPORARY_NETWORK_FAILURE": "Temporary network failure",
