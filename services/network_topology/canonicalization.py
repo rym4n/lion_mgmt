@@ -88,7 +88,7 @@ SENSITIVE_TEXT = re.compile(
     r"(?im)^\s*(?:(?:authorization|cookie)\s*:|"
     r"(?:api[-_ ]?token|password|passwd|encrypted[-_ ]?password|"
     r"private[-_ ]?key|pre[-_ ]?shared[-_ ]?key|psk|radius[-_ ]?key)"
-    r"\b\s*(?:[:=]|\s)\s*\S+|snmp(?:-server)?\s+community\s+\S+|"
+    r"\b\s*(?:[:=]|\s)\s*\S+|snmp(?:-server|-agent)?\s+community\s+.*|"
     r"tacacs\S*\s+key\s+\S+|username\s+\S+|"
     r"set\s+.*\b(?:encrypted[-_ ]?password|password|secret)\s+\S+)"
 )

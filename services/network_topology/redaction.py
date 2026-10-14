@@ -28,7 +28,7 @@ _SENSITIVE_KEY = re.compile(
 _SENSITIVE_LINE = re.compile(
     r"(?im)^.*(?:authorization\s*:|cookie\s*:|api[-_ ]?token|password|passwd|"
     r"private[-_ ]?key|pre[-_ ]?shared[-_ ]?key|\bpsk\b|radius[-_ ]?key|"
-    r"snmp(?:-server)?\s+community|tacacs\S*\s+key|username\s+\S+|"
+    r"snmp(?:-server|-agent)?\s+community|tacacs\S*\s+key|username\s+\S+|"
     r"\bsecret\b).*(?:\r?\n|$)"
 )
 _OBSERVATION_HASH_FIELDS = frozenset(

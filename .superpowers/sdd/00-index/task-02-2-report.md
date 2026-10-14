@@ -22,3 +22,11 @@
 ## Limitation
 
 Install the project dependencies and rerun the focused test plus the topology suite; no claim of runtime test pass is made from this environment.
+
+## Fix round 1
+
+The focused test exposed that `snmp-agent community read public` left `public` after the first redaction pass. Extended both action scrubbing and canonicalization rejection patterns to cover `snmp-agent` and consume qualifiers and values through the full line.
+
+- `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology/test_auto_collection_observations.py`: **4 passed**
+- `python3 -m compileall -q services/network_topology/collection services/network_topology/redaction.py services/network_topology/canonicalization.py`: passed
+- `git diff --check`: passed
