@@ -15,6 +15,7 @@ from services.network_topology.canonicalization import (
     canonicalize_text,
     sha256_uri,
 )
+from services.network_topology import canonicalization
 
 
 REDACTION_MARKER = "[REDACTED]"
@@ -33,6 +34,24 @@ _SENSITIVE_LINE = re.compile(
 _OBSERVATION_HASH_FIELDS = frozenset(
     {"content_type", "data", "raw_sha256", "content_sha256"}
 )
+
+
+def scrub_action_output(value: Any) -> Any:
+    """Recursively remove credential-bearing keys and redact sensitive lines."""
+    if isinstance(value, dict):
+        return {
+            key: scrub_action_output(child)
+            for key, child in value.items()
+            if not _SENSITIVE_KEY.search(str(key))
+            and not canonicalization.SENSITIVE_NAME.search(canonicalization._normalize_name(str(key)))
+        }
+    if isinstance(value, list):
+        return [scrub_action_output(child) for child in value]
+    if isinstance(value, str):
+        text = canonicalization.SENSITIVE_TEXT.sub(f"{REDACTION_MARKER}\n", value)
+        text = canonicalization.SENSITIVE_XML.sub(REDACTION_MARKER, text)
+        return _SENSITIVE_LINE.sub(f"{REDACTION_MARKER}\n", text)
+    return value
 
 
 def validate_then_redact(envelope: dict[str, Any]) -> dict[str, Any]:
