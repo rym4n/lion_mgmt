@@ -16,7 +16,7 @@ async def _normalize_flow_task_message(value):
     return await normalize_flow_task_message(value)
 
 
-async def aproduce(topic, value, key=None, partition=None):
+async def aproduce(topic, value, key=None, partition=None, *, raise_on_error: bool = False):
     if (
         topic == TASK_TOPIC
         and isinstance(value, dict)
@@ -36,6 +36,8 @@ async def aproduce(topic, value, key=None, partition=None):
             _ = await producer.send_and_wait(topic, orjson.dumps(value), key, partition)
     except Exception as err:
         logger.error(f"{err} | {traceback.format_exc()}")
+        if raise_on_error:
+            raise
 
 
 async def aconsume(topic, group_id, callback_func=None, consume_records=500):
