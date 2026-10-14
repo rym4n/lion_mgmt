@@ -9,6 +9,8 @@ from services.network_topology import manifest
 from services.network_topology import contracts
 from services.network_topology.canonicalization import canonicalize_and_hash_manifest, canonicalize_json, sha256_uri
 from services.network_topology.collection.snapshot_builder import PLAYBOOK_ID
+from services.network_topology.collection.errors import CollectionError
+from models.network_topology_v2 import TopologyCollectionRun
 
 
 async def issue_action_manifest(plan, run, targets, *, now) -> dict:
@@ -22,6 +24,12 @@ async def issue_action_manifest(plan, run, targets, *, now) -> dict:
                   "selector_hash": sha256_uri(canonicalize_json(resource_ids))}
     async with in_transaction() as connection:
         topology = await manifest._locked_topology(connection, authority)
+        current = await TopologyCollectionRun.filter(
+            id=run.id, tenant_id=plan.tenant_id, topology_id=plan.topology_id,
+            plan_id=plan.id, deleted=False,
+        ).using_db(connection).select_for_update().first()
+        if current is None or current.state != "PENDING":
+            raise CollectionError("COLLECTION_RUN_CLOSED", 409)
         profile_row, profile = await manifest._current_profile(connection, authority, topology, topology.topology_profile_revision)
         capability = next((p for p in contracts.load_registry(
             "aioe.network-topology.registry/capability-profiles/v1")["profiles"]

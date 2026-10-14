@@ -2540,6 +2540,9 @@ async def init_data(request):
                 remark = item.get("remark", "")
                 change_desc = item.get("change_desc", "")
                 flow_json = item.get("flow_json") or {}
+                raw_flow_timeout = item.get("flow_timeout", 300)
+                if type(raw_flow_timeout) is not int or not 300 <= raw_flow_timeout <= 259200:
+                    raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
                 if builtin_resource_id:
                     flow_json = _replace_builtin_resource_placeholder(flow_json, builtin_resource_id)
                 async with in_transaction():
@@ -2580,7 +2583,7 @@ async def init_data(request):
                         flow_json=flow_json,
                         creator=creator,
                         updator=creator,
-                        flow_timeout=300,
+                        flow_timeout=raw_flow_timeout,
                         tenant_id=tenant_id,
                     )
                     action_ids = await statistics_data(flow_json, tenant_id)

@@ -299,3 +299,27 @@ async def test_collection_detail_analysis_orm_lookup_is_tenant_and_topology_scop
     result = await runs.run_detail("t1", "cr1", repository=repo)
     assert calls == [{"id": "ar1", "tenant_id": "t1", "topology_row_id": "topo-1", "deleted": False}]
     assert result["stage"] == "PUBLISHING" and result["analysis_state"] == "SUCCEEDED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["list_agent_jobs", "detail_agent_job", "rerun_agent_job", "clear_agent_scripts"])
+@pytest.mark.parametrize("injection", [{"tenant": "other"}, {"options": {"tenant_id": "other"}}, {"options": [{"tenant": "other"}]}])
+async def test_maintenance_rejects_tenant_aliases_before_any_access(monkeypatch, handler, injection):
+    from services.network_topology import agent_maintenance_views as views
+    monkeypatch.setattr(views, "current_maintenance_mode", AsyncMock(return_value=True))
+    monkeypatch.setattr(views, "_job", AsyncMock(side_effect=AssertionError("unexpected data access")))
+    body = {"job_id": "j1", **injection}
+    if handler == "clear_agent_scripts":
+        body["tenant_id"] = "tenant-b"
+    response = await getattr(views, handler)(request(body))
+    assert response.status == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", ["detail_agent_job", "rerun_agent_job"])
+async def test_maintenance_job_identity_rejects_top_level_tenant(monkeypatch, handler):
+    from services.network_topology import agent_maintenance_views as views
+    monkeypatch.setattr(views, "current_maintenance_mode", AsyncMock(return_value=True))
+    monkeypatch.setattr(views, "_job", AsyncMock(side_effect=AssertionError("unexpected data access")))
+    response = await getattr(views, handler)(request({"job_id": "j1", "tenant_id": "tenant-b"}))
+    assert response.status == 403

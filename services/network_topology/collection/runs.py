@@ -107,20 +107,66 @@ class OrmRunRepository:
             filters["tenant_id"] = tenant_id
         return await TopologyCollectionRun.filter(**filters).first()
 
-    async def save_run(self, run):
-        await run.save()
+    async def save_run(self, run, *, fields=None):
+        # Each stage only owns its own fields. Both terminal and newer-stage
+        # states reject a stale worker's update across processes/ORM instances.
+        stage_fields = {
+            "COLLECTING": ("item_results", "device_succeeded"),
+            "COLLECTED": ("snapshot_draft",),
+            "SUBMITTED": ("sync_id", "analysis_run_id", "snapshot_id", "snapshot_draft"),
+        }
+        predecessors = {
+            "PENDING": ["PENDING"],
+            "MANIFEST_FROZEN": ["PENDING"],
+            "COLLECTING": ["MANIFEST_FROZEN", "COLLECTING"],
+            "COLLECTED": ["COLLECTING"],
+            "SUBMITTED": ["COLLECTED"],
+        }
+        if fields is not None:
+            values = {name: getattr(run, name) for name in fields}
+            states = [state for state in RUN_STATES if state not in RUN_TERMINAL_STATES]
+        else:
+            values = {name: getattr(run, name) for name in stage_fields.get(run.state, ())}
+            values["state"] = run.state
+            states = predecessors.get(run.state, [])
+        changed = await TopologyCollectionRun.filter(
+            id=run.id, tenant_id=run.tenant_id, deleted=False, state__in=states,
+        ).update(**values)
+        if not changed:
+            raise CollectionError("COLLECTION_RUN_CLOSED", 409)
 
     async def save_plan(self, plan):
         await plan.save()
 
     async def finish_terminal(self, run, state, finished_at, *, error_code=None,
-                              error_message=None, result=None, graph_revision=None):
+                              error_message=None, result=None, graph_revision=None,
+                              cancellation_actor=None):
         async with in_transaction() as connection:
             current = await TopologyCollectionRun.filter(
                 id=run.id, tenant_id=run.tenant_id, deleted=False
             ).using_db(connection).select_for_update().first()
             if current is None or _terminal(current.state):
                 return None
+            # Lock order: collection -> analysis -> plan. Submission takes
+            # topology -> collection before creating analysis; publication
+            # takes topology -> analysis and never needs collection or plan.
+            # Thus no cycle and no unlinked analysis can escape cancellation.
+            if state in {"FAILED", "CANCELLED"} and current.analysis_run_id:
+                analysis = await TopologyAnalysisRun.filter(
+                    id=current.analysis_run_id, tenant_id=current.tenant_id,
+                    topology_row_id=current.topology_id, deleted=False,
+                ).using_db(connection).select_for_update().first()
+                if analysis is not None:
+                    if error_code == "COLLECTION_RUN_TIMEOUT" and _state(analysis.state) == "SUCCEEDED":
+                        # Publication won the race; the next refresh projects
+                        # success instead of misreporting an already published run.
+                        return None
+                    if not analysis_runs._is_terminal(analysis.state):
+                        fields = analysis_runs._apply_cancellation(
+                            analysis, str(cancellation_actor or current.triggered_by or "collection-system"),
+                            "采集已取消或超时", finished_at,
+                        )
+                        await analysis.save(using_db=connection, update_fields=list(fields))
             plan = await TopologyCollectionPlan.filter(
                 id=current.plan_id, tenant_id=current.tenant_id, deleted=False
             ).using_db(connection).select_for_update().first()
@@ -216,7 +262,10 @@ async def trigger_manual(tenant_id, topology_id, *, account_id, repository=None)
         await finish_run(run, "FAILED", error_code="COLLECTION_FLOW_SUBMIT_FAILED", repository=repo)
         raise
     run.flow_run_id = flow_run_id
-    await repo.save_run(run)
+    if isinstance(repo, OrmRunRepository):
+        await repo.save_run(run, fields=["flow_run_id"])
+    else:
+        await repo.save_run(run)
     return _result(run)
 
 
@@ -293,7 +342,7 @@ async def _notify_after_commit(plan, run):
 
 
 async def finish_run(run, state, *, error_code=None, error_message=None, result=None,
-                     graph_revision=None, repository=None):
+                     graph_revision=None, repository=None, cancellation_actor=None):
     repo = _repo(repository)
     state = _state(state)
     if state not in RUN_STATES or state not in RUN_TERMINAL_STATES:
@@ -303,6 +352,7 @@ async def finish_run(run, state, *, error_code=None, error_message=None, result=
         committed = await repo.finish_terminal(
             run, state, finished_at, error_code=error_code,
             error_message=error_message, result=result, graph_revision=graph_revision,
+            **({"cancellation_actor": cancellation_actor} if cancellation_actor is not None else {}),
         )
         if committed is None:
             return None
@@ -397,9 +447,9 @@ async def cancel_run(tenant_id, topology_id, *, account_id, repository=None):
     run = await repo.active_run(tenant_id, topology_id)
     if run is None:
         raise CollectionError("COLLECTION_RUN_NOT_FOUND", 404)
-    if getattr(run, "analysis_run_id", None):
+    if not isinstance(repo, OrmRunRepository) and getattr(run, "analysis_run_id", None):
         await analysis_runs.cancel_analysis(tenant_id, run.analysis_run_id, actor=account_id, reason="用户取消采集")
-    await finish_run(run, "CANCELLED", repository=repo)
+    await finish_run(run, "CANCELLED", repository=repo, cancellation_actor=account_id)
     return _result(run)
 
 
@@ -489,12 +539,12 @@ def agent_summary(job, *, maintenance):
 
 
 async def get_run_for_plan(
-    plan_id, collection_run_id, *, tenant_id=DEFAULT_TENANT_ID, repository=None
+    plan_id, collection_run_id, *, tenant_id=None, repository=None
 ):
     """Resolve a run and its plan for the internal collection status API."""
     repo = _repo(repository)
     try:
-        plan = await repo.get_plan(plan_id, tenant_id=tenant_id)
+        plan = await repo.get_plan(plan_id, tenant_id=tenant_id) if tenant_id is not None else await repo.get_plan(plan_id)
     except TypeError:
         # Keep compatibility with small repository fakes that predate the
         # optional tenant filter, while still enforcing it after the lookup.
@@ -517,6 +567,11 @@ async def sweep_runs(repository=None):
     rows = await repo.open_runs() if hasattr(repo, "open_runs") else await TopologyCollectionRun.filter(deleted=False, state__not_in=list(RUN_TERMINAL_STATES))
     count = 0
     for run in rows:
+        if _state(run.state) == "SUBMITTED":
+            await refresh_from_analysis(run, repository=repo)
+            if _terminal(run.state):
+                count += 1
+                continue
         plan = await repo.get_plan(run.plan_id)
         started = getattr(run, "started_at", None)
         timeout = int(getattr(plan, "run_timeout_seconds", getattr(run, "run_timeout_seconds", 3600)) or 3600)

@@ -18,7 +18,7 @@ from models.network_topology import NetworkTopology
 from models.network_topology_v2 import TopologyAgentJob, TopologyAnalysisRun, TopologyCollectionSnapshot
 from services.network_topology import analysis_runs
 from services.network_topology.collection.errors import CollectionError
-from services.network_topology.collection.views import _actor_id, _body, _error, _page, _required_string
+from services.network_topology.collection.views import _actor_id, _body, _error, _page, _required_string, _reject_tenant_fields
 
 agent_maintenance_bp = Blueprint(
     "network_topology_agent_maintenance", url_prefix="/network-topology/maintenance"
@@ -37,6 +37,16 @@ def _serialize(values):
     return {key: value.isoformat() if isinstance(value, datetime) else value for key, value in values.items()}
 
 
+def _maintenance_body(request, *, allow_tenant_id=False):
+    data = _body(request)
+    # Only list and clear accept the explicit top-level tenant selector.
+    checked = {key: value for key, value in data.items() if not (allow_tenant_id and key == "tenant_id")}
+    _reject_tenant_fields(checked)
+    if allow_tenant_id and "tenant_id" in data:
+        _required_string(data, "tenant_id")
+    return data
+
+
 async def _job(data):
     job = await TopologyAgentJob.filter(id=_required_string(data, "job_id"), deleted=False).first()
     if job is None:
@@ -49,7 +59,7 @@ async def list_agent_jobs(request):
     if not await current_maintenance_mode(request):
         raise CustomError(ErrorCode.FORBIDDEN)
     try:
-        data = _body(request)
+        data = _maintenance_body(request, allow_tenant_id=True)
         page, page_size = _page(data)
         filters = {"deleted": False}
         if "tenant_id" in data:
@@ -73,7 +83,7 @@ async def detail_agent_job(request):
     if not await current_maintenance_mode(request):
         raise CustomError(ErrorCode.FORBIDDEN)
     try:
-        job = await _job(_body(request))
+        job = await _job(_maintenance_body(request))
         result = _serialize({name: getattr(job, name) for name in JOB_FIELDS})
         # EncryptedTextField decrypts these strings at the ORM boundary.
         result["transcript"] = orjson.loads(job.transcript) if job.transcript else []
@@ -88,7 +98,7 @@ async def rerun_agent_job(request):
     if not await current_maintenance_mode(request):
         raise CustomError(ErrorCode.FORBIDDEN)
     try:
-        job = await _job(_body(request))
+        job = await _job(_maintenance_body(request))
         run = await TopologyAnalysisRun.filter(
             id=job.analysis_run_id, tenant_id=job.tenant_id, deleted=False
         ).first()
@@ -128,7 +138,7 @@ async def clear_agent_scripts(request):
     if not await current_maintenance_mode(request):
         raise CustomError(ErrorCode.FORBIDDEN)
     try:
-        tenant_id = _required_string(_body(request), "tenant_id")
+        tenant_id = _required_string(_maintenance_body(request, allow_tenant_id=True), "tenant_id")
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", tenant_id):
             raise CollectionError("COLLECTION_INVALID_REQUEST", 400)
         async with httpx.AsyncClient(timeout=30) as client:

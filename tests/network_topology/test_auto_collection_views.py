@@ -95,8 +95,9 @@ async def test_collection_summaries_batches_queries(monkeypatch):
 
     class RunModel:
         @classmethod
-        def filter(cls, **kwargs):
+        def filter(cls, *conditions, **kwargs):
             calls.append(("run", kwargs))
+            assert conditions[0].join_type == "OR"
             return Query([run])
 
     monkeypatch.setattr(plans, "TopologyCollectionPlan", PlanModel)
@@ -104,7 +105,7 @@ async def test_collection_summaries_batches_queries(monkeypatch):
     result = await plans.collection_summaries("tenant-a", ["top-1"])
     assert len(calls) == 2
     assert calls[0][1]["topology_id__in"] == ["top-1"]
-    assert calls[1][1]["id__in"] == ["run-1"]
+    assert calls[1][1]["tenant_id"] == "tenant-a"
     assert result["top-1"]["last_run"]["id"] == "run-1"
 
 
@@ -141,7 +142,10 @@ async def test_internal_status_scopes_run_to_plan_tenant():
     repo.runs["run-other"] = run_row("run-other", plan_id="p1", tenant_id="tenant-b")
     with pytest.raises(views.CollectionError) as exc:
         await runs.get_run_for_plan("p1", "run-other", repository=repo)
-    assert exc.value.code == "PLAN_NOT_FOUND"
+    assert exc.value.code == "COLLECTION_RUN_NOT_FOUND"
+    repo.runs["run-own"] = run_row("run-own", plan_id="p1", tenant_id="tenant-a")
+    resolved_plan, resolved_run = await runs.get_run_for_plan("p1", "run-own", repository=repo)
+    assert resolved_plan.tenant_id == "tenant-a" and resolved_run.id == "run-own"
 
     default_plan = plan("p-default", tenant_id=DEFAULT_TENANT_ID)
     repo = FakeRunRepository(plans=[default_plan])
@@ -212,3 +216,20 @@ async def test_manifest_closed_run_does_not_finish_unresolved_run(monkeypatch):
     )
     assert response.status == 409
     finish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_default_internal_caller_can_poll_ordinary_tenant_plan(monkeypatch):
+    repo = FakeRunRepository(plans=[plan("ordinary", tenant_id="tenant-a")])
+    repo.runs["own"] = run_row("own", plan_id="ordinary", tenant_id="tenant-a")
+    original = runs.get_run_for_plan
+    async def resolve(*args, **kwargs):
+        return await original(*args, **kwargs, repository=repo)
+    monkeypatch.setattr(runs, "get_run_for_plan", resolve)
+    status = AsyncMock(return_value={"run_state": "COLLECTING"})
+    monkeypatch.setattr(views.submit, "status", status)
+    response = await _unwrapped(views.status_collection_internal)(
+        _request({"plan_id": "ordinary", "collection_run_id": "own"}, DEFAULT_TENANT_ID)
+    )
+    assert response.status == 200
+    assert status.await_args.args[0].tenant_id == "tenant-a"

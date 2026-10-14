@@ -177,12 +177,14 @@ async def collection_summaries(tenant_id: str, topology_ids: list[str]) -> dict[
         pass
     plans = await plan_query
     last_run_ids = [str(plan.last_run_id) for plan in plans if getattr(plan, "last_run_id", None)]
+    from tortoise.expressions import Q
+    from models.network_topology_v2 import RUN_TERMINAL_STATES
     runs = await TopologyCollectionRun.filter(
-        tenant_id=tenant_id,
-        id__in=last_run_ids,
-        deleted=False,
+        Q(id__in=last_run_ids) | Q(topology_id__in=topology_ids, state__not_in=list(RUN_TERMINAL_STATES)),
+        tenant_id=tenant_id, deleted=False,
     )
     runs_by_id = {str(run.id): run for run in runs}
+    active_by_topology = {str(run.topology_id): run for run in runs if run.state not in RUN_TERMINAL_STATES}
     summaries = {}
     for plan in plans:
         # Older fakes and integrations may expose item rows on the plan. The
@@ -198,9 +200,11 @@ async def collection_summaries(tenant_id: str, topology_ids: list[str]) -> dict[
             if items is not None
             else bool(getattr(plan, "enabled", False))
         )
-        if not has_enabled_item:
+        if not has_enabled_item and str(plan.topology_id) not in active_by_topology:
             continue
-        last_run = runs_by_id.get(str(plan.last_run_id)) if getattr(plan, "last_run_id", None) else None
+        last_run = active_by_topology.get(str(plan.topology_id)) or (
+            runs_by_id.get(str(plan.last_run_id)) if getattr(plan, "last_run_id", None) else None
+        )
         last_run_payload = None
         if last_run is not None:
             finished_at = getattr(last_run, "finished_at", None)

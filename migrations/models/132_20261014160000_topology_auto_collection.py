@@ -51,8 +51,8 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
 
 
 async def downgrade(db: BaseDBAsyncClient) -> str:
-    return "\n".join(
+    return "\n".join([
         'DROP TABLE IF EXISTS "network_topology_collection_run";',
         'DROP TABLE IF EXISTS "network_topology_collection_item";',
         'DROP TABLE IF EXISTS "network_topology_collection_plan";',
-    )
+    ])

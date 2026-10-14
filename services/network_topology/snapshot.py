@@ -163,6 +163,29 @@ class OrmSnapshotRepository:
         )
         return await query.using_db(connection).select_for_update().first()
 
+    async def lock_collection_run(self, tenant_id, topology_id, actor, connection):
+        if not actor.startswith("collection-run:"):
+            return None
+        from models.network_topology_v2 import TopologyCollectionRun
+        row = await TopologyCollectionRun.filter(
+            id=actor.removeprefix("collection-run:"), tenant_id=tenant_id,
+            topology_id=topology_id, deleted=False,
+        ).using_db(connection).select_for_update().first()
+        if row is None or row.state != "COLLECTED":
+            raise SnapshotError(MANIFEST_INVALID)
+        return row
+
+    async def bind_collection_analysis(self, collection, analysis, snapshot_id, connection):
+        if collection is None:
+            return
+        collection.sync_id = collection.analysis_run_id = str(analysis.id)
+        collection.snapshot_id = snapshot_id
+        collection.state = "SUBMITTED"
+        collection.snapshot_draft = None
+        await collection.save(using_db=connection, update_fields=[
+            "sync_id", "analysis_run_id", "snapshot_id", "state", "snapshot_draft",
+        ])
+
     async def get_snapshot(self, tenant_id, topology_id, snapshot_id, connection):
         query = TopologyCollectionSnapshot.filter(
             tenant_id=tenant_id,
@@ -454,6 +477,13 @@ async def commit_prepared_snapshot(
         if retry is not None:
             return retry
         _require_manifest_binding(manifest, validated, actor, timestamp)
+        # All payload preparation/object storage completed before this transaction.
+        # Lock order is topology -> manifest -> collection -> newly created
+        # analysis. Terminal collection transitions use collection -> analysis;
+        # publication uses topology -> analysis and never collection.
+        collection = None
+        if hasattr(repo, "lock_collection_run"):
+            collection = await repo.lock_collection_run(tenant_id, topology_id, actor, connection)
         await payload_store.activate(
             tenant_id, prepared, connection=connection, now=timestamp
         )
@@ -472,6 +502,8 @@ async def commit_prepared_snapshot(
         await _consume_manifest(
             repo, manifest, snapshot, run, prepared, timestamp, connection
         )
+        if collection is not None:
+            await repo.bind_collection_analysis(collection, run, validated.snapshot_id, connection)
     return SyncAccepted(str(run.id), validated.snapshot_id)
 
 

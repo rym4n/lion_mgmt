@@ -309,7 +309,7 @@ async def status_collection_internal(request: Request):
         if not isinstance(run_id, str) or not run_id.strip():
             raise CollectionError("COLLECTION_INVALID_REQUEST", 400)
         plan, run = await runs.get_run_for_plan(
-            plan_id, run_id.strip(), tenant_id=DEFAULT_TENANT_ID
+            plan_id, run_id.strip(), tenant_id=None
         )
         return response_ok(await submit.status(plan, run))
     except CollectionError as error:

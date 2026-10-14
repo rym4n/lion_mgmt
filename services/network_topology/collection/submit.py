@@ -7,6 +7,7 @@ from typing import Any
 
 import orjson
 import settings
+from models.network_topology_v2 import TopologyCollectionRun
 
 from services.network_topology import snapshot as topology_snapshot
 from services.network_topology import upload as topology_upload
@@ -18,6 +19,8 @@ from services.network_topology.upload import UploadAuthority, UploadOwner
 
 
 def _save_run(run):
+    if isinstance(run, TopologyCollectionRun):
+        return runs.OrmRunRepository().save_run(run)
     saver = getattr(run, "save", None)
     if saver is None:
         return None
@@ -85,7 +88,10 @@ async def submit_snapshot(plan, run, *, ingest=None, now=None) -> dict[str, Any]
         run.snapshot_id = accepted.snapshot_id
         run.state = "SUBMITTED"
         run.snapshot_draft = None
-        await _persist(run)
+        # ORM ingress atomically linked the analysis under the collection lock.
+        # Do not write a stale request instance after that transaction commits.
+        if not isinstance(run, TopologyCollectionRun):
+            await _persist(run)
         return accepted.as_dict() if hasattr(accepted, "as_dict") else {
             "sync_id": accepted.sync_id, "snapshot_id": accepted.snapshot_id,
             "status": getattr(accepted, "status", "RECEIVED"),
