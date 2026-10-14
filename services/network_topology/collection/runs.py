@@ -105,19 +105,39 @@ class OrmRunRepository:
     async def save_plan(self, plan):
         await plan.save()
 
-    async def claim_terminal(self, run, state, finished_at):
+    async def finish_terminal(self, run, state, finished_at, *, error_code=None,
+                              error_message=None, result=None, graph_revision=None):
         async with in_transaction() as connection:
             current = await TopologyCollectionRun.filter(
                 id=run.id, tenant_id=run.tenant_id, deleted=False
             ).using_db(connection).select_for_update().first()
             if current is None or _terminal(current.state):
-                return False
+                return None
+            plan = await TopologyCollectionPlan.filter(
+                id=current.plan_id, tenant_id=current.tenant_id, deleted=False
+            ).using_db(connection).select_for_update().first()
             current.state = state
             current.finished_at = finished_at
-            await current.save(using_db=connection, update_fields=["state", "finished_at"])
+            fields = ["state", "finished_at"]
+            for name, value in (("error_code", error_code), ("error_message", error_message),
+                                ("result", result), ("graph_revision", graph_revision)):
+                if value is not None:
+                    setattr(current, name, value)
+                    fields.append(name)
+            if plan is not None:
+                plan.last_run_id = current.id
+                if state == "SUCCEEDED":
+                    plan.consecutive_failures = 0
+                elif state == "FAILED":
+                    plan.consecutive_failures = int(plan.consecutive_failures or 0) + 1
+                await plan.save(using_db=connection, update_fields=["last_run_id", "consecutive_failures"])
+            await current.save(using_db=connection, update_fields=fields)
             run.state = state
             run.finished_at = finished_at
-            return True
+            for name in ("error_code", "error_message", "result", "graph_revision"):
+                if hasattr(current, name):
+                    setattr(run, name, getattr(current, name))
+            return current, plan
 
 
 def _repo(repository):
@@ -258,9 +278,19 @@ async def finish_run(run, state, *, error_code=None, error_message=None, result=
     if state not in RUN_STATES or state not in RUN_TERMINAL_STATES:
         raise CollectionError("COLLECTION_RUN_STATE_INVALID", 400)
     finished_at = _now()
-    if hasattr(repo, "claim_terminal"):
-        if not await repo.claim_terminal(run, state, finished_at):
+    if hasattr(repo, "finish_terminal"):
+        committed = await repo.finish_terminal(
+            run, state, finished_at, error_code=error_code,
+            error_message=error_message, result=result, graph_revision=graph_revision,
+        )
+        if committed is None:
             return None
+        plan = committed[1]
+        if plan is not None and run.state == "FAILED" and plan.notify_enabled and plan.consecutive_failures >= 3:
+            outcome = notify_failure(plan, run)
+            if inspect.isawaitable(outcome):
+                await outcome
+        return None
     elif _terminal(run.state):
         return None
     # Set the terminal marker before the first await. This makes repeated
@@ -285,7 +315,7 @@ async def finish_run(run, state, *, error_code=None, error_message=None, result=
             plan.consecutive_failures = int(getattr(plan, "consecutive_failures", 0) or 0) + 1
         await repo.save_plan(plan)
     await repo.save_run(run)
-    if plan is not None and run.state == "FAILED" and plan.notify_enabled and plan.consecutive_failures == 3:
+    if plan is not None and run.state == "FAILED" and plan.notify_enabled and plan.consecutive_failures >= 3:
         outcome = notify_failure(plan, run)
         if inspect.isawaitable(outcome):
             await outcome

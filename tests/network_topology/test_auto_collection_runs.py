@@ -57,6 +57,17 @@ async def test_three_failures_trigger_notify(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fourth_failure_still_triggers_notify(monkeypatch):
+    calls = []
+    monkeypatch.setattr(runs, "notify_failure", lambda p, r: calls.append(r.id) or _done())
+    repo = FakeRunRepository(plans=[plan("p1", enabled=True, notify_enabled=True)])
+    for _ in range(4):
+        created = await runs.start_scheduled("p1", repository=repo)
+        await runs.finish_run(repo.runs[created["collection_run_id"]], "FAILED", error_code="X", repository=repo)
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_finish_is_idempotent_and_rejects_nonterminal():
     repo = FakeRunRepository(plans=[plan("p1", enabled=True, notify_enabled=True)])
     created = await runs.start_scheduled("p1", repository=repo)

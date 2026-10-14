@@ -46,3 +46,16 @@ Round 1 focused verification:
 PYTHONPATH=. uv run --project . pytest -q tests/network_topology/test_auto_collection_runs.py
 7 passed, 23 warnings in 1.57s
 ```
+
+## Round 2 Fix Evidence
+
+`finish_run` now performs the ORM terminal state, terminal metadata, plan `last_run_id`, and failure counter update in one row-locked transaction. Notification dispatch happens only after that transaction commits. The notification rule is `consecutive_failures >= 3`, while terminal claiming keeps repeated refresh/cancel/timeout calls idempotent.
+
+Added coverage for the fourth failure notification and repeated terminalization. Focused verification:
+
+```text
+PYTHONPATH=. uv run --project . pytest -q tests/network_topology/test_auto_collection_runs.py
+8 passed, 23 warnings in 1.60s
+```
+
+`python3 -m py_compile` and `git diff --check` also passed.
