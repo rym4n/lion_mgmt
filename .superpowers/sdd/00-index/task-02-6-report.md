@@ -18,3 +18,11 @@ Coverage includes semaphore concurrency, action/output failure handling, missing
 ## Concerns
 
 Manifest persistence relies on the existing manifest/profile database seams and requires a live configured Tortoise connection for integration coverage. Background recovery remains delegated to `sweep_runs` as specified.
+
+## Round 1 fixes
+
+- Action manifest optional kinds now come from the packaged `aioe-action-collection/v1` capability registry.
+- Nonzero executor statuses fail before JSON parsing; failure messages are scrubbed before persistence.
+- Background starts are serialized with a process lock and support repository conditional claims.
+- `COLLECTION_INCOMPLETE` remains the terminal error code; unexpected failures include traceback logging and map to `COLLECTION_DISPATCH_FAILED`.
+- Focused suite now passes 8 tests.

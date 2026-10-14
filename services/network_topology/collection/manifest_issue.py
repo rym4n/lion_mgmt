@@ -6,6 +6,7 @@ import uuid
 from tortoise.transactions import in_transaction
 
 from services.network_topology import manifest
+from services.network_topology import contracts
 from services.network_topology.canonicalization import canonicalize_and_hash_manifest, canonicalize_json, sha256_uri
 from services.network_topology.collection.snapshot_builder import PLAYBOOK_ID
 
@@ -22,9 +23,14 @@ async def issue_action_manifest(plan, run, targets, *, now) -> dict:
     async with in_transaction() as connection:
         topology = await manifest._locked_topology(connection, authority)
         profile_row, profile = await manifest._current_profile(connection, authority, topology, topology.topology_profile_revision)
+        capability = next((p for p in contracts.load_registry(
+            "aioe.network-topology.registry/capability-profiles/v1")["profiles"]
+                           if p.get("id") == "aioe-action-collection/v1"), None)
+        if capability is None:
+            raise manifest.ManifestError(manifest.MANIFEST_CAPABILITY_UNSUPPORTED)
         expected = [{"resource_id": rid, "capability_profile": "aioe-action-collection/v1",
                      "required_kinds": ["raw.action_output"],
-                     "optional_kinds": list(profile.get("optional_kinds", []))} for rid in resource_ids]
+                     "optional_kinds": list(capability["optional_kinds"])} for rid in resource_ids]
         registry = manifest._validated_registry_version()
         intent, issued_at = await manifest._upgrade_intent(connection, authority, topology, lambda: now)
         sequence = await manifest._next_sequence(connection, authority, topology)

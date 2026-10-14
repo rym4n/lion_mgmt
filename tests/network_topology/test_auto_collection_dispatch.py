@@ -64,6 +64,33 @@ async def test_dispatch_output_failures(text, code):
     outcomes = await dispatch.run_dispatch(plan("p", concurrency=1), run_row("run"), [target("r")], executor=executor, persist=False)
     assert outcomes[0].error_code == code
 
+@pytest.mark.asyncio
+async def test_executor_failure_status_does_not_parse_invalid_output():
+    async def executor(*args, **kwargs):
+        return ExecResult(-1, None, 1)
+    outcomes = await dispatch.run_dispatch(plan("p", concurrency=1), run_row("run"), [target("r")], executor=executor, persist=False)
+    assert outcomes[0].error_code == "COLLECTION_ACTION_FAILED"
+
+@pytest.mark.asyncio
+async def test_background_start_only_dispatches_once():
+    row = run_row("run")
+    row.save_calls = 0
+    async def save(**kwargs):
+        row.save_calls += 1
+    row.save = save
+    calls = 0
+    async def collect(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+    monkey = dispatch.collect_and_store
+    dispatch.collect_and_store = collect
+    try:
+        await asyncio.gather(dispatch.start_background(plan("p"), row), dispatch.start_background(plan("p"), row))
+        await asyncio.sleep(0)
+        assert calls == 1
+    finally:
+        dispatch.collect_and_store = monkey
+
 
 @pytest.mark.asyncio
 async def test_dispatch_persists_summary_without_output_and_counts_devices():

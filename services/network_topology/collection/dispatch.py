@@ -5,6 +5,7 @@ import asyncio
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import logging
+import traceback
 from time import monotonic
 from typing import Protocol
 
@@ -17,6 +18,7 @@ from models.network_topology_v2 import RUN_TERMINAL_STATES, TopologyCollectionMa
 from services.network_topology import snapshot
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.observations import parse_action_output
+from services.network_topology.redaction import scrub_action_output
 from services.network_topology.collection.runs import OrmRunRepository, finish_run
 from services.network_topology.collection.snapshot_builder import ItemOutcome, asset_context_for, build_snapshot
 from services.network_topology.collection.targets import Target
@@ -24,6 +26,7 @@ from settings import TASK_TOPIC
 
 logger = logging.getLogger(__name__)
 _ACTIVE_TASKS: set[asyncio.Task] = set()
+_START_LOCK = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -83,8 +86,18 @@ async def run_dispatch(plan, run, targets, *, executor=None, now=None, repositor
                 except asyncio.TimeoutError:
                     raise CollectionError("COLLECTION_ITEM_TIMEOUT") from None
                 duration = result.duration_ms
+                if result.status != 0:
+                    message = "COLLECTION_ACTION_FAILED"
+                    # Parse only a successful executor result; failed payloads may be
+                    # empty or non-JSON and must retain Runlog failure semantics.
+                    try:
+                        payload = scrub_action_output(orjson.loads(result.result_text)) if result.result_text else {}
+                        message = str(payload.get("msg") or message)[:512] if isinstance(payload, dict) else message
+                    except Exception:
+                        pass
+                    raise CollectionError("COLLECTION_ACTION_FAILED", message=message)
                 output = parse_action_output(result.result_text)
-                if result.status != 0 or (isinstance(output, dict) and output.get("code") not in (0, 200)):
+                if isinstance(output, dict) and output.get("code") not in (0, 200):
                     message = output.get("msg") if isinstance(output, dict) else None
                     raise CollectionError("COLLECTION_ACTION_FAILED", message=str(message or "COLLECTION_ACTION_FAILED")[:512])
             except CollectionError as exc:
@@ -137,8 +150,12 @@ async def collect_and_store(plan, run, *, executor=None, repository=None) -> dic
             run.state = "COLLECTED"
             await repo.save_run(run)
         return summary
+    except CollectionError as exc:
+        await finish_run(run, "FAILED", error_code=exc.code, error_message=exc.message, repository=repo)
+        return {"device_total": run.device_total, "device_succeeded": run.device_succeeded,
+                "item_results": getattr(run, "item_results", None) or []}
     except Exception:
-        logger.error("Collection dispatch failed for run %s", run.id)
+        logger.error("Collection dispatch failed for run %s\n%s", run.id, traceback.format_exc())
         await finish_run(run, "FAILED", error_code="COLLECTION_DISPATCH_FAILED", repository=repo)
         return {"device_total": run.device_total, "device_succeeded": run.device_succeeded,
                 "item_results": getattr(run, "item_results", None) or []}
@@ -150,11 +167,19 @@ def _task_done(task):
         logger.error("Background collection terminal accounting failed")
 
 
-async def start_background(plan, run) -> dict:
-    if run.state == "MANIFEST_FROZEN":
-        run.state = "COLLECTING"
-        await run.save(update_fields=["state"])
-        task = asyncio.create_task(collect_and_store(plan, run))
-        _ACTIVE_TASKS.add(task)
-        task.add_done_callback(_task_done)
+async def start_background(plan, run, *, repository=None) -> dict:
+    async with _START_LOCK:
+        if run.state == "MANIFEST_FROZEN":
+            # The lock serializes stale callers in this process. Repositories may
+            # provide a durable conditional claim for multi-process workers.
+            if repository is not None and hasattr(repository, "claim_collection_start"):
+                claimed = await repository.claim_collection_start(run)
+                if not claimed:
+                    return {"collection_run_id": str(run.id), "run_state": run.state}
+            else:
+                run.state = "COLLECTING"
+                await run.save(update_fields=["state"])
+            task = asyncio.create_task(collect_and_store(plan, run, repository=repository))
+            _ACTIVE_TASKS.add(task)
+            task.add_done_callback(_task_done)
     return {"collection_run_id": str(run.id), "run_state": run.state}
