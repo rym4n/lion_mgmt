@@ -166,7 +166,9 @@ class TopologyAnalysisWorker:
     async def _run_stages(self, run: Any, identity: LeaseIdentity) -> None:
         while not self.stop_event.is_set():
             stage = _as_stage(run.stage)
-            if stage == AnalysisRunStage.FACTS_READY and not settings.TOPOLOGY_V2_PUBLISH_ENABLED:
+            diagnostic = leases.is_diagnostic_reanalysis(run)
+            if (stage == AnalysisRunStage.FACTS_READY
+                    and not diagnostic and not settings.TOPOLOGY_V2_PUBLISH_ENABLED):
                 await leases.wait_for_publish(identity, repository=self.leases)
                 return
             if stage == AnalysisRunStage.PUBLISHING:
@@ -176,6 +178,14 @@ class TopologyAnalysisWorker:
                 if not allowed:
                     raise PipelineFailure("WORKER_LEASE_LOST")
             result = await self._execute_with_heartbeat(run, stage, identity)
+            if diagnostic and stage == AnalysisRunStage.VALIDATING_GRAPH:
+                # execute_stage has validated the persisted graph under the
+                # active fence. Complete this run without a publication attempt.
+                if not await leases.mark_succeeded(
+                    identity, repository=self.leases, clock=self.clock
+                ):
+                    raise PipelineFailure("WORKER_LEASE_LOST")
+                return
             if stage == AnalysisRunStage.PUBLISHING:
                 if not result.published:
                     raise PipelineFailure("GRAPH_VALIDATION_FAILED")

@@ -119,8 +119,9 @@ def views(monkeypatch):
 async def test_list_is_cross_tenant_paginated_and_excludes_sensitive_fields(monkeypatch, views):
     calls, queries = model(monkeypatch, views, "TopologyAgentJob", [job(), job(id="j2", attempt=3)])
     result = data(await views.list_agent_jobs(request({"page": 2, "page_size": 1})))
-    assert result["total"] == 2 and len(result["items"]) == 1
-    assert result["items"][0]["tenant_id"] == "tenant-b"
+    assert "items" not in result
+    assert result["total"] == 2 and len(result["list"]) == 1
+    assert result["list"][0]["tenant_id"] == "tenant-b"
     assert calls == [{"deleted": False}]
     assert not {"documents", "transcript", "job_token_hash"} & set(queries[0].fields)
     await views.list_agent_jobs(request({"tenant_id": "tenant-b", "state": "SUCCEEDED"}))
@@ -151,12 +152,12 @@ async def test_rerun_uses_job_analysis_tenant_snapshot_current_profile_and_admin
     monkeypatch.setattr(views.analysis_runs, "reanalyze_snapshot", reanalyze)
     response = await views.rerun_agent_job(request({"job_id": "j1"}))
     assert data(response)["sync_id"] == "new1"
-    assert data(response)["publish_as_current"] is True
+    assert data(response)["publish_as_current"] is False
     assert analysis_calls == [{"id": "ar1", "tenant_id": "tenant-b", "deleted": False}]
     assert snapshot_calls == [{"id": "snap-row1", "tenant_id": "tenant-b", "topology_row_id": "top1", "deleted": False}]
     assert topology_calls == [{"id": "top1", "tenant_id": "tenant-b", "deleted": False}]
     reanalyze.assert_awaited_once_with("tenant-b", "snap1", topology_id="top1", target_profile_revision=7,
-                                    publish_as_current=True, expected_current_graph_revision=8,
+                                    publish_as_current=False, expected_current_graph_revision=8,
                                     expected_publication_revision=9, actor="admin1")
 
 

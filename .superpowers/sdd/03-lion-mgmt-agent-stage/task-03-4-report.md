@@ -27,3 +27,24 @@ Initial focused RED: missing maintenance module and agent summary/job lookup. Fo
 - Existing full-suite reanalysis tests cover actual stale CAS rejection before enqueue; new maintenance adapter test verifies safe 409 propagation.
 
 No deployed lion_agent/cache clear, PostgreSQL decryption/query/pagination, live rerun publication, browser UI or deployment was exercised. No remote push or migration was performed.
+
+## Review fix 2: original snapshot diagnostic reruns and list contract
+
+This section supersedes the earlier publish_as_current=True ruling. Integration review established that an already-published original snapshot cannot be published again: publication requires a strictly newer collection sequence, and publication profile guards reject a newly selected current profile against the original snapshot profile. A 202 with True would therefore enqueue an inevitably failing rerun.
+
+The maintenance endpoint now requests and reports `publish_as_current: false`. The narrow diagnostic predicate is **analysis_kind=REANALYZE and publish_as_current=False**. These runs use the existing pipeline to reparse, normalize, commit formal facts, resolve identities, project a graph with the selected current profile, and validate that persisted graph. Only after successful VALIDATING_GRAPH execution does the worker call fenced mark_succeeded and finish at that stage. It never enters PUBLISHING or calls the graph publisher. The publish feature gate does not block diagnostic graph construction. Lease claim still requires existing topology/snapshot/profile and matching snapshot topology, but intentionally does not apply publication freshness, snapshot-profile equality, current-profile equality, or publication CAS freshness to diagnostic work. The request's existing enqueue-time CAS validation remains in analysis_runs.reanalyze_snapshot.
+
+Fenced success allows VALIDATING_GRAPH only for that diagnostic predicate; ordinary publication still requires PUBLISHING. Cancellation and stale generation/token checks still block success. Persisted facts/graph payloads and hashes stay on the new analysis run, while current topology graph/snapshot/analysis pointers, sequence and revisions remain unchanged. No changes to publication.py/publishing.py or the graph pipeline were needed; existing pipeline validation already provides the required graph-validation boundary.
+
+The maintenance job-list response now uses `data.list`, matching the frontend API contract, with total/page/page_size unchanged. Its focused test explicitly rejects the previous items key.
+
+TDD evidence: the initial revised suite had six failures: original snapshot tried to publish, changed-profile/older snapshots could not be claimed, the narrow diagnostic claim was rejected, and the endpoint still returned items/True. Those failures now pass. A subsequent RED demonstrated mark_succeeded incorrectly accepting PUBLISHING for a diagnostic run; it now requires VALIDATING_GRAPH for diagnostics.
+
+Verification:
+
+- Focused diagnostic reanalysis + maintenance + lease/worker + graph pipeline + reanalysis contract suite: **98 passed, 1 deselected** (the known baseline authorization-mock test), 23 existing Tortoise warnings.
+- Full `PYTHONPATH=. uv run --frozen --with pytest pytest -q tests/network_topology`: **1124 passed, 2 failed**, 23 existing Tortoise warnings. Failures remain exactly the two baseline refresh= mock failures recorded above.
+- New tests execute the real AnalysisPipeline and TopologyAnalysisWorker from SPLITTING through validated graph completion using in-memory repositories and golden structured inputs. Cases cover same already-published snapshot, selected profile changed from 3 to 4, a newer published collection, disabled publishing, persisted valid facts/graph and hashes, no publisher calls, unchanged topology state, invalid graph failure, stale fencing, cancellation, retained existence/snapshot binding guards, and ordinary publishing behavior preservation.
+- Changed-file compileall and git diff --check pass.
+
+No live PostgreSQL, deployed worker/agent, migration, external publication or deployment was exercised. Diagnostic identity resolution still uses the existing durable identity registry, as ordinary analysis does; this change prevents graph publication rather than introducing a wholly read-only analysis pipeline.

@@ -16,6 +16,7 @@ from models._network_topology_v2_analysis import TopologyAnalysisRun
 from models._network_topology_v2_base import (
     AnalysisRunStage,
     AnalysisRunState,
+    AnalysisKind,
     PayloadObjectStatus,
 )
 from models._network_topology_v2_collection import (
@@ -260,6 +261,10 @@ def _stale_reason(run: Any, context: GuardContext) -> str | None:
         return "NEWER_COLLECTION_PUBLISHED"
     if str(snapshot.topology_row_id) != str(run.topology_row_id):
         return "NEWER_COLLECTION_PUBLISHED"
+    # Diagnostic reanalysis intentionally combines the original immutable
+    # collection with its selected profile and never replaces a published graph.
+    if is_diagnostic_reanalysis(run):
+        return None
     if int(profile.revision) != int(snapshot.profile_revision):
         return "STALE_PROFILE"
     if int(topology.topology_profile_revision or 0) != int(profile.revision):
@@ -269,6 +274,13 @@ def _stale_reason(run: Any, context: GuardContext) -> str | None:
     if run.publish_as_current and _revision_changed(run, topology):
         return "PUBLICATION_CAS_MISMATCH"
     return None
+
+
+def is_diagnostic_reanalysis(run: Any) -> bool:
+    return (
+        _enum_value(getattr(run, "analysis_kind", None)) == AnalysisKind.REANALYZE.value
+        and getattr(run, "publish_as_current", None) is False
+    )
 
 
 def _older_collection(snapshot, topology, current_snapshot) -> bool:
@@ -392,8 +404,10 @@ async def mark_succeeded(
     now = clock()
 
     def mutate(run):
-        if _stage(run) != AnalysisRunStage.PUBLISHING.value:
-            raise InvalidTransition("success requires PUBLISHING")
+        required_stage = (AnalysisRunStage.VALIDATING_GRAPH if is_diagnostic_reanalysis(run)
+                          else AnalysisRunStage.PUBLISHING)
+        if _stage(run) != required_stage.value:
+            raise InvalidTransition("success requires publication or validated diagnostic reanalysis")
         _apply_terminal(run, AnalysisRunState.SUCCEEDED, None, now)
 
     repo = repository or OrmLeaseRepository()
@@ -615,4 +629,5 @@ __all__ = [
     "claim_due_run", "exponential_backoff", "heartbeat", "mark_succeeded",
     "next_stage", "publication_allowed", "release_lease", "require_stage_transition", "run_is_due",
     "schedule_retry", "stage_transition_allowed", "wait_for_publish",
+    "is_diagnostic_reanalysis",
 ]

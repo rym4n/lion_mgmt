@@ -62,7 +62,7 @@ async def list_agent_jobs(request):
         query = TopologyAgentJob.filter(**filters)
         total = await query.count()
         rows = await query.order_by("-ctime", "-id").offset((page - 1) * page_size).limit(page_size).values(*JOB_FIELDS)
-        return response_ok({"items": [_serialize(row) for row in rows], "total": total,
+        return response_ok({"list": [_serialize(row) for row in rows], "total": total,
                             "page": page, "page_size": page_size})
     except CollectionError as error:
         return _error(error)
@@ -108,14 +108,14 @@ async def rerun_agent_job(request):
         result = await analysis_runs.reanalyze_snapshot(
             run.tenant_id, snapshot.snapshot_id, topology_id=str(topology.id),
             target_profile_revision=topology.topology_profile_revision,
-            # Reuse normal fenced publication: this maintenance rerun may
-            # replace the current graph if its captured revisions still match.
-            publish_as_current=True,
+            # Analyze the original snapshot with the current profile; retain
+            # results on this run without replacing the published graph.
+            publish_as_current=False,
             expected_current_graph_revision=topology.current_graph_revision or 0,
             expected_publication_revision=topology.publication_revision or 0,
             actor=_actor_id(request),
         )
-        return sanic_json({"code": 0, "data": {**result, "publish_as_current": True}},
+        return sanic_json({"code": 0, "data": {**result, "publish_as_current": False}},
                           status=202, dumps=orjson.dumps)
     except analysis_runs.AnalysisRunError as error:
         return _error(CollectionError(error.code, error.status))
