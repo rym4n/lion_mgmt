@@ -54,3 +54,32 @@ class FakeRunRepository:
 
     async def open_runs(self):
         return [r for r in self.runs.values() if r.state not in runs.RUN_TERMINAL_STATES]
+
+
+def run_row(run_id, **kw):
+    from datetime import datetime, timezone
+    values = dict(id=run_id, tenant_id="t1", plan_id="p", topology_id="topo-1", state="MANIFEST_FROZEN", triggered_by=None,
+                  started_at=datetime.now(timezone.utc), device_total=0, device_succeeded=0, frozen_targets=[])
+    values.update(kw)
+    return SimpleNamespace(**values)
+
+
+class FakeTargetRepository:
+    def __init__(self, *, resources, tools, actions):
+        self.resources, self.tools, self.action_rows = resources, tools, actions
+
+    async def resource(self, tenant_id, app_name, resource_id):
+        return self.resources.get(resource_id)
+
+    async def all_resources(self, tenant_id, app_name):
+        return list(self.resources.values())
+
+    async def latest_tool(self, tenant_id, app_name):
+        return self.tools.get(app_name)
+
+    async def tool(self, tenant_id, app_name, version):
+        row = self.tools.get(app_name)
+        return row if row and row[0] == version else None
+
+    async def actions(self, tenant_id, app_name, version):
+        return self.action_rows.get((app_name, version), [])
