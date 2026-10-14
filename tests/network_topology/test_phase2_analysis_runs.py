@@ -470,8 +470,8 @@ async def test_thin_routes_use_expected_permissions_and_safe_error_body(monkeypa
 
     permissions = []
 
-    async def allow(_request, *required):
-        permissions.append(required)
+    async def allow(_request, *required, refresh=False):
+        permissions.append((required, refresh))
         return True
 
     async def status(*_args, **_kwargs):
@@ -507,7 +507,7 @@ async def test_thin_routes_use_expected_permissions_and_safe_error_body(monkeypa
     assert "traceback" not in orjson.dumps(payload).decode().lower()
 
     assert permissions == [
-        ("network_topology:sync", "network_topology:reanalyze"),
-        ("network_topology:reanalyze",),
+        (("network_topology:sync", "network_topology:reanalyze"), False),
+        (("network_topology:reanalyze",), False),
     ]
     assert inspect.iscoroutinefunction(inspect.unwrap(views.cancel_analysis))

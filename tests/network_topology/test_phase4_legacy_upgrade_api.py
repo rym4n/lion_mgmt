@@ -102,8 +102,8 @@ async def test_route_checks_topology_update_permission(monkeypatch):
 
     checked = []
 
-    async def check_permissions(_request, *permissions):
-        checked.append(permissions)
+    async def check_permissions(_request, *permissions, refresh=False):
+        checked.append((permissions, refresh))
         return True
 
     async def adapter(_request):
@@ -113,7 +113,7 @@ async def test_route_checks_topology_update_permission(monkeypatch):
     monkeypatch.setattr(views.upgrade_views, "upgrade_to_v2", adapter)
 
     assert await views.upgrade_to_v2(_request()) == "ok"
-    assert checked == [("network_topology:u",)]
+    assert checked == [(("network_topology:u",), True)]
 
 
 @pytest.mark.asyncio
