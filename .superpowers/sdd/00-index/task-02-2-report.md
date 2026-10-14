@@ -45,3 +45,12 @@ Failures:
 - `tests/network_topology/test_phase4_legacy_upgrade_api.py::test_route_checks_topology_update_permission`
 
 Both are the recorded permission-mock baseline: monkeypatched permission functions reject the decorator's `refresh=` keyword argument. No Task 02.2 regression was exposed.
+
+## Review fix round 1
+
+- XML scrubbing now parses XML strings through the existing element redaction helper, removing sensitive elements and attributes together with their values while preserving safe XML content.
+- `raw_observation` now scrubs caller-provided output before hashing and schema validation.
+- Focused observations tests: `6 passed`.
+- Full topology suite: `2 failed, 957 passed, 23 warnings in 21.78s`; the same two permission-mock baseline failures remain.
+- `python3 -m compileall -q services/network_topology/collection services/network_topology/redaction.py services/network_topology/canonicalization.py`: passed.
+- `git diff --check`: passed.

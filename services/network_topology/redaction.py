@@ -48,6 +48,11 @@ def scrub_action_output(value: Any) -> Any:
     if isinstance(value, list):
         return [scrub_action_output(child) for child in value]
     if isinstance(value, str):
+        if "<" in value and ">" in value:
+            try:
+                return _redact_xml(value)
+            except (CanonicalizationError, ElementTree.ParseError):
+                pass
         text = canonicalization.SENSITIVE_TEXT.sub(f"{REDACTION_MARKER}\n", value)
         text = canonicalization.SENSITIVE_XML.sub(REDACTION_MARKER, text)
         return _SENSITIVE_LINE.sub(f"{REDACTION_MARKER}\n", text)

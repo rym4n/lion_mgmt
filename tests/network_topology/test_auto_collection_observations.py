@@ -30,3 +30,17 @@ def test_raw_observation_is_contract_valid():
 def test_cli_text_records_do_not_become_typed():
     output = {"data": {"records": [{"kinds": ["system.identity"], "content_type": "text/plain", "data": "Huawei VRP"}]}}
     assert typed_observations(output, resource_id="r", item_id="i", observed_at="2026-10-14T00:00:00Z") == []
+
+
+def test_scrub_redacts_xml_element_and_attribute_values():
+    cleaned = scrub_action_output("<config><password>secret</password><user token=\"abc\">ok</user><vlan>10</vlan></config>")
+    assert "secret" not in cleaned and "abc" not in cleaned
+    assert "<vlan>10</vlan>" in cleaned
+    canonicalization.reject_credential_blocks(cleaned)
+
+
+def test_raw_observation_scrubs_direct_output():
+    obs = raw_observation(observation_id="i:r", app_name="app", action_func="act", app_version="v", resource_id="r", output={"password": "secret", "data": {"text": "snmp-agent community read public"}}, observed_at="2026-10-14T00:00:00Z")
+    encoded = orjson.dumps(obs)
+    assert b"secret" not in encoded and b"public" not in encoded
+    canonicalization.reject_credential_blocks(obs)

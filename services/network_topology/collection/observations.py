@@ -36,6 +36,7 @@ def _hashed(observation: dict[str, Any]) -> dict[str, Any]:
 
 
 def raw_observation(*, observation_id, app_name, action_func, app_version, resource_id, output, observed_at):
+    output = scrub_action_output(output)
     observation = _hashed({
         "observation_id": observation_id, "kind": RAW_KIND,
         "observation_status": "success", "source_method": "aioe_action",
