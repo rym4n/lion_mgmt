@@ -44,3 +44,15 @@ def test_raw_observation_scrubs_direct_output():
     encoded = orjson.dumps(obs)
     assert b"secret" not in encoded and b"public" not in encoded
     canonicalization.reject_credential_blocks(obs)
+
+
+@pytest.mark.parametrize("value", ['<user token="abc">', '<password>abc'])
+def test_scrub_redacts_sensitive_xml_fragments(value):
+    cleaned = scrub_action_output(value)
+    assert "abc" not in cleaned
+    canonicalization.reject_credential_blocks(cleaned)
+
+
+def test_scrub_preserves_non_sensitive_fragment_text():
+    value = "status: <interface>up"
+    assert scrub_action_output(value) == value

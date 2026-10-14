@@ -53,8 +53,11 @@ def scrub_action_output(value: Any) -> Any:
                 return _redact_xml(value)
             except (CanonicalizationError, ElementTree.ParseError):
                 pass
+        # Unsafe XML fragments cannot be structurally scrubbed without risking
+        # retaining an element's text or an attribute's credential value.
+        if canonicalization.SENSITIVE_XML.search(value):
+            return REDACTION_MARKER
         text = canonicalization.SENSITIVE_TEXT.sub(f"{REDACTION_MARKER}\n", value)
-        text = canonicalization.SENSITIVE_XML.sub(REDACTION_MARKER, text)
         return _SENSITIVE_LINE.sub(f"{REDACTION_MARKER}\n", text)
     return value
 

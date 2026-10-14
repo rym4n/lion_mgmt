@@ -54,3 +54,25 @@ Both are the recorded permission-mock baseline: monkeypatched permission functio
 - Full topology suite: `2 failed, 957 passed, 23 warnings in 21.78s`; the same two permission-mock baseline failures remain.
 - `python3 -m compileall -q services/network_topology/collection services/network_topology/redaction.py services/network_topology/canonicalization.py`: passed.
 - `git diff --check`: passed.
+
+## Review fix round 2
+
+Sensitive XML syntax in a string that cannot be safely parsed now causes the whole string to be replaced with `[REDACTED]`, rather than retaining credential values after syntax-only substitution. Non-sensitive fragment text retains its previous behavior.
+
+New regressions:
+
+- `test_scrub_redacts_sensitive_xml_fragments[<user token="abc">]`
+- `test_scrub_redacts_sensitive_xml_fragments[<password>abc]`
+- `test_scrub_preserves_non_sensitive_fragment_text`
+
+RED command: `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology/test_auto_collection_observations.py`
+
+Output: `2 failed, 7 passed in 0.65s`; both sensitive XML fragment cases retained `abc`.
+
+GREEN command: `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology/test_auto_collection_observations.py`
+
+Output: `9 passed in 0.61s`.
+
+Relevant redaction regression command: `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology/test_auto_collection_observations.py tests/network_topology/test_phase2_payload_store.py tests/network_topology/test_phase2_upload_session.py`
+
+Output: `34 passed, 23 warnings in 2.22s`. This includes `test_raw_body_is_validated_then_redacted_before_hash_or_storage` and `test_staging_contains_only_redacted_observation_payload`.
