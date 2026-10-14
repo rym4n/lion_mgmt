@@ -4,6 +4,7 @@ from models.network_topology_v2 import (
     TopologyCollectionPlan,
     TopologyCollectionRun,
 )
+import models.network_topology_v2 as public_v2
 
 
 def test_tables_and_defaults():
@@ -14,3 +15,13 @@ def test_tables_and_defaults():
     assert plan["run_timeout_seconds"].default == 3600
     assert TopologyCollectionRun._meta.fields_map["state"].default == "PENDING"
     assert RUN_TERMINAL_STATES == {"SUCCEEDED", "FAILED", "CANCELLED"}
+
+
+def test_public_facade_exports_auto_collection_surface():
+    assert {
+        "RUN_STATES",
+        "RUN_TERMINAL_STATES",
+        "TopologyCollectionItem",
+        "TopologyCollectionPlan",
+        "TopologyCollectionRun",
+    } <= set(public_v2.__all__)

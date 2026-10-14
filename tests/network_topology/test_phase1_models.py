@@ -431,8 +431,13 @@ def test_public_facade_exports_complete_model_surface() -> None:
     assert public_v2.__all__ == (
         "PresentationOverride",
         "TopologyAnalysisRun",
+        "RUN_STATES",
+        "RUN_TERMINAL_STATES",
+        "TopologyCollectionItem",
         "TopologyCollectionManifest",
         "TopologyCollectionSnapshot",
+        "TopologyCollectionPlan",
+        "TopologyCollectionRun",
         "TopologyIdentityAlias",
         "TopologyIdentityConflictAudit",
         "TopologyIdentityRegistry",
@@ -672,6 +677,8 @@ def test_topology_scoped_v2_models_have_tenant_topology_index_prefix() -> None:
     expected_prefix = ("tenant_id", "topology_row_id")
     for model_name in public_v2.__all__:
         model = getattr(public_v2, model_name)
+        if not isinstance(model, type):
+            continue
         if "topology_row_id" not in model._meta.fields_map:
             continue
         assert any(index[:2] == expected_prefix for index in model._meta.indexes)
@@ -693,7 +700,7 @@ from models import (
     TopologyObservationStaging,
     TopologySnapshotUploadSession,
 )
-assert all(getattr(models, name)._meta.app == 'models' for name in public_names)
+assert all(getattr(models, name)._meta.app == 'models' for name in public_names if isinstance(getattr(models, name), type))
 assert TopologyCollectionSnapshot._meta.fields_map['target_manifest_row'].related_model is TopologyCollectionManifest
 assert TopologyCollectionManifest._meta.fields_map['committed_snapshot_row'].related_model is TopologyCollectionSnapshot
 assert TopologyCollectionManifest._meta.fields_map['committed_analysis_run_row'].related_model is TopologyAnalysisRun

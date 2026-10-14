@@ -12,7 +12,7 @@ def test_all_retained_foreign_keys_resolve_to_retained_models() -> None:
     retained = {
         "NetworkTopology",
         "NetworkTopologyVersion",
-        *network_topology_v2.__all__,
+        *(name for name in network_topology_v2.__all__ if isinstance(getattr(network_topology_v2, name), type)),
     }
 
     for model_name in retained:

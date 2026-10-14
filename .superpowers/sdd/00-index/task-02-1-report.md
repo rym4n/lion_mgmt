@@ -36,3 +36,23 @@ The three failures are the two documented baseline permission-mock failures plus
 - Exported the new model symbols and constants as attributes from `models.network_topology_v2`.
 - Added migration 132 with BaseModel columns, JSONB/TEXT mappings, conditional unique plan and active-run indexes, and reversible async downgrade.
 - Added model defaults/table coverage test.
+
+## Review fix round 1
+
+Updated `models.network_topology_v2.__all__` to include `RUN_STATES`, `RUN_TERMINAL_STATES`, `TopologyCollectionItem`, `TopologyCollectionPlan`, and `TopologyCollectionRun`. Updated the exact facade contract test and added focused export coverage; model-inventory tests now ignore the two constants when iterating model classes.
+
+Focused review command:
+
+```text
+PYTHONPATH=. uv run --frozen --with pytest pytest -q tests/network_topology/test_auto_collection_models.py tests/network_topology/test_phase1_models.py tests/network_topology/test_phase1_model_inventory.py tests/network_topology/test_phase1_model_relations.py
+23 passed, 23 warnings in 2.66s
+```
+
+Full suite:
+
+```text
+PYTHONPATH=. uv run --frozen --with pytest pytest -q tests/network_topology
+951 passed, 2 failed, 23 warnings in 21.67s
+```
+
+The remaining two failures are the documented permission-mock baseline failures.

@@ -47,6 +47,8 @@ def test_public_v2_inventory_contains_no_retired_models() -> None:
 def test_every_public_v2_table_is_tenant_scoped_and_non_nullable() -> None:
     for model_name in network_topology_v2.__all__:
         model = getattr(network_topology_v2, model_name)
+        if not isinstance(model, type):
+            continue
         assert issubclass(model, TopologyTenantModel)
         assert model._meta.fields_map["tenant_id"].null is False
         assert "installation_id" not in model._meta.fields_map
