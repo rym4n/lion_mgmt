@@ -181,3 +181,27 @@ async def test_status_uses_public_error_mapping_for_model_shaped_analysis(monkey
     assert data["error_code"] == "SCHEMA_INVALID"
     assert data["error_message"] == "Snapshot schema validation failed"
     assert "secret" not in (data["error_message"] or "")
+
+
+@pytest.mark.asyncio
+async def test_terminal_analysis_persists_only_public_error_fields(monkeypatch):
+    captured = {}
+    class Repo:
+        async def get_analysis(self, run_id, *, tenant_id, topology_id):
+            return SimpleNamespace(state="FAILED", stage="PARSING", error_code="INTERNAL_SECRET", error_summary="secret traceback")
+    async def finish(run, state, **kwargs):
+        captured.update(kwargs)
+        run.state = state
+        run.error_code = kwargs.get("error_code")
+        run.error_message = kwargs.get("error_message")
+    monkeypatch.setattr(submit.runs, "_repo", lambda repository: Repo())
+    monkeypatch.setattr(submit.runs, "finish_run", finish)
+    run = _run(_snapshot()); run.state = "SUBMITTED"; run.analysis_run_id = "analysis-1"
+    await submit.runs.refresh_from_analysis(run)
+    assert captured["error_code"] == "SCHEMA_INVALID"
+    assert captured["error_message"] == "Snapshot schema validation failed"
+    data = await submit.status(SimpleNamespace(topology_id="topo-1"), run)
+    assert data["error_code"] == "SCHEMA_INVALID"
+    assert data["error_message"] == "Snapshot schema validation failed"
+    assert "INTERNAL_SECRET" not in repr(data)
+    assert "secret traceback" not in repr(data)

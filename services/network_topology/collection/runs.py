@@ -365,7 +365,14 @@ async def refresh_from_analysis(run, repository=None):
         ) else "changed"
         await finish_run(run, "SUCCEEDED", result=result, graph_revision=graph_revision, repository=repo)
     elif state in {"FAILED", "SUPERSEDED", "CANCELLED"}:
-        await finish_run(run, "FAILED", error_code=getattr(analysis, "error_code", None), repository=repo)
+        public_code, public_summary = analysis_runs._public_status_error(analysis, state)
+        await finish_run(
+            run,
+            "FAILED",
+            error_code=public_code,
+            error_message=public_summary,
+            repository=repo,
+        )
     return run
 
 

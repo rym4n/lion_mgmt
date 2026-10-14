@@ -32,3 +32,7 @@ Analysis graph/error values are kept as transient `_analysis_*` status projectio
 ## Round 3 re-review fixes
 
 Analysis refresh now keeps absent `analysis.graph_revision` from erasing the persisted collection graph revision; status falls back to the collection revision after terminal success. Analysis errors use `_public_status_error`, so model `error_summary` and internal worker details are never returned. Added model-shaped fake tests for first successful poll and in-flight failure mapping. Focused suite: `13 passed`.
+
+## Round 4 security fix
+
+FAILED/SUPERSEDED/CANCELLED analysis transitions now persist only `_public_status_error` code and summary through `finish_run`; raw model error codes and summaries are never copied into collection run fields. Regression test verifies persistence and later status output contain no `INTERNAL_SECRET` or traceback text. Focused suite: `14 passed`.
