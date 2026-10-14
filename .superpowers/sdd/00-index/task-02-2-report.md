@@ -30,3 +30,18 @@ The focused test exposed that `snmp-agent community read public` left `public` a
 - `PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology/test_auto_collection_observations.py`: **4 passed**
 - `python3 -m compileall -q services/network_topology/collection services/network_topology/redaction.py services/network_topology/canonicalization.py`: passed
 - `git diff --check`: passed
+
+## Full topology suite
+
+Command:
+
+`PYTHONPATH=. uv run --frozen --with pytest --with rfc8785 pytest -q tests/network_topology`
+
+Exact result: **2 failed, 955 passed, 23 warnings in 22.34s**.
+
+Failures:
+
+- `tests/network_topology/test_phase2_analysis_runs.py::test_thin_routes_use_expected_permissions_and_safe_error_body`
+- `tests/network_topology/test_phase4_legacy_upgrade_api.py::test_route_checks_topology_update_permission`
+
+Both are the recorded permission-mock baseline: monkeypatched permission functions reject the decorator's `refresh=` keyword argument. No Task 02.2 regression was exposed.
