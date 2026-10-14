@@ -9,7 +9,7 @@ from models.base import EncryptedTextField
 
 __all__ = (
     "RUN_STATES", "RUN_TERMINAL_STATES", "TopologyCollectionItem",
-    "TopologyCollectionPlan", "TopologyCollectionRun",
+    "TopologyCollectionPlan", "TopologyCollectionRun", "TopologyAgentJob",
 )
 
 RUN_STATES = ("PENDING", "MANIFEST_FROZEN", "COLLECTING", "COLLECTED", "SUBMITTED", "SUCCEEDED", "FAILED", "CANCELLED")
@@ -78,3 +78,30 @@ class TopologyCollectionRun(TopologyTenantModel):
     class Meta:
         table = "network_topology_collection_run"
         indexes = (("tenant_id", "topology_id", "state"), ("tenant_id", "plan_id", "ctime"))
+
+
+class TopologyAgentJob(TopologyTenantModel):
+    """Durable agent normalization job and its redacted submission result."""
+
+    analysis_run_id = fields.CharField(max_length=36)
+    topology_id = fields.CharField(max_length=36)
+    collection_run_id = fields.CharField(max_length=36, null=True)
+    attempt = fields.IntField()
+    state = fields.CharField(max_length=16, default="QUEUED")
+    resource_ids = fields.JSONField(default=list)
+    job_token_hash = fields.CharField(max_length=64)
+    profile_version = fields.CharField(max_length=255, null=True)
+    cache_hits = fields.IntField(default=0)
+    cache_misses = fields.IntField(default=0)
+    iterations = fields.IntField(default=0)
+    token_usage = fields.JSONField(null=True)
+    documents = EncryptedTextField(null=True)
+    transcript = EncryptedTextField(null=True)
+    error_code = fields.CharField(max_length=128, null=True)
+    error_message = fields.TextField(null=True)
+    started_at = fields.DatetimeField(null=True)
+    finished_at = fields.DatetimeField(null=True)
+
+    class Meta:
+        table = "network_topology_agent_job"
+        indexes = (("tenant_id", "analysis_run_id"), ("tenant_id", "collection_run_id"))

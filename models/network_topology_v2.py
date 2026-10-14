@@ -26,6 +26,7 @@ from models._network_topology_v2_presentation import (
 from models._network_topology_v2_auto_collection import (
     RUN_STATES,
     RUN_TERMINAL_STATES,
+    TopologyAgentJob,
     TopologyCollectionItem,
     TopologyCollectionPlan,
     TopologyCollectionRun,
@@ -34,6 +35,7 @@ from models._network_topology_v2_auto_collection import (
 __all__ = (
     "PresentationOverride",
     "TopologyAnalysisRun",
+    "TopologyAgentJob",
     "RUN_STATES",
     "RUN_TERMINAL_STATES",
     "TopologyCollectionItem",
