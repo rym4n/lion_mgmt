@@ -90,7 +90,7 @@ async def test_timer_publish_failure_retains_retry_identity(monkeypatch):
         await plans.sync_timer(plan)
     original = Timer.row
     assert original.enable == 0
-    assert plan.timed_id is None
+    assert plan.timed_id == "timer"
     await plans.sync_timer(plan)
     assert Timer.row is original
     assert original.enable == 1

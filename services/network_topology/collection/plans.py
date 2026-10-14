@@ -197,20 +197,31 @@ async def _locked_plan(plan):
 async def sync_timer(plan) -> None:
     # Re-read under the plan row lock: older post-commit callers must reconcile
     # the latest revision, and two callers must not create separate timer rows.
-    failure = None
+    prepared = None
     async with _locked_plan(plan) as current:
         if current is not None:
-            try:
-                await _sync_timer_locked(current)
-            except Exception as exc:
-                # Commit a newly allocated disabled timer identity even when the
-                # broker outcome is uncertain; retry must reuse that identity.
-                failure = exc
-    if failure is not None:
-        raise failure
+            prepared = await _prepare_timer_locked(current)
+    if prepared is None:
+        return
+    timed, message, enabled, cron = prepared
+    # The identity and disabled state are committed before touching Kafka.  A
+    # broker failure therefore cannot roll back the row needed for retry.
+    await aproduce(TASK_TOPIC, message, raise_on_error=True)
+    async with _locked_plan(plan) as current:
+        if current is None:
+            return
+        # A newer save may have changed the schedule while Kafka was in flight;
+        # leave the timer disabled and let that save's reconciliation win.
+        if bool(current.enabled) != enabled or current.schedule_cron != cron:
+            return
+        timed.enable = int(enabled)
+        timed.tactics = cron
+        await timed.save()
+        current.timed_id = timed.id
+        await current.save(update_fields=['timed_id'])
 
 
-async def _sync_timer_locked(plan) -> None:
+async def _prepare_timer_locked(plan):
     playbook = version = None
     if plan.enabled:
         playbook, version = await builtin_playbook()
@@ -230,10 +241,7 @@ async def _sync_timer_locked(plan) -> None:
     msg = dict(run_type='flow', run_args=inputs, timer='cron' if plan.enabled else 'remove',
                timer_rule=dict(end_date=TIMER_END, crontab=plan.schedule_cron) if plan.enabled else {},
                timer_id=timed.id, tenant_id=DEFAULT_TENANT_ID)
-    # Publishing is deliberately repeatable with the same timer id. On failure
-    # keep its row so a retry cannot leave an orphan scheduler entry.
-    await aproduce(TASK_TOPIC, msg, raise_on_error=True)
-    timed.enable = int(plan.enabled)
+    timed.enable = 0
     timed.tactics = plan.schedule_cron
     timed.playbook_input = inputs
     timed.end_time = TIMER_END
@@ -244,6 +252,7 @@ async def _sync_timer_locked(plan) -> None:
     await timed.save()
     plan.timed_id = timed.id
     await plan.save(update_fields=['timed_id'])
+    return timed, msg, bool(plan.enabled), plan.schedule_cron
 
 
 async def delete_plan_for_topology(tenant_id, topology_id) -> None:
@@ -252,6 +261,10 @@ async def delete_plan_for_topology(tenant_id, topology_id) -> None:
         if plan is None:
             return
         plan.enabled = False
-        await _sync_timer_locked(plan)
+        prepared = await _prepare_timer_locked(plan)
+        if prepared:
+            await aproduce(TASK_TOPIC, prepared[1], raise_on_error=True)
+            prepared[0].enable = 0
+            await prepared[0].save()
         await TopologyCollectionItem.filter(tenant_id=tenant_id, plan_id=plan.id, deleted=False).using_db(db).update(deleted=True)
         await TopologyCollectionPlan.filter(tenant_id=tenant_id, id=plan.id, deleted=False).using_db(db).update(deleted=True, enabled=False)
