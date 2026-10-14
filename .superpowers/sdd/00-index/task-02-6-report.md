@@ -26,3 +26,7 @@ Manifest persistence relies on the existing manifest/profile database seams and 
 - Background starts are serialized with a process lock and support repository conditional claims.
 - `COLLECTION_INCOMPLETE` remains the terminal error code; unexpected failures include traceback logging and map to `COLLECTION_DISPATCH_FAILED`.
 - Focused suite now passes 8 tests.
+
+## Round 1 follow-up
+
+The default ORM background transition now uses a tenant/topology/deleted scoped conditional update (`MANIFEST_FROZEN` to `COLLECTING`), preventing cross-worker duplicate dispatch. Repository claims are supported for testable persistence seams, and claimed runs update their in-memory state. Focused suite remains 8 passed.

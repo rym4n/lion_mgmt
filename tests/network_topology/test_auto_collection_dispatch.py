@@ -74,10 +74,17 @@ async def test_executor_failure_status_does_not_parse_invalid_output():
 @pytest.mark.asyncio
 async def test_background_start_only_dispatches_once():
     row = run_row("run")
-    row.save_calls = 0
-    async def save(**kwargs):
-        row.save_calls += 1
-    row.save = save
+    stale = run_row("run")
+    class Repo:
+        state = "MANIFEST_FROZEN"
+        async def claim_collection_start(self, run):
+            claimed = self.state == "MANIFEST_FROZEN"
+            self.state = "COLLECTING"
+            await asyncio.sleep(0)
+            return claimed
+        async def get_run(self, *args, **kwargs):
+            return SimpleNamespace(state=self.state)
+    repo = Repo()
     calls = 0
     async def collect(*args, **kwargs):
         nonlocal calls
@@ -85,9 +92,11 @@ async def test_background_start_only_dispatches_once():
     monkey = dispatch.collect_and_store
     dispatch.collect_and_store = collect
     try:
-        await asyncio.gather(dispatch.start_background(plan("p"), row), dispatch.start_background(plan("p"), row))
+        results = await asyncio.gather(dispatch.start_background(plan("p"), row, repository=repo),
+                                       dispatch.start_background(plan("p"), stale, repository=repo))
         await asyncio.sleep(0)
         assert calls == 1
+        assert all(result["run_state"] == "COLLECTING" for result in results)
     finally:
         dispatch.collect_and_store = monkey
 

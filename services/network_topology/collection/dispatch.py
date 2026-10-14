@@ -14,7 +14,7 @@ from libs.kafka import aproduce
 from libs.utils import gen_run_id
 from models import Runlog
 from models.asset_management import AssetInstance
-from models.network_topology_v2 import RUN_TERMINAL_STATES, TopologyCollectionManifest
+from models.network_topology_v2 import RUN_TERMINAL_STATES, TopologyCollectionManifest, TopologyCollectionRun
 from services.network_topology import snapshot
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.observations import parse_action_output
@@ -26,7 +26,6 @@ from settings import TASK_TOPIC
 
 logger = logging.getLogger(__name__)
 _ACTIVE_TASKS: set[asyncio.Task] = set()
-_START_LOCK = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -168,18 +167,24 @@ def _task_done(task):
 
 
 async def start_background(plan, run, *, repository=None) -> dict:
-    async with _START_LOCK:
-        if run.state == "MANIFEST_FROZEN":
-            # The lock serializes stale callers in this process. Repositories may
-            # provide a durable conditional claim for multi-process workers.
-            if repository is not None and hasattr(repository, "claim_collection_start"):
-                claimed = await repository.claim_collection_start(run)
-                if not claimed:
-                    return {"collection_run_id": str(run.id), "run_state": run.state}
-            else:
-                run.state = "COLLECTING"
-                await run.save(update_fields=["state"])
+    if run.state == "MANIFEST_FROZEN":
+        if repository is not None:
+            claimed = await repository.claim_collection_start(run)
+        else:
+            claimed = await TopologyCollectionRun.filter(
+                id=run.id, tenant_id=run.tenant_id, topology_id=run.topology_id,
+                deleted=False, state="MANIFEST_FROZEN").update(state="COLLECTING")
+        if claimed:
+            run.state = "COLLECTING"
             task = asyncio.create_task(collect_and_store(plan, run, repository=repository))
             _ACTIVE_TASKS.add(task)
             task.add_done_callback(_task_done)
+        else:
+            if repository is not None:
+                current = await repository.get_run(run.id, tenant_id=run.tenant_id)
+            else:
+                current = await TopologyCollectionRun.filter(
+                    id=run.id, tenant_id=run.tenant_id, deleted=False).first()
+            if current is not None:
+                run.state = current.state
     return {"collection_run_id": str(run.id), "run_state": run.state}
