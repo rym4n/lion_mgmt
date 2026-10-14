@@ -110,7 +110,7 @@ async def status(plan, run) -> dict[str, Any]:
         "run_state": getattr(run, "state", None),
         "analysis_state": getattr(run, "analysis_state", None),
         "stage": getattr(run, "stage", None),
-        "graph_revision": getattr(run, "_analysis_graph_revision", getattr(run, "graph_revision", None)),
+        "graph_revision": getattr(run, "_analysis_graph_revision", None) or getattr(run, "graph_revision", None),
         "result": getattr(run, "result", None),
         "error_code": getattr(run, "_analysis_error_code", getattr(run, "error_code", None)),
         "error_message": getattr(run, "_analysis_error_message", getattr(run, "error_message", None)),

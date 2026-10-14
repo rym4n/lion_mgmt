@@ -105,8 +105,8 @@ async def test_status_projects_scoped_inflight_analysis(monkeypatch, state, stag
     assert (data["analysis_state"], data["stage"]) == (state, stage)
     assert data["graph_revision"] == 8
     assert run.graph_revision == 3 and run.error_code is None and run.error_message is None
-    assert data["error_code"] == "TEMPORARY_NETWORK_FAILURE"
-    assert data["error_message"] == "Retry pending"
+    assert data["error_code"] is None
+    assert data["error_message"] is None
 
 
 def _valid_single_snapshot():
@@ -150,3 +150,34 @@ async def test_single_raw_observation_uses_chunk_ingress_with_valid_contract(mon
     await submit.submit_snapshot(SimpleNamespace(topology_id="topo-1"), run)
     assert calls == ["start", "stage", "commit"]
     assert run.state == "SUBMITTED" and run.analysis_run_id == "a1"
+
+
+@pytest.mark.asyncio
+async def test_status_success_keeps_collection_graph_revision_when_analysis_has_no_graph_field(monkeypatch):
+    class Repo:
+        async def get_analysis(self, run_id, *, tenant_id, topology_id):
+            return SimpleNamespace(state="SUCCEEDED", stage="PUBLISHED", error_code=None, error_summary=None, expected_current_graph_revision=4)
+        async def get_topology(self, tenant_id, topology_id):
+            return SimpleNamespace(current_graph_revision=9)
+        async def get_plan(self, plan_id): return None
+    monkeypatch.setattr(submit.runs, "_repo", lambda repository: Repo())
+    async def finish(*a, **k): pass
+    monkeypatch.setattr(submit.runs, "finish_run", finish)
+    run = _run(_snapshot()); run.state = "SUBMITTED"; run.analysis_run_id = "analysis-1"; run.graph_revision = 9
+    data = await submit.status(SimpleNamespace(topology_id="topo-1"), run)
+    assert data["graph_revision"] == 9
+
+
+@pytest.mark.asyncio
+async def test_status_uses_public_error_mapping_for_model_shaped_analysis(monkeypatch):
+    class Repo:
+        async def get_analysis(self, run_id, *, tenant_id, topology_id):
+            return SimpleNamespace(state="FAILED", stage="PARSING", error_code="INTERNAL_SECRET", error_summary="secret worker traceback")
+    monkeypatch.setattr(submit.runs, "_repo", lambda repository: Repo())
+    async def finish(*a, **k): pass
+    monkeypatch.setattr(submit.runs, "finish_run", finish)
+    run = _run(_snapshot()); run.state = "SUBMITTED"; run.analysis_run_id = "analysis-1"
+    data = await submit.status(SimpleNamespace(topology_id="topo-1"), run)
+    assert data["error_code"] == "SCHEMA_INVALID"
+    assert data["error_message"] == "Snapshot schema validation failed"
+    assert "secret" not in (data["error_message"] or "")

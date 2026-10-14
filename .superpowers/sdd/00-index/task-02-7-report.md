@@ -28,3 +28,7 @@ The upload envelope contract requires `expected_observation_count >= 2`; chunked
 The upload envelope minimum is now 1, matching collection/v2 raw-only capability output. Chunk submission no longer rejects a valid one-observation resource; zero remains rejected by the packaged JSON Schema. Added contract validation tests for both cases and an end-to-end one-observation chunk path.
 
 Analysis graph/error values are kept as transient `_analysis_*` status projection fields, leaving persisted collection terminal accounting untouched. Focused suite: `11 passed`.
+
+## Round 3 re-review fixes
+
+Analysis refresh now keeps absent `analysis.graph_revision` from erasing the persisted collection graph revision; status falls back to the collection revision after terminal success. Analysis errors use `_public_status_error`, so model `error_summary` and internal worker details are never returned. Added model-shaped fake tests for first successful poll and in-flight failure mapping. Focused suite: `13 passed`.
