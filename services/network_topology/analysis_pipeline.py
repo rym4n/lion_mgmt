@@ -35,14 +35,16 @@ from services.network_topology.run_pipeline import (
     ObservationChunk,
     build_collection_chunks,
     parse_collection_candidates,
+    split_collection,
 )
 from services.network_topology.worker import PipelineFailure, StageResult
 
 
-PHASE3_STAGES = frozenset(
+PIPELINE_STAGES = frozenset(
     (
         AnalysisRunStage.SPLITTING,
         AnalysisRunStage.PARSING,
+        AnalysisRunStage.AGENT_NORMALIZING,
         AnalysisRunStage.VALIDATING_FACTS,
     )
 )
@@ -54,21 +56,38 @@ class _AnalysisContext:
     chunks: tuple[ObservationChunk, ...]
 
 
+class NoAgentStage:
+    """Fail closed unless no observations are pending for the agent."""
+
+    async def run(self, run, collection, lease):
+        if getattr(run, "agent_observation_ids", None):
+            raise PipelineFailure("AGENT_NOT_CONFIGURED")
+        return ()
+
+    async def load_results(self, run):
+        return ()
+
+
 class AnalysisPipeline:
     """Turn an admitted collection snapshot into formal, provenance-bound Facts."""
 
-    def __init__(self, repository=None, payload_store=None) -> None:
+    def __init__(self, repository=None, payload_store=None, agent_stage=None) -> None:
         self.repository = repository or OrmAnalysisPipelineRepository()
         self.payload_store = payload_store or PayloadStore()
+        self.agent_stage = agent_stage or NoAgentStage()
 
     async def analyze_collection(
-        self, collection: dict[str, Any], *, analysis_run_id: str
+        self, collection: dict[str, Any], *, analysis_run_id: str,
+        agent_results: tuple = (),
+        exclude_observation_ids: frozenset[str] = frozenset(),
     ) -> MergeResult:
         try:
             context = _build_context(collection)
-            batches = parse_collection_candidates(collection)
-            converted = _convert_batches(context, batches, analysis_run_id)
-            result = _merge(context, converted)
+            batches = parse_collection_candidates(
+                collection, exclude_observation_ids=exclude_observation_ids
+            )
+            converted = (*_convert_batches(context, batches, analysis_run_id), *agent_results)
+            result = _merge(context, converted, exclude_observation_ids)
         except ParserError as exc:
             raise PipelineFailure("PARSER_FAILED") from exc
         except FactMergeError as exc:
@@ -84,7 +103,7 @@ class AnalysisPipeline:
     async def execute_stage(
         self, run: Any, stage: AnalysisRunStage, lease: LeaseIdentity
     ) -> StageResult:
-        selected = _phase3_stage(stage)
+        selected = _known_stage(stage)
         await self.repository.assert_active(run, selected, lease)
         _require_current_stage(run, selected)
         collection = await self.repository.load_collection(run, self.payload_store)
@@ -93,12 +112,27 @@ class AnalysisPipeline:
             _build_context(collection)
             await self.repository.assert_active(run, selected, lease)
             return StageResult()
+        split = split_collection(collection)
         if selected == AnalysisRunStage.PARSING:
             _build_context(collection)
-            parse_collection_candidates(collection)
+            parse_collection_candidates(
+                collection, exclude_observation_ids=frozenset(split.agent_observation_ids)
+            )
+            await self.repository.assert_active(run, selected, lease)
+            return StageResult(updates={"agent_observation_ids": list(split.agent_observation_ids)})
+        if selected == AnalysisRunStage.AGENT_NORMALIZING:
+            await self.agent_stage.run(run, collection, lease)
             await self.repository.assert_active(run, selected, lease)
             return StageResult()
-        result = await self.analyze_collection(collection, analysis_run_id=str(run.id))
+        if isinstance(self.agent_stage, NoAgentStage) and (
+            split.agent_observation_ids or getattr(run, "agent_observation_ids", None)
+        ):
+            raise PipelineFailure("AGENT_NOT_CONFIGURED")
+        result = await self.analyze_collection(
+            collection, analysis_run_id=str(run.id),
+            agent_results=await self.agent_stage.load_results(run),
+            exclude_observation_ids=frozenset(split.agent_observation_ids),
+        )
         await self.repository.assert_active(run, selected, lease)
         if _already_committed(run, result):
             return StageResult()
@@ -113,12 +147,12 @@ class AnalysisPipeline:
         return StageResult()
 
 
-def _phase3_stage(stage: Any) -> AnalysisRunStage:
+def _known_stage(stage: Any) -> AnalysisRunStage:
     try:
         selected = stage if isinstance(stage, AnalysisRunStage) else AnalysisRunStage(stage)
     except (TypeError, ValueError) as exc:
         raise PipelineFailure("GRAPH_VALIDATION_FAILED") from exc
-    if selected not in PHASE3_STAGES:
+    if selected not in PIPELINE_STAGES:
         raise PipelineFailure("GRAPH_VALIDATION_FAILED")
     return selected
 
@@ -165,11 +199,18 @@ def _convert_batches(context, batches, analysis_run_id):
     return tuple(output)
 
 
-def _merge(context, converted):
+def _merge(context, converted, exclude):
     collection = context.collection
     manifest = collection.get("target_manifest", {}).get("expected_resources", ())
     expected = tuple(sorted(item["resource_id"] for item in manifest))
-    required = tuple(chunk.chunk_id for chunk in context.chunks)
+    parser_chunks = tuple(
+        chunk.chunk_id for chunk in context.chunks
+        if any(item["observation_id"] not in exclude for item in chunk.observations)
+    )
+    agent_chunks = tuple(dict.fromkeys(
+        result.chunk_id for result in converted if result.chunk_id not in parser_chunks
+    ))
+    required = (*parser_chunks, *agent_chunks)
     return merge_fact_results(
         converted,
         expected_resource_ids=expected,

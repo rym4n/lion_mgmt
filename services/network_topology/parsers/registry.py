@@ -55,6 +55,8 @@ class ParserRegistry:
         parser_profile: str | None,
         device_type: str | None = None,
     ) -> DeterministicParser:
+        if kind == "raw.action_output":
+            raise ParserError("Raw action output requires the agent stage")
         selection = _Selection(
             kind, data_schema, vendor, platform, os_family, parser_profile
         )

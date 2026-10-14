@@ -46,6 +46,31 @@ KIND_DOMAIN = {
 
 
 @dataclass(frozen=True)
+class CollectionSplit:
+    parser_observation_ids: tuple[str, ...]
+    agent_observation_ids: tuple[str, ...]
+
+
+def split_collection(collection: dict[str, Any]) -> CollectionSplit:
+    """Route all successful observations of a resource together."""
+    parser_ids: list[str] = []
+    agent_ids: list[str] = []
+    for source in collection.get("sources", []):
+        for resource in source.get("resources", []):
+            successful = [
+                item for item in resource.get("result", {}).get("observations", [])
+                if item.get("observation_status") == "success"
+            ]
+            target = (
+                agent_ids
+                if any(item.get("kind") == "raw.action_output" for item in successful)
+                else parser_ids
+            )
+            target.extend(item["observation_id"] for item in successful)
+    return CollectionSplit(tuple(parser_ids), tuple(agent_ids))
+
+
+@dataclass(frozen=True)
 class ObservationChunk:
     """A stable, whole-value chunk for one resource and observation domain."""
 
@@ -144,20 +169,22 @@ def _make_chunk(
 
 
 def parse_collection_candidates(
-    collection: dict[str, Any], registry: ParserRegistry | None = None
+    collection: dict[str, Any], registry: ParserRegistry | None = None,
+    *, exclude_observation_ids: frozenset[str] = frozenset(),
 ) -> tuple[CandidateBatch, ...]:
     """Parse all successful observations; any error fails closed to the caller."""
     selected_registry = registry or ParserRegistry.default()
     chunks = build_collection_chunks(collection)
     parsed: list[tuple[str, CandidateBatch]] = []
     for chunk in chunks:
-        parsed.extend(_parse_chunk(chunk, selected_registry))
+        parsed.extend(_parse_chunk(chunk, selected_registry, exclude_observation_ids))
     parsed.extend(_parse_authority(chunks))
     return _order_candidate_batches(parsed)
 
 
 def _parse_chunk(
-    chunk: ObservationChunk, registry: ParserRegistry
+    chunk: ObservationChunk, registry: ParserRegistry,
+    exclude_observation_ids: frozenset[str],
 ) -> list[tuple[str, CandidateBatch]]:
     results: list[tuple[str, CandidateBatch]] = []
     source_order = {
@@ -168,6 +195,8 @@ def _parse_chunk(
         chunk.observations, key=lambda item: source_order[item["observation_id"]]
     )
     for observation in ordered:
+        if observation["observation_id"] in exclude_observation_ids:
+            continue
         parser_input = ParserInput.from_observations(
             chunk_id=chunk.chunk_id,
             resource_id=chunk.resource_id,
