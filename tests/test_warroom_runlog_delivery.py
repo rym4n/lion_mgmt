@@ -119,6 +119,61 @@ async def test_room_runlog_executor_fallback_respects_tenant():
 
 
 @pytest.mark.asyncio
+async def test_command_center_runtime_event_is_tenant_scoped_and_normalized(monkeypatch):
+    manager = ChatManager.__new__(ChatManager)
+    same_tenant = FakeWebSocket()
+    other_tenant = FakeWebSocket()
+    manager.active_connections = {
+        "same-user": {
+            "session": {
+                "conn": same_tenant,
+                "current_room": None,
+                "tenant_id": "tenant-1",
+            }
+        },
+        "other-user": {
+            "session": {
+                "conn": other_tenant,
+                "current_room": None,
+                "tenant_id": "tenant-2",
+            }
+        },
+    }
+
+    await manager._dispatch_message(
+        {
+            "type": "message",
+            "data": orjson.dumps(
+                {
+                    "type": "command_center_runtime",
+                    "task_id": "task-1",
+                    "tenant_id": "tenant-1",
+        "receiver_id": "same-user",
+                    "stream_id": "digital-employee:task-1",
+                    "event_type": "thinking",
+                    "content": "正在分析",
+                }
+            ),
+        }
+    )
+
+    assert same_tenant.sent == [
+        {
+            "type": "command_center_updated",
+            "runtime": {
+                "task_id": "task-1",
+                "tenant_id": "tenant-1",
+                "receiver_id": "same-user",
+                "stream_id": "digital-employee:task-1",
+                "event_type": "thinking",
+                "content": "正在分析",
+            },
+        }
+    ]
+    assert other_tenant.sent == []
+
+
+@pytest.mark.asyncio
 async def test_legacy_runlog_history_rebuilds_missing_message_index(monkeypatch):
     runlogs = [
         SimpleNamespace(run_id="run-2", ctime="2026-08-24 10:00:00"),

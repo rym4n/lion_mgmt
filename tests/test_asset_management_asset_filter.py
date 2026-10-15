@@ -278,6 +278,66 @@ def test_asset_list_filters_before_paginating_and_preserves_filtered_total(monke
     assert operations == [("order_by", ("-utime",)), "all"]
 
 
+def test_asset_list_filters_reference_by_target_name_and_multiple_values(monkeypatch):
+    source_records = [
+        _AssetRecord(id="source-1", attributes={"owners": ["target-1", "target-2"]}),
+        _AssetRecord(id="source-2", attributes={"owners": ["target-3"]}),
+    ]
+    target_records = [
+        _AssetRecord(id="target-1", name="办公ip地址段", attributes={}),
+        _AssetRecord(id="target-2", name="核心交换机", attributes={}),
+        _AssetRecord(id="target-3", name="数据库", attributes={}),
+    ]
+    source_query = _CiQuery(source_records, [])
+    target_query = _CiQuery(target_records, [])
+    asset_model = SimpleNamespace(id="source-type")
+    target_model = SimpleNamespace(id="target-type")
+
+    async def get_asset_model(tenant, model_ref):
+        assert tenant == "tenant-a"
+        return asset_model if model_ref == "source-type" else target_model
+
+    async def get_reference_labels(_tenant, items, _field_defs):
+        return {item.id: {} for item in items}
+
+    def asset_filter(*args, **kwargs):
+        if kwargs.get("asset_model_id") == "target-type":
+            return target_query
+        return source_query
+
+    ref_field = _field("ref", field_key="owners")
+    ref_field.options = {"multiple": True}
+    ref_field.referenced_asset_model_id = "target-type"
+
+    async def get_fields_with_reference(tenant, model_ref):
+        assert (tenant, model_ref) == ("tenant-a", "source-type")
+        return [ref_field]
+
+    monkeypatch.setattr(views, "get_asset_model_or_404", get_asset_model)
+    monkeypatch.setattr(views, "fields_for_model", get_fields_with_reference)
+    monkeypatch.setattr(views, "reference_labels_for_assets", get_reference_labels)
+    monkeypatch.setattr(views.AssetInstance, "filter", staticmethod(asset_filter))
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+    request = SimpleNamespace(
+        json={
+            "asset_model_id": "source-type",
+            "field_filter": {
+                "field_key": "owners",
+                "operator": "eq",
+                "value": "办公ip地址段",
+            },
+            "page": 1,
+            "size": 20,
+        },
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+
+    payload = asyncio.run(inspect.unwrap(views.asset_list)(request))
+
+    assert payload["total"] == 1
+    assert [item["id"] for item in payload["items"]] == ["source-1"]
+
+
 def test_asset_list_rejects_retired_text_filter(monkeypatch):
     records = [
         _AssetRecord(id="match", attributes={"hostname": "Primary-DB"}),

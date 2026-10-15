@@ -454,6 +454,21 @@ def test_run_uses_command_run_session_and_emits_runtime_callbacks():
         "embedding": None,
     }
     assert [event_type for event_type, _ in runtime_events] == ["thinking", "tool_call", "delta", "delta", "end"]
+    command_center_messages = [
+        message
+        for channel, message in redis.messages
+        if channel == "wr-topic" and message.get("type") == "command_center_runtime"
+    ]
+    assert [message["event_type"] for message in command_center_messages] == [
+        "thinking",
+        "tool_call",
+        "delta",
+        "delta",
+        "end",
+    ]
+    assert command_center_messages[0]["stream_id"] == "digital-employee:task-1"
+    assert command_center_messages[0]["tenant_id"] == "tenant-1"
+    assert command_center_messages[0]["receiver_id"] == "operator-1"
     assert task.result is None
     assert task.saved_update_fields == []
     assert [call[0]["status"] for call in progress_calls] == ["running"]

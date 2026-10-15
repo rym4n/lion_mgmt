@@ -33,6 +33,32 @@ def _receiver_id(task: CommandTask, operator_id: str | None) -> str | None:
     return operator_id or getattr(task, "creator_id", None)
 
 
+async def _publish_command_center_runtime(
+    task: CommandTask, event_type: str, payload: dict, operator_id: str | None
+) -> None:
+    """Publish live runtime data for command-center tasks without a warroom."""
+    if task.room_id:
+        return
+    message = {
+        "type": "command_center_runtime",
+        "task_id": str(task.id),
+        "tenant_id": str(task.tenant_id),
+        "receiver_id": _receiver_id(task, operator_id),
+        "stream_id": _stream_id(task),
+        "event_type": event_type,
+        "content": str(payload.get("content") or payload.get("delta") or ""),
+    }
+    if payload.get("tool_name"):
+        message["tool_name"] = payload["tool_name"]
+    if payload.get("status"):
+        message["status"] = payload["status"]
+    try:
+        client = caches.get("redis_chat").client
+        await client.publish(WR_TOPIC, orjson.dumps(message).decode())
+    except Exception as exc:
+        logger.warning(f"发布指挥中心运行流失败: task_id={task.id}, error={exc}")
+
+
 def _zero_usage() -> dict:
     return {
         "fallback": False,
@@ -307,6 +333,7 @@ async def run(
                         "run_id": getattr(command_run, "run_id", None) or task.run_id,
                         "runtime_event": runtime_event,
                     }
+            await _publish_command_center_runtime(task, event_type, event, operator_id)
             if event_type in {"delta", "end"}:
                 value = event.get("content") or event.get("delta")
                 if event_type == "delta" and value:

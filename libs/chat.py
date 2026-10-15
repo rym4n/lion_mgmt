@@ -471,6 +471,8 @@ class ChatManager:
                 )
             else:
                 should_send = True
+            if tenant_id is not None and str(info.get("tenant_id")) != str(tenant_id):
+                continue
             if not should_send:
                 continue
             if await self._safe_send(info["conn"], payload):
@@ -563,6 +565,24 @@ class ChatManager:
             if msg.get("stream_id"):
                 thinking_data["stream_id"] = msg.get("stream_id")
             message["data"] = orjson.dumps(thinking_data)
+        elif msg.get("type") == "command_center_runtime":
+            runtime = {
+                key: msg[key]
+                for key in (
+                    "task_id",
+                    "tenant_id",
+                    "receiver_id",
+                    "stream_id",
+                    "event_type",
+                    "content",
+                    "tool_name",
+                    "status",
+                )
+                if key in msg
+            }
+            message["data"] = orjson.dumps(
+                {"type": "command_center_updated", "runtime": runtime}
+            )
         elif msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
             # 流式回复，累积内容并直接转发给前端
             stream_id = msg.get("stream_id")
@@ -604,6 +624,14 @@ class ChatManager:
                 await self._broadcast(message["data"].decode(), user_id=receiver_id)
             else:
                 logger.warning(f"AI 消息缺少 receiver_id，跳过投递: {msg_type}")
+        elif msg_type == "command_center_runtime":
+            receiver_id = msg.get("receiver_id")
+            if receiver_id:
+                await self._broadcast(message["data"].decode(), user_id=receiver_id)
+            else:
+                await self._broadcast(
+                    message["data"].decode(), tenant_id=msg.get("tenant_id")
+                )
         else:
             room_id = msg.get("room_id")
             if room_id:
@@ -615,7 +643,9 @@ class ChatManager:
                 )
             else:
                 # room_id 为空时全员广播（如用户在线状态等全局消息）
-                await self._broadcast(message["data"].decode())
+                await self._broadcast(
+                    message["data"].decode(), tenant_id=msg.get("tenant_id")
+                )
 
     async def _flush_events(self):
         # 1. 检查是否有数据需要处理

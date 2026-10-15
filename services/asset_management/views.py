@@ -287,6 +287,29 @@ async def _resolve_asset_directory_filter(tenant: str, field_filter: dict) -> No
     }
 
 
+async def _resolve_asset_reference_filter(tenant: str, field, field_filter: dict) -> None:
+    if field_filter["data_type"] != "ref":
+        return
+    model_ref = getattr(field, "referenced_asset_model_id", None) or getattr(
+        field, "referenced_asset_model_key", None
+    )
+    if not model_ref:
+        return
+    target_model = await get_asset_model_or_404(tenant, model_ref)
+    targets = await AssetInstance.filter(
+        tenant_id=tenant,
+        asset_model_id=target_model.id,
+        deleted=False,
+    ).all()
+    expected = field_filter["value"].casefold()
+    field_filter["resolved_values"] = {
+        str(item.id)
+        for item in targets
+        if expected == str(item.id).casefold()
+        or expected == str(getattr(item, "name", "") or "").casefold()
+    }
+
+
 def _matches_asset_field_filter(value, field_filter: dict) -> bool:
     if value is None:
         return False
@@ -318,7 +341,16 @@ def _matches_asset_field_filter(value, field_filter: dict) -> bool:
         upper = field_filter["upper"]
         return (lower is None or actual >= lower) and (upper is None or actual <= upper)
     if data_type in {"enum", "bool", "ref"}:
-        return _strict_equal(value, field_filter["value"])
+        if data_type != "ref":
+            return _strict_equal(value, field_filter["value"])
+        values = value if isinstance(value, list) else [value]
+        resolved = field_filter.get("resolved_values")
+        return any(
+            str(item) in resolved
+            if resolved is not None
+            else _strict_equal(item, field_filter["value"])
+            for item in values
+        )
     if data_type == "tag":
         if not isinstance(value, list):
             return False
@@ -828,6 +860,7 @@ async def asset_list(request: Request):
             raise CustomError(ErrorCode.PARAM_ERROR)
         field_filter = _normalize_asset_field_filter(field, payload)
         await _resolve_asset_directory_filter(tenant, field_filter)
+        await _resolve_asset_reference_filter(tenant, field, field_filter)
         matched_items = []
         for item in await queryset.order_by("-utime").all():
             value = (item.attributes or {}).get(field_filter["field_key"])
