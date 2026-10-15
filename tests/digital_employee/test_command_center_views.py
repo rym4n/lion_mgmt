@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import inspect
+import logging
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -12,6 +13,138 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from services.command_center import views  # noqa: E402
+
+
+def test_task_list_run_lookup_selects_usage_fields_only(monkeypatch, caplog):
+    only_calls = []
+
+    class Query:
+        def only(self, *fields):
+            only_calls.append(fields)
+            return self
+
+        async def all(self):
+            return [
+                SimpleNamespace(
+                    task_id="task-1",
+                    usage={
+                        "input_tokens": 7,
+                        "output_tokens": 3,
+                        "total_tokens": 10,
+                        "model_calls": 1,
+                    },
+                )
+            ]
+
+    class RunModel:
+        @classmethod
+        def filter(cls, **kwargs):
+            assert kwargs == {"tenant_id": "tenant-1", "task_id__in": ["task-1"], "deleted": False}
+            return Query()
+
+    monkeypatch.setattr(views, "CommandTaskRun", RunModel)
+    task = SimpleNamespace(id="task-1", json={"assigned_agent_id": None, "creator_id": None})
+
+    with caplog.at_level(logging.INFO, logger=views.logger.name):
+        out = asyncio.run(views._resolve_task_actors([task], "tenant-1"))
+
+    assert only_calls == [("task_id", "usage")]
+    assert out["task-1"]["token_usage"]["total_tokens"] == 10
+    assert any(
+        "run_fetch_ms=" in record.message and "usage_ms=" in record.message
+        for record in caplog.records
+    )
+
+
+def test_task_detail_run_lookup_selects_summary_fields_only(monkeypatch):
+    selected_fields = []
+
+    class Query:
+        def only(self, *fields):
+            selected_fields.append(fields)
+            return self
+
+        def order_by(self, *_fields):
+            return self
+
+        def exclude(self, **_filters):
+            return self
+
+        async def all(self):
+            return []
+
+    class TaskModel:
+        @classmethod
+        async def get_or_none(cls, **filters):
+            assert filters == {"id": "task-1", "tenant_id": "tenant-1", "deleted": False}
+            return SimpleNamespace(id="task-1", status="completed", progress=100, result="done")
+
+    class RunModel:
+        @classmethod
+        def filter(cls, **filters):
+            assert filters == {"task_id": "task-1", "tenant_id": "tenant-1", "deleted": False}
+            return Query()
+
+    class ApprovalModel:
+        @classmethod
+        def filter(cls, **_filters):
+            return Query()
+
+    monkeypatch.setattr(views, "CommandTask", TaskModel)
+    monkeypatch.setattr(views, "CommandTaskRun", RunModel)
+    monkeypatch.setattr(views, "CommandApproval", ApprovalModel)
+    monkeypatch.setattr(views, "CommandTaskEvent", ApprovalModel)
+    async def fake_actors(*_args):
+        return {}
+
+    monkeypatch.setattr(views, "_resolve_task_actors", fake_actors)
+    monkeypatch.setattr(views, "_task_detail_json", lambda task, _actor: {"id": task.id})
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+    request = SimpleNamespace(json={"id": "task-1"}, ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}))
+
+    out = asyncio.run(inspect.unwrap(views.task_detail)(request))
+
+    assert selected_fields == [
+        ("task_id", "usage", "status", "error", "metadata", "started_at", "finished_at", "run_id")
+    ]
+    assert out["task"] == {"id": "task-1"}
+    assert out["summary"]["status"] == "completed"
+
+
+def test_task_list_logs_query_and_response_phase_timings(monkeypatch, caplog):
+    task = SimpleNamespace(id="task-1")
+
+    async def fake_list_tasks(tenant_id, filters):
+        assert tenant_id == "tenant-1"
+        assert filters == {"page": 1, "size": 50}
+        return [task], 1
+
+    async def fake_resolve_task_actors(tasks, tenant_id):
+        assert tasks == [task]
+        assert tenant_id == "tenant-1"
+        return {"task-1": {}}
+
+    monkeypatch.setattr(views, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(views, "_resolve_task_actors", fake_resolve_task_actors)
+    monkeypatch.setattr(views, "_task_detail_json", lambda task, actor: {"id": task.id})
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+    request = SimpleNamespace(
+        json={"page": 1, "size": 50},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+
+    with caplog.at_level(logging.INFO, logger=views.logger.name):
+        out = asyncio.run(inspect.unwrap(views.query_tasks)(request))
+
+    assert out["tasks"] == [{"id": "task-1"}]
+    assert any(
+        "command_center task list timings" in record.message
+        and all(
+            field in record.message
+            for field in ("list_ms=", "actor_ms=", "dto_ms=", "response_ms=", "total_ms=")
+        )
+        for record in caplog.records
+    )
 
 
 def test_task_read_dto_summarizes_payload_and_result_without_raw_values():
@@ -414,6 +547,10 @@ def test_task_stats_aggregates_tenant_scoped_counts(monkeypatch):
             self.value = value
             self.filters = []
 
+        def only(self, *fields):
+            selected_fields.append(fields)
+            return self
+
         async def all(self):
             return self.value
 
@@ -421,6 +558,7 @@ def test_task_stats_aggregates_tenant_scoped_counts(monkeypatch):
             return self.value
 
     run_filters = []
+    selected_fields = []
     task_filters = []
     approval_filters = []
 
@@ -467,6 +605,7 @@ def test_task_stats_aggregates_tenant_scoped_counts(monkeypatch):
     assert out["risks"] == {"pending_approvals": 3, "failed_tasks": 1}
     assert run_filters[0]["tenant_id"] == "tenant-1"
     assert run_filters[0]["deleted"] is False
+    assert selected_fields == [("usage",)]
     assert task_filters[0]["deleted"] is False
     assert approval_filters[0] == {"tenant_id": "tenant-1", "deleted": False, "status": "pending"}
 

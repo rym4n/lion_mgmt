@@ -339,7 +339,7 @@ def test_all_runlog_consumers_keep_domain_permission_and_tenant_detail_scope():
 
 
 def test_batch_entrypoints_offer_summary_only_responses():
-    assert "paginated_runlog_summaries" in inspect.getsource(timed_views.get_run_log)
+    assert "paginated_timed_runlog_summaries" in inspect.getsource(timed_views.get_run_log)
     assert "paginated_runlog_summaries" in inspect.getsource(
         workflow_views.get_version_runlog
     )

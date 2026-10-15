@@ -14,7 +14,7 @@ from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.runlog_pagination import paginated_runlog_summaries, runlog_node_page
+from libs.runlog_pagination import runlog_node_page
 from libs.security.authorization import (
     account_has_permission,
     check_action_execute_permission,
@@ -32,6 +32,7 @@ from models import (
 )
 from services.workflow.views import get_playbook_input
 from services.timed.cron_expression import is_valid_cron_expression
+from services.timed.runlog_queries import paginated_timed_runlog_summaries
 from settings import TASK_TOPIC
 
 timed_bp = Blueprint("timed", url_prefix="/timed")
@@ -1345,6 +1346,8 @@ async def get_run_log(request):
 
     condition = Q(timer_id=timed_id, deleted=False, tenant_id=tenant_id)
 
+    start_dt = None
+    end_dt = None
     if start_time:
         start_dt = datetime.datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
         condition &= Q(start_time__gte=start_dt)
@@ -1355,7 +1358,17 @@ async def get_run_log(request):
         condition &= Q(status=int(status))
 
     if req_json.get("summary_only"):
-        total, run_logs = await paginated_runlog_summaries(Runlog, condition, page, size)
+        total, run_logs = await paginated_timed_runlog_summaries(
+            Runlog,
+            condition,
+            tenant_id=tenant_id,
+            timer_id=timed_id,
+            page=page,
+            size=size,
+            start_time=start_dt,
+            end_time=end_dt,
+            status=status,
+        )
     else:
         total, run_logs = await paginated_runlog_groups(Runlog, condition, page, size)
 

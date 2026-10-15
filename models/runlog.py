@@ -95,6 +95,7 @@ class Runlog(BaseModel):
         indexes = [
             ("playbook_name", "run_id", "status"),
             ("tenant_id", "run_id", "ctime", "id"),
+            ("tenant_id", "timer_id", "deleted", "run_id", "start_time", "ctime"),
             (
                 "tenant_id",
                 "event_id",

@@ -3,9 +3,11 @@ import base64
 import binascii
 from datetime import datetime, time
 import json
+import logging
 import mimetypes
 import os
 import re
+import time as time_module
 import uuid
 from urllib.parse import quote
 
@@ -48,6 +50,7 @@ from .summary import aggregate_usage, build_task_summary, humanize_event, normal
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
 __all__ = ["command_bp"]
+logger = logging.getLogger(__name__)
 
 TASK_STATUS_ENUM = [
     "pending_dispatch",
@@ -586,9 +589,11 @@ async def _resolve_task_actors(tasks: list[CommandTask], tenant_id: str) -> dict
     from models.digital_employee import DigitalEmployeeRole
     from models.user import Account
 
+    started = time_module.perf_counter()
     agent_ids = {t.json.get("assigned_agent_id") for t in tasks if t.json.get("assigned_agent_id")}
     creator_ids = {t.json.get("creator_id") for t in tasks if t.json.get("creator_id")}
 
+    actor_query_started = time_module.perf_counter()
     agents_by_id: dict[str, CommandAgent] = {}
     if agent_ids:
         agents = await CommandAgent.filter(tenant_id=tenant_id, id__in=list(agent_ids)).all()
@@ -604,17 +609,29 @@ async def _resolve_task_actors(tasks: list[CommandTask], tenant_id: str) -> dict
     if creator_ids:
         accounts = await Account.filter(id__in=list(creator_ids)).all()
         creators_by_id = {account.id: account for account in accounts}
+    actor_query_ms = (time_module.perf_counter() - actor_query_started) * 1000
 
     # 批量聚合每个任务的 token 消耗，避免前端逐个查详情
     usage_by_task: dict[str, dict] = {}
     task_ids = [task.id for task in tasks]
+    run_fetch_started = time_module.perf_counter()
     if task_ids:
-        runs = await CommandTaskRun.filter(tenant_id=tenant_id, task_id__in=task_ids, deleted=False).all()
-        runs_by_task: dict[str, list] = {}
-        for run in runs:
-            runs_by_task.setdefault(run.task_id, []).append(run)
-        for task_id, task_runs in runs_by_task.items():
-            usage_by_task[task_id] = aggregate_usage(task_runs)
+        runs = (
+            await CommandTaskRun.filter(tenant_id=tenant_id, task_id__in=task_ids, deleted=False)
+            .only("task_id", "usage")
+            .all()
+        )
+    else:
+        runs = []
+    run_fetch_ms = (time_module.perf_counter() - run_fetch_started) * 1000
+
+    usage_started = time_module.perf_counter()
+    runs_by_task: dict[str, list] = {}
+    for run in runs:
+        runs_by_task.setdefault(run.task_id, []).append(run)
+    for task_id, task_runs in runs_by_task.items():
+        usage_by_task[task_id] = aggregate_usage(task_runs)
+    usage_ms = (time_module.perf_counter() - usage_started) * 1000
 
     actors: dict[str, dict] = {}
     for task in tasks:
@@ -628,6 +645,16 @@ async def _resolve_task_actors(tasks: list[CommandTask], tenant_id: str) -> dict
             "creator_display_name": (creator.display_name or creator.username) if creator else None,
             "token_usage": usage_by_task.get(task.id, zero_usage()),
         }
+    logger.info(
+        "command_center task actor timings tenant_id=%s task_count=%s run_count=%s actor_ms=%.2f run_fetch_ms=%.2f usage_ms=%.2f total_ms=%.2f",
+        tenant_id,
+        len(tasks),
+        len(runs),
+        actor_query_ms,
+        run_fetch_ms,
+        usage_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
     return actors
 
 
@@ -1093,16 +1120,42 @@ async def create_task(request: Request):
 async def query_tasks(request: Request):
     data = _require_json(request)
     tenant_id = request.ctx.session.get("tenant_id")
+    started = time_module.perf_counter()
+
+    task_query_started = time_module.perf_counter()
     tasks, total = await list_tasks(tenant_id, data)
+    task_query_ms = (time_module.perf_counter() - task_query_started) * 1000
+
+    actor_query_started = time_module.perf_counter()
     actors = await _resolve_task_actors(tasks, tenant_id)
-    return response_ok(
-        {
-            "total": total,
-            "page": data.get("page", 1),
-            "size": data.get("size", 20),
-            "tasks": [_task_detail_json(task, actors.get(task.id)) for task in tasks],
-        }
+    actor_query_ms = (time_module.perf_counter() - actor_query_started) * 1000
+
+    dto_started = time_module.perf_counter()
+    payload = {
+        "total": total,
+        "page": data.get("page", 1),
+        "size": data.get("size", 20),
+        "tasks": [_task_detail_json(task, actors.get(task.id)) for task in tasks],
+    }
+    dto_ms = (time_module.perf_counter() - dto_started) * 1000
+
+    response_started = time_module.perf_counter()
+    result = response_ok(payload)
+    response_ms = (time_module.perf_counter() - response_started) * 1000
+    logger.info(
+        "command_center task list timings tenant_id=%s page=%s size=%s task_count=%s total=%s list_ms=%.2f actor_ms=%.2f dto_ms=%.2f response_ms=%.2f total_ms=%.2f",
+        tenant_id,
+        data.get("page", 1),
+        data.get("size", 20),
+        len(tasks),
+        total,
+        task_query_ms,
+        actor_query_ms,
+        dto_ms,
+        response_ms,
+        (time_module.perf_counter() - started) * 1000,
     )
+    return result
 
 
 @command_bp.post("/tasks/detail")
@@ -1150,7 +1203,12 @@ async def task_detail(request: Request):
     task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
     if not task:
         raise CustomError(ErrorCode.NOT_FOUND)
-    runs = await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
+    runs = (
+        await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False)
+        .only("task_id", "usage", "status", "error", "metadata", "started_at", "finished_at", "run_id")
+        .order_by("-ctime")
+        .all()
+    )
     pending_approvals = await CommandApproval.filter(
         task_id=task.id,
         tenant_id=tenant_id,
@@ -1432,7 +1490,7 @@ async def task_runlog_detail(request: Request):
 async def task_stats(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
     today_start = datetime.combine(datetime.now(TZ).date(), time.min, tzinfo=TZ)
-    runs = await CommandTaskRun.filter(tenant_id=tenant_id, deleted=False, ctime__gte=today_start).all()
+    runs = await CommandTaskRun.filter(tenant_id=tenant_id, deleted=False, ctime__gte=today_start).only("usage").all()
     running = await CommandTask.filter(tenant_id=tenant_id, deleted=False, status__in=["running", "dispatched", "pending_approval"]).count()
     pending_approvals = await CommandApproval.filter(tenant_id=tenant_id, deleted=False, status=COMMAND_APPROVAL_STATUS_PENDING).count()
     failed_tasks = await CommandTask.filter(tenant_id=tenant_id, deleted=False, status="failed").count()
