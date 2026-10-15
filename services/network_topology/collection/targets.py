@@ -26,7 +26,6 @@ class Target:
 
 class TargetRepository(Protocol):
     async def resource(self, tenant_id, app_name, resource_id) -> dict | None: ...
-    async def all_resources(self, tenant_id, app_name) -> list[dict]: ...
     async def latest_tool(self, tenant_id, app_name) -> tuple | None: ...
     async def tool(self, tenant_id, app_name, version) -> tuple | None: ...
     async def actions(self, tenant_id, app_name, version) -> list[dict]: ...
@@ -41,11 +40,6 @@ class OrmTargetRepository:
         row = await ToolResources.filter(id=resource_id, tenant_id=tenant_id, tool_name=app_name,
                                          deleted=False, internal=False).first()
         return self._resource(row) if row else None
-
-    async def all_resources(self, tenant_id, app_name):
-        rows = await ToolResources.filter(tenant_id=tenant_id, tool_name=app_name,
-                                          deleted=False, internal=False).order_by("id")
-        return [self._resource(row) for row in rows]
 
     async def latest_tool(self, tenant_id, app_name):
         row = await Tool.filter(tenant_id=tenant_id, name=app_name, maintain=False, deleted=False).order_by("-ctime").first()
@@ -64,8 +58,6 @@ async def freeze_targets(plan, items, *, repository=None) -> list[Target]:
     repo = repository or OrmTargetRepository()
     targets = []
     for item in items:
-        if not item.enabled:
-            continue
         tool = await (repo.tool(plan.tenant_id, item.app_name, item.app_version) if item.app_version
                       else repo.latest_tool(plan.tenant_id, item.app_name))
         if tool is None:
@@ -81,15 +73,12 @@ async def freeze_targets(plan, items, *, repository=None) -> list[Target]:
             resource = await repo.resource(plan.tenant_id, item.app_name, rid)
             if resource is None:
                 raise CollectionError("RESOURCE_NOT_FOUND", 409, str(reference.get("resource_name") or rid))
-            selected[rid] = (resource, reference.get("asset_instance_id"))
-        if item.include_new_resources:
-            for resource in await repo.all_resources(plan.tenant_id, item.app_name):
-                selected.setdefault(str(resource["id"]), (resource, None))
-        for rid, (resource, asset_id) in selected.items():
+            selected[rid] = resource
+        for rid, resource in selected.items():
             config = resource.get("resources_json") or {}
             host = next((config[key].get("value") for key in ("host", "ip")
                          if isinstance(config.get(key), dict) and config[key].get("value")), None)
             targets.append(Target(str(item.id), item.app_name, version, main, item.action_func,
                                   action.get("name") or item.action_func, deepcopy(item.action_input or {}),
-                                  rid, resource["name"], host, asset_id))
+                                  rid, resource["name"], host, None))
     return targets

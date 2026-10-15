@@ -84,7 +84,7 @@ class OrmRunRepository:
         if plan is None:
             return []
         return await TopologyCollectionItem.filter(
-            tenant_id=plan.tenant_id, plan_id=plan_id, deleted=False, enabled=True
+            tenant_id=plan.tenant_id, plan_id=plan_id, deleted=False
         ).order_by("order", "id")
 
     async def active_run(self, tenant_id, topology_id):

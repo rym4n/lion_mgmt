@@ -49,10 +49,10 @@ async def test_freeze_does_not_shrink_missing_resource_scope():
 
 
 @pytest.mark.asyncio
-async def test_freeze_latest_tool_expansion_dedup_and_host():
+async def test_freeze_uses_only_selected_resources_even_for_legacy_items():
     repo = FakeTargetRepository(resources={"r1":{"id":"r1", "name":"one", "resources_json":{"host":{"value":"10.0.0.1"}}}, "r2":{"id":"r2", "name":"two", "resources_json":{"ip":{"value":"10.0.0.2"}}}}, tools={"huawei_switch":("v", "main.py")}, actions={("huawei_switch","v"):[{"func":"collect","name":"采集"}]})
-    frozen = await targets_module.freeze_targets(plan("p"), [item(include_new_resources=True), item(enabled=False)], repository=repo)
-    assert [(t.resource_id, t.host, t.asset_instance_id) for t in frozen] == [("r1","10.0.0.1","a1"), ("r2","10.0.0.2",None)]
+    frozen = await targets_module.freeze_targets(plan("p"), [item(include_new_resources=True, enabled=False)], repository=repo)
+    assert [(t.resource_id, t.host, t.asset_instance_id) for t in frozen] == [("r1","10.0.0.1",None)]
     assert all(t.app_version == "v" and t.main == "main.py" for t in frozen)
 
 

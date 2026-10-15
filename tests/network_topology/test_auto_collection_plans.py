@@ -10,13 +10,42 @@ def payload(**kw):
     data = dict(expected_revision=0, enabled=True, schedule_cron='0 0 2 * * *', concurrency=8,
                 per_item_timeout_seconds=300, run_timeout_seconds=3600, notify_enabled=False,
                 notify_config=None, items=[dict(app_name='switch', action_func='collect', action_input={},
-                resources=[dict(resource_id='r1', asset_instance_id=None)])])
+                resources=[dict(resource_id='r1')])])
     data.update(kw)
     return data
 
 
 def test_valid():
-    assert plans.validate_plan_payload(payload())['items'][0]['resources'] == [{'resource_id':'r1','asset_instance_id':None}]
+    item = plans.validate_plan_payload(payload())['items'][0]
+    assert item['resources'] == [{'resource_id': 'r1'}]
+    assert item['include_new_resources'] is False
+    assert item['enabled'] is True
+
+
+def test_legacy_management_fields_do_not_change_selected_resources():
+    raw = payload()['items'][0]
+    raw.update(include_new_resources=True, enabled=False,
+               resources=[{'resource_id': 'r1', 'asset_instance_id': 'a1'}])
+    item = plans.validate_plan_payload(payload(items=[raw]))['items'][0]
+    assert item['resources'] == [{'resource_id': 'r1'}]
+    assert item['include_new_resources'] is False
+    assert item['enabled'] is True
+
+
+def test_item_requires_selected_resource_even_with_legacy_expansion_flag():
+    raw = payload()['items'][0]
+    raw.update(resources=[], include_new_resources=True)
+    with pytest.raises(CollectionError) as exc:
+        plans.validate_plan_payload(payload(items=[raw]))
+    assert exc.value.code == 'PLAN_INVALID'
+    assert exc.value.message == '采集项至少选择一台资源'
+
+
+def test_scheduled_collection_requires_an_item():
+    with pytest.raises(CollectionError) as exc:
+        plans.validate_plan_payload(payload(items=[]))
+    assert exc.value.code == 'PLAN_INVALID'
+    assert exc.value.message == '定时采集至少需要一个采集项'
 
 
 @pytest.mark.parametrize('kw', [dict(concurrency=0), dict(concurrency=True), dict(run_timeout_seconds=7200),
@@ -28,11 +57,10 @@ def test_invalid(kw):
     assert exc.value.code == 'PLAN_INVALID'
 
 
-def test_duplicate_and_conflicting_links():
+def test_duplicate_items():
     item = payload()['items'][0]
-    for items in ([item,item], [item,{**item, 'action_func':'other','resources':[dict(resource_id='r1',asset_instance_id='a')]}]):
-        with pytest.raises(CollectionError):
-            plans.validate_plan_payload(payload(items=items))
+    with pytest.raises(CollectionError):
+        plans.validate_plan_payload(payload(items=[item, item]))
 
 
 class Timer(SimpleNamespace):
@@ -133,7 +161,7 @@ def persistence(monkeypatch):
     stores = {}
     for name, module in [('NetworkTopology', models), ('TopologyCollectionPlan', plans),
                          ('TopologyCollectionItem', plans), ('ToolAction', plans),
-                         ('ToolResources', plans), ('AssetInstance', plans)]:
+                         ('ToolResources', plans)]:
         rows = []
         stores[name] = rows
         class Store:
@@ -166,12 +194,16 @@ async def test_persistence_cas_replacement_and_tenant_isolation(persistence):
     saved = await plans.save_plan('t', 'top', payload(), account_id='acct')
     assert saved['plan']['revision'] == 1
     assert len(saved['items']) == 1
+    assert saved['items'][0]['resources'] == [{'resource_id': 'r1'}]
+    assert 'enabled' not in saved['items'][0]
+    assert 'include_new_resources' not in saved['items'][0]
     with pytest.raises(CollectionError) as exc:
         await plans.save_plan('t', 'top', payload(), account_id='acct')
     assert exc.value.code == 'PLAN_REVISION_CONFLICT'
     saved = await plans.save_plan('t', 'top', payload(expected_revision=1), account_id='acct')
     assert saved['plan']['revision'] == 2
     assert persistence['TopologyCollectionItem'][0].deleted is True
+    assert saved['items'][0]['resources'] == [{'resource_id': 'r1'}]
     assert (await plans.get_plan('other', 'top')) == {'plan': None, 'items': []}
     assert plans.sync_timer.await_count == 2
 
@@ -183,6 +215,25 @@ async def test_reference_validation_before_writes(persistence):
         await plans.save_plan('t', 'top', payload(), account_id='acct')
     assert exc.value.code == 'PLAN_INVALID'
     assert persistence['TopologyCollectionPlan'] == []
+
+
+@pytest.mark.asyncio
+async def test_save_can_delete_all_collection_items(persistence):
+    await plans.save_plan('t', 'top', payload(), account_id='acct')
+    saved = await plans.save_plan('t', 'top', payload(expected_revision=1, enabled=False, items=[]), account_id='acct')
+    assert saved['items'] == []
+    assert all(row.deleted for row in persistence['TopologyCollectionItem'])
+
+
+@pytest.mark.asyncio
+async def test_get_hides_legacy_asset_and_item_flags(persistence):
+    saved = await plans.save_plan('t', 'top', payload(), account_id='acct')
+    row = persistence['TopologyCollectionItem'][0]
+    row.resources = [{'resource_id': 'r1', 'asset_instance_id': 'legacy-asset'}]
+    row.include_new_resources = True
+    row.enabled = False
+    result = await plans.get_plan('t', 'top')
+    assert result['items'] == saved['items']
 
 
 @pytest.fixture(autouse=True)

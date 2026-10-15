@@ -12,7 +12,7 @@ from tortoise.expressions import RawSQL
 from tortoise.transactions import in_transaction
 from core.maintenance import DEFAULT_TENANT_ID
 from libs.kafka import aproduce
-from models import AssetInstance, Playbook, PlaybookVersion, Timed, ToolAction, ToolResources
+from models import Playbook, PlaybookVersion, Timed, ToolAction, ToolResources
 from models.network_topology_v2 import (
     TopologyCollectionItem,
     TopologyCollectionPlan,
@@ -30,7 +30,7 @@ PLAN_FIELDS = ('id', 'topology_id', 'enabled', 'schedule_cron', 'concurrency',
                'per_item_timeout_seconds', 'run_timeout_seconds', 'notify_enabled',
                'notify_config', 'timed_id', 'last_run_id', 'consecutive_failures', 'revision')
 ITEM_FIELDS = ('id', 'app_name', 'app_version', 'action_func', 'action_input', 'resources',
-               'include_new_resources', 'enabled', 'order')
+               'order')
 
 
 def _invalid(reason):
@@ -79,7 +79,7 @@ def validate_plan_payload(payload: dict) -> dict:
     raw_items = payload.get('items', [])
     if not isinstance(raw_items, list):
         raise _invalid('采集项必须是数组')
-    items, seen, links = [], set(), {}
+    items, seen, selected_ids = [], set(), set()
     for index, raw in enumerate(raw_items):
         if not isinstance(raw, dict):
             raise _invalid('采集项必须是对象')
@@ -104,31 +104,27 @@ def validate_plan_payload(payload: dict) -> dict:
         for entry in resources:
             if not isinstance(entry, dict):
                 raise _invalid('资源必须是对象')
-            rid, asset = entry.get('resource_id'), entry.get('asset_instance_id')
+            rid = entry.get('resource_id')
             if not isinstance(rid, str) or not rid.strip() or len(rid.strip()) > 36:
                 raise _invalid('资源 ID 非法')
             rid = rid.strip()
-            if asset is not None and (not isinstance(asset, str) or not asset.strip() or len(asset.strip()) > 36):
-                raise _invalid('资产 ID 非法')
-            asset = asset.strip() if asset is not None else None
-            if rid in links and links[rid] != asset:
-                raise _invalid('同一资源关联了不同资产')
-            links[rid] = asset
+            selected_ids.add(rid)
             if rid not in item_seen:
-                normalized.append(dict(resource_id=rid, asset_instance_id=asset))
+                normalized.append(dict(resource_id=rid))
                 item_seen.add(rid)
-        include = _boolean(raw, 'include_new_resources')
-        if not normalized and not include:
+        if not normalized:
             raise _invalid('采集项至少选择一台资源')
         version = raw.get('app_version')
         if version is not None and (not isinstance(version, str) or len(version) > 50):
             raise _invalid('应用版本非法')
         items.append(dict(app_name=app, app_version=version or None, action_func=func,
                           action_input=deepcopy(action_input), resources=normalized,
-                          include_new_resources=include, enabled=_boolean(raw, 'enabled', True),
+                          include_new_resources=False, enabled=True,
                           order=_integer(raw.get('order', index), 'order', 0, 2**31-1)))
-    if len(links) > MAX_RESOURCES:
+    if len(selected_ids) > MAX_RESOURCES:
         raise _invalid(f'采集设备总数不能超过 {MAX_RESOURCES}')
+    if data['enabled'] and not items:
+        raise _invalid('定时采集至少需要一个采集项')
     data['items'] = items
     return data
 
@@ -147,7 +143,9 @@ async def get_plan(tenant_id: str, topology_id: str) -> dict:
         return {'plan': None, 'items': []}
     items = await TopologyCollectionItem.filter(tenant_id=tenant_id, plan_id=plan.id, deleted=False).order_by('order', 'id')
     return {'plan': {key: deepcopy(getattr(plan, key)) for key in PLAN_FIELDS},
-            'items': [{key: deepcopy(getattr(item, key)) for key in ITEM_FIELDS} for item in items]}
+            'items': [{**{key: deepcopy(getattr(item, key)) for key in ITEM_FIELDS if key != 'resources'},
+                       'resources': [{'resource_id': str(link['resource_id'])}
+                                     for link in item.resources or []]} for item in items]}
 
 
 async def collection_summaries(tenant_id: str, topology_ids: list[str]) -> dict[str, dict]:
@@ -160,15 +158,15 @@ async def collection_summaries(tenant_id: str, topology_ids: list[str]) -> dict[
         topology_id__in=topology_ids,
         deleted=False,
     )
-    # Collection items have no ORM relation to plans. Annotate their enabled
-    # count in the same plan query so list pages stay at two database queries.
+    # Collection items have no ORM relation to plans. Count configured items
+    # in the same plan query so list pages stay at two database queries.
     try:
         plan_query = plan_query.annotate(
             enabled_item_count=RawSQL(
                 '(SELECT COUNT(*) FROM "network_topology_collection_item" AS item '
                 'WHERE item."plan_id" = "network_topology_collection_plan"."id" '
                 'AND item."tenant_id" = "network_topology_collection_plan"."tenant_id" '
-                'AND item."deleted" = FALSE AND item."enabled" = TRUE)'
+                'AND item."deleted" = FALSE)'
             )
         )
     except AttributeError:
@@ -196,7 +194,7 @@ async def collection_summaries(tenant_id: str, topology_ids: list[str]) -> dict[
             bool(enabled_item_count)
             if enabled_item_count is not None
             else
-            any(bool(getattr(item, "enabled", False)) for item in items)
+            bool(items)
             if items is not None
             else bool(getattr(plan, "enabled", False))
         )
@@ -247,8 +245,6 @@ async def save_plan(tenant_id: str, topology_id: str, payload: dict, *, account_
             for resource in item['resources']:
                 if not await ToolResources.filter(id=resource['resource_id'], tenant_id=tenant_id, deleted=False, tool_name=item['app_name'], internal=False).using_db(db).exists():
                     raise _invalid('应用资源不存在或不可用')
-                if resource['asset_instance_id'] and not await AssetInstance.filter(id=resource['asset_instance_id'], tenant_id=tenant_id, deleted=False).using_db(db).exists():
-                    raise _invalid('关联资产不存在')
         if data['enabled']:
             pb, pv = await builtin_playbook()
             if pb is None or pv is None:
