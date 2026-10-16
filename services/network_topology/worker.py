@@ -13,6 +13,7 @@ import logging
 import signal
 import socket
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol
@@ -59,6 +60,8 @@ class WakeupSource(Protocol):
 class RedisWakeupSource:
     def __init__(self, cache=None):
         self.cache = cache
+        self._pubsub = None
+        self._pubsub_lock = asyncio.Lock()
 
     async def wait(self, timeout: float, stop_event: asyncio.Event) -> None:
         if stop_event.is_set():
@@ -68,19 +71,52 @@ class RedisWakeupSource:
         except asyncio.TimeoutError:
             return
         except asyncio.CancelledError:
+            await self._close_pubsub()
             raise
         except Exception as exc:
+            await self._close_pubsub()
             LOGGER.warning("topology worker Redis wake-up unavailable: %s", type(exc).__name__)
             await _wait_for_stop(stop_event, timeout)
 
     async def _wait_for_message(self, timeout):
-        cache = self.cache or caches.get("redis_mgmt")
-        async with cache.client.pubsub() as pubsub:
-            await pubsub.subscribe(WAKEUP_CHANNEL)
-            await asyncio.wait_for(
-                pubsub.get_message(ignore_subscribe_messages=True, timeout=timeout),
-                timeout=timeout,
-            )
+        pubsub = await self._get_pubsub()
+        await asyncio.wait_for(
+            pubsub.get_message(ignore_subscribe_messages=True, timeout=timeout),
+            timeout=timeout,
+        )
+
+    async def _get_pubsub(self):
+        if self._pubsub is not None:
+            return self._pubsub
+        async with self._pubsub_lock:
+            if self._pubsub is not None:
+                return self._pubsub
+            cache = self.cache or caches.get("redis_mgmt")
+            pubsub = cache.client.pubsub()
+            try:
+                await pubsub.subscribe(WAKEUP_CHANNEL)
+                # ``subscribe`` leaves its confirmation response queued. Consume
+                # it before polling, otherwise every wait returns immediately.
+                await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=1
+                )
+            except BaseException:
+                with suppress(Exception):
+                    await pubsub.aclose()
+                raise
+            self._pubsub = pubsub
+            return pubsub
+
+    async def _close_pubsub(self) -> None:
+        async with self._pubsub_lock:
+            pubsub = self._pubsub
+            self._pubsub = None
+        if pubsub is not None:
+            with suppress(Exception):
+                await pubsub.aclose()
+
+    async def aclose(self) -> None:
+        await self._close_pubsub()
 
 
 class PollingWakeupSource:
@@ -135,8 +171,13 @@ class TopologyAnalysisWorker:
 
     async def shutdown(self) -> None:
         self.stop_event.set()
-        if self.active_lease is not None:
-            await leases.release_lease(self.active_lease, repository=self.leases)
+        try:
+            close_wakeup = getattr(self.wakeup, "aclose", None)
+            if close_wakeup is not None:
+                await close_wakeup()
+        finally:
+            if self.active_lease is not None:
+                await leases.release_lease(self.active_lease, repository=self.leases)
 
     async def _process(self, claimed: leases.ClaimedRun) -> None:
         self.active_lease = claimed.identity
