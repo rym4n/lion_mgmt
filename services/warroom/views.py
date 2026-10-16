@@ -23,7 +23,7 @@ from models import Events, Runlog, Tool, ToolAction
 from models.user import Account
 from models.warroom import Message, MessageAccount, Room
 from libs.utils import runlog_list
-from settings import CACHE, TASK_TOPIC, WR_TOPIC
+from settings import TASK_TOPIC, WR_TOPIC
 
 warroom_bp = Blueprint("warroom", url_prefix="/warroom")
 __all__ = ["warroom_bp"]
@@ -1608,7 +1608,6 @@ async def send_message(request):
         "timestamp": str(message.ctime),
         "room_id": room.id,
     }
-    caches.set_config(CACHE)
     await caches.get("redis_chat").client.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
     return response_ok("发送成功")

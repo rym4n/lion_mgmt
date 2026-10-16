@@ -133,8 +133,6 @@ async def _handle_streamable_http(request: Request):
                     return response.text("Accepted", status=202)
             except Exception as e:
                 logger.error(f"MCP Redis publish: {e}")
-            finally:
-                await redis_client.close()
 
         return response.json(
             {"jsonrpc": "2.0", "error": {"code": -32000, "message": "Session not found"}, "id": body.get("id")},
@@ -229,8 +227,6 @@ async def _handle_sse_mode(request: Request):
             )
         except Exception as e:
             logger.warning(f"MCP Redis set session key failed: {e}")
-        finally:
-            await redis_client.close()
 
     endpoint_url = f"/api/mcp/messages?session_id={sid_hex}"
 
@@ -368,7 +364,5 @@ async def handle_messages(request: Request):
                 return response.text("Accepted", status=202)
         except Exception as e:
             logger.error(f"MCP Redis publish: {e}")
-        finally:
-            await redis_client.close()
 
     return response.text("Session not found", status=404)
