@@ -351,6 +351,11 @@ COMMAND_TASK_SWEEP_INTERVAL_SECONDS = int(
     os.environ.get("RY_COMMAND_TASK_SWEEP_INTERVAL_SECONDS") or 60
 )
 
+# Dashboard 物化视图刷新间隔。刷新在后台任务执行，不阻塞 Dashboard 请求。
+DASHBOARD_REFRESH_INTERVAL_SECONDS = int(
+    os.environ.get("RY_DASHBOARD_REFRESH_INTERVAL_SECONDS") or 300
+)
+
 # lion_agent 的 aioe-cli 工具回调 AIOE OpenAPI 的内部地址（容器网络内可达）
 AIOE_INTERNAL_URL = os.environ.get("RY_AIOE_INTERNAL_URL", "http://lion-mgmt:8000")
 

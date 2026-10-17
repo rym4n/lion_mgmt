@@ -10,17 +10,18 @@ import orjson
 import pytest
 
 from services.dashboard import views as dashboard_views
+from services.dashboard import materialized_refresh
 from services.dashboard.views import (
-    _DASHBOARD_MATERIALIZED_VIEWS,
-    _DASHBOARD_REFRESH_CACHE_KEY,
-    _DASHBOARD_REFRESH_CACHE_TTL_SECONDS,
-    _DASHBOARD_REFRESH_TASK_NAME,
-    _refresh_dashboard_materialized_views,
-    _schedule_dashboard_materialized_view_refresh,
     count_apps,
     count_playbooks,
     playbooks_success_rate,
     view_dashboard,
+)
+from services.dashboard.materialized_refresh import (
+    _DASHBOARD_MATERIALIZED_VIEWS,
+    _DASHBOARD_REFRESH_CACHE_KEY,
+    _DASHBOARD_REFRESH_CACHE_TTL_SECONDS,
+    refresh_dashboard_materialized_views,
 )
 
 
@@ -282,7 +283,7 @@ def test_dashboard_returns_snapshot_without_synchronous_refresh(
     assert params[0].isoformat() == "2026-06-11T00:00:00+00:00"
     assert params[1].isoformat() == "2026-07-11T23:59:59+00:00"
     assert params[2] == "tenant-1"
-    assert set(app.tasks) == {_DASHBOARD_REFRESH_TASK_NAME}
+    assert set(app.tasks) == set()
 
 
 def test_dashboard_response_serializes_database_date(monkeypatch):
@@ -346,7 +347,7 @@ def test_success_rate_returns_materialized_snapshot(monkeypatch):
     assert "FROM runlog_playbook_success_rate" in sql
     assert "FROM runlog\n" not in sql
     assert params == ("tenant-1",)
-    assert set(app.tasks) == {_DASHBOARD_REFRESH_TASK_NAME}
+    assert set(app.tasks) == set()
 
 
 def test_background_refresh_is_deduplicated_and_concurrent(monkeypatch):
@@ -373,11 +374,12 @@ def test_background_refresh_is_deduplicated_and_concurrent(monkeypatch):
                 captured["refresh_queries"].append(sql)
 
     monkeypatch.setattr(
-        "services.dashboard.views.in_transaction",
+        materialized_refresh,
+        "in_transaction",
         lambda: FakeTransaction(FakeConnection()),
     )
 
-    asyncio.run(_refresh_dashboard_materialized_views(FakeApp(FakeCache())))
+    asyncio.run(refresh_dashboard_materialized_views(FakeApp(FakeCache())))
 
     assert captured["cache_add"] == (
         _DASHBOARD_REFRESH_CACHE_KEY,
@@ -407,10 +409,10 @@ def test_background_refresh_skips_when_throttle_key_exists(monkeypatch):
         raise AssertionError("a throttled refresh must not open a transaction")
 
     monkeypatch.setattr(
-        "services.dashboard.views.in_transaction", fail_if_transaction_starts
+        materialized_refresh, "in_transaction", fail_if_transaction_starts
     )
 
-    asyncio.run(_refresh_dashboard_materialized_views(FakeApp(BusyCache())))
+    asyncio.run(refresh_dashboard_materialized_views(FakeApp(BusyCache())))
 
 
 def test_background_refresh_keeps_throttle_when_cancelled(monkeypatch):
@@ -430,25 +432,13 @@ def test_background_refresh_keeps_throttle_when_cancelled(monkeypatch):
                 raise asyncio.CancelledError
 
     monkeypatch.setattr(
-        "services.dashboard.views.in_transaction",
+        materialized_refresh,
+        "in_transaction",
         lambda: FakeTransaction(CancellingConnection()),
     )
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(_refresh_dashboard_materialized_views(FakeApp(FakeCache())))
-
-
-def test_schedule_keeps_one_managed_refresh_task():
-    app = FakeApp()
-
-    try:
-        _schedule_dashboard_materialized_view_refresh(app)
-        first_task = app.tasks[_DASHBOARD_REFRESH_TASK_NAME]
-        _schedule_dashboard_materialized_view_refresh(app)
-    finally:
-        app.close_tasks()
-
-    assert app.tasks[_DASHBOARD_REFRESH_TASK_NAME] is first_task
+        asyncio.run(refresh_dashboard_materialized_views(FakeApp(FakeCache())))
 
 
 def test_dashboard_refresh_index_migration_supports_concurrent_refresh():
