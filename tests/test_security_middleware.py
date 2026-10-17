@@ -413,5 +413,33 @@ def test_audit_request_data_recursively_redacts_password_fields():
     assert payload["password"] == "new-secret"
 
 
+def test_resource_health_check_audit_redacts_arbitrary_resource_values():
+    request = SimpleNamespace(
+        path="/tools/resource/health-check",
+        json={
+            "tool_name": "demo",
+            "resources": {
+                "api_token": {"data_type": "string", "value": "secret-token", "default_value": "default-secret"},
+                "host": {"data_type": "string", "value": "https://example.test"},
+            },
+        },
+        body=b"",
+    )
+    redacted = orjson.loads(security._redacted_user_request_data(request))
+    assert redacted["resources"]["api_token"]["value"] == "******"
+    assert redacted["resources"]["host"]["value"] == "******"
+    assert "secret-token" not in security._redacted_user_request_data(request)
+    assert "default-secret" not in security._redacted_user_request_data(request)
+    assert request.json["resources"]["api_token"]["value"] == "secret-token"
+
+
+def test_malformed_resource_health_check_audit_never_records_raw_payload():
+    request = SimpleNamespace(
+        path="/tools/resource/health-check", json=["malformed-secret"],
+        body=b'["malformed-secret"]',
+    )
+    assert "malformed-secret" not in (security._redacted_user_request_data(request) or "")
+
+
 def test_audit_request_data_preserves_non_json_payload():
     assert security._redact_sensitive_request_data("plain text") == "plain text"

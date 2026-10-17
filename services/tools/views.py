@@ -55,6 +55,7 @@ from models import (
 )
 from services.digital_employee.lion_agent_adapter import stream_prompt_events, workspace_id_for
 from services.digital_employee.lion_agent_client import LionAgentClient
+from services.tools import resource_health_check
 from settings import TASK_TOPIC, TZ
 
 from PIL import Image
@@ -2080,6 +2081,110 @@ async def tool_resource_model(request):
         raise CustomError(ErrorCode.RESOURCES_MODEL_NOT_FOUND_ERROR)
 
     return response_ok(resources)
+
+
+@tools_bp.post("/resource/health-check-capability")
+@requires_permission(
+    TOOL_CREATE_RESOURCE_PERMISSION,
+    TOOL_UPDATE_RESOURCE_PERMISSION,
+    TOOL_ENGINE_UPDATE_PERMISSION,
+)
+async def resource_health_check_capability(request):
+    """Return whether the latest scoped application version has health_check."""
+    if not isinstance(request.json, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    tool_name = request.json.get("tool_name")
+    tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
+    return response_ok(
+        await resource_health_check.health_check_capability(
+            tool_name, tenant_id, maintenance_mode
+        )
+    )
+
+
+@tools_bp.post("/resource/health-check")
+@requires_permission(
+    TOOL_CREATE_RESOURCE_PERMISSION,
+    TOOL_UPDATE_RESOURCE_PERMISSION,
+)
+async def test_tool_resource_connection(request):
+    """Test unsaved resource values with the application's health_check action."""
+    if not isinstance(request.json, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    payload = request.json
+    tool_name = payload.get("tool_name")
+    name = payload.get("name")
+    resources = payload.get("resources")
+    resource_id = payload.get("resource_id")
+    engine = payload.get("engine")
+    version = payload.get("version")
+    if (
+        not isinstance(tool_name, str)
+        or not tool_name.strip()
+        or not isinstance(name, str)
+        or not name.strip()
+        or not isinstance(resources, dict)
+        or (resource_id is not None and not isinstance(resource_id, str))
+        or (engine is not None and not isinstance(engine, str))
+        or (version is not None and not isinstance(version, str))
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
+    existing_resource = None
+    if resource_id:
+        # Existing credentials always require update permission. This prevents
+        # a create-only caller from probing another user's saved resource.
+        await check_permissions(request, TOOL_UPDATE_RESOURCE_PERMISSION)
+        existing_resource = await _ensure_resource_in_scope(
+            tenant_id,
+            maintenance_mode,
+            tool_name=tool_name,
+            resource_id=resource_id,
+        )
+        if engine is not None and (engine or "") != (existing_resource.engine or ""):
+            await check_permissions(request, TOOL_ENGINE_UPDATE_PERMISSION)
+        if engine is None:
+            engine = existing_resource.engine
+    else:
+        await check_permissions(request, TOOL_CREATE_RESOURCE_PERMISSION)
+
+    tool, action = await resource_health_check.resolve_health_check(
+        tool_name, version, tenant_id, maintenance_mode
+    )
+    if existing_resource:
+        if not await check_action_execute_permission(
+            request.ctx.session["account_info"],
+            tool_name,
+            "health_check",
+            resource_id,
+            tenant_id,
+            maintenance_mode,
+            tool.version,
+        ):
+            raise CustomError(ErrorCode.UNAUTH)
+    schema = await resource_health_check._resource_schema(
+        tool_name, tenant_id, maintenance_mode
+    )
+    if not schema:
+        raise CustomError(ErrorCode.RESOURCES_MODEL_NOT_FOUND_ERROR)
+    values = resource_health_check.resource_values(
+        schema,
+        resources,
+        existing_resource.resources_json if existing_resource else None,
+    )
+    result = await resource_health_check.execute_health_check(
+        tool=tool,
+        action=action,
+        values=values,
+        name=name,
+        engine=engine,
+        tenant_id=tenant_id,
+        executor=request.ctx.session["account_info"].id,
+    )
+    return response_ok(result)
 
 
 @tools_bp.post("/resource/add")

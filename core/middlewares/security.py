@@ -36,6 +36,22 @@ SENSITIVE_REQUEST_FIELDS = frozenset(
 )
 
 
+def _redact_resource_health_check_payload(payload):
+    if not isinstance(payload, dict):
+        return payload
+    if "resources" in payload:
+        payload = dict(payload)
+        resources = payload["resources"]
+        # Field names are useful audit context; values and supplied metadata
+        # may contain credentials regardless of the declared data_type.
+        payload["resources"] = (
+            {key: {"value": "******"} for key in resources}
+            if isinstance(resources, dict)
+            else "******"
+        )
+    return payload
+
+
 def _redact_sensitive_request_data(value: str | bytes | None):
     if not value:
         return value
@@ -127,6 +143,16 @@ def _normal_request_data(request: Request) -> str | bytes | None:
 
 
 def _redacted_user_request_data(request: Request) -> str | bytes | None:
+    if request.path == "/tools/resource/health-check":
+        try:
+            payload = request.json
+        except Exception:  # noqa: BLE001
+            payload = None
+        if type(payload) is dict:
+            return _redact_sensitive_request_data(
+                orjson.dumps(_redact_resource_health_check_payload(payload))
+            )
+        return "******"
     sensitive_user_paths = {
         "/user/change-password",
         "/user/edit",
