@@ -14,6 +14,7 @@ from core.maintenance import DEFAULT_TENANT_ID, current_maintenance_mode
 from core.response import response_ok
 from libs.security.authorization import requires_permission
 from models.network_topology import NetworkTopology
+from services.network_topology import manifest as topology_manifest
 from services.network_topology.collection import dispatch, manifest_issue, plans, runs, submit, targets
 from services.network_topology.collection.errors import CollectionError
 
@@ -258,6 +259,11 @@ async def manifest_collection_internal(request: Request):
             # Target errors may contain resource identities or execution
             # details; only the stable public code crosses this boundary.
             raise CollectionError(error.code, error.status) from None
+        except topology_manifest.ManifestError as error:
+            await runs.finish_run(run, "FAILED", error_code=error.code)
+            raise CollectionError(
+                error.code, error.status, error.public_message
+            ) from None
         except Exception:
             error = CollectionError("COLLECTION_MANIFEST_FAILED", 503)
             await runs.finish_run(run, "FAILED", error_code=error.code)

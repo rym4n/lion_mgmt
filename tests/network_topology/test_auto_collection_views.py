@@ -219,6 +219,32 @@ async def test_manifest_closed_run_does_not_finish_unresolved_run(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["MANIFEST_UPGRADE_INTENT_INVALID", "MANIFEST_PROFILE_STALE"])
+async def test_manifest_rejection_preserves_stable_domain_error(monkeypatch, code):
+    from services.network_topology.manifest import ManifestError
+
+    row = run_row("run-1", plan_id="p1", state="PENDING")
+    monkeypatch.setattr(views, "_open_internal_run", AsyncMock(return_value=(plan("p1"), row)))
+    monkeypatch.setattr(views.runs, "OrmRunRepository", lambda: SimpleNamespace(get_items=AsyncMock(return_value=[])))
+    monkeypatch.setattr(views.targets, "freeze_targets", AsyncMock(return_value=[]))
+    rejection = ManifestError(code)
+    rejection.args = ("INTERNAL_SECRET",)
+    monkeypatch.setattr(views.manifest_issue, "issue_action_manifest", AsyncMock(side_effect=rejection))
+    finish = AsyncMock()
+    monkeypatch.setattr(views.runs, "finish_run", finish)
+
+    response = await _unwrapped(views.manifest_collection_internal)(
+        _request({"plan_id": "p1", "collection_run_id": row.id}, DEFAULT_TENANT_ID)
+    )
+
+    assert response.status == rejection.status
+    assert orjson.loads(response.body)["data"]["error_code"] == code
+    assert orjson.loads(response.body)["msg"] == rejection.public_message
+    finish.assert_awaited_once_with(row, "FAILED", error_code=code)
+    assert b"INTERNAL_SECRET" not in response.body
+
+
+@pytest.mark.asyncio
 async def test_default_internal_caller_can_poll_ordinary_tenant_plan(monkeypatch):
     repo = FakeRunRepository(plans=[plan("ordinary", tenant_id="tenant-a")])
     repo.runs["own"] = run_row("own", plan_id="ordinary", tenant_id="tenant-a")
