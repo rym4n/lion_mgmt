@@ -205,10 +205,10 @@ class OrmSnapshotRepository:
         fields = (
             "status",
             "consumed_at",
-            "committed_snapshot_row",
+            "committed_snapshot_row_id",
             "committed_snapshot_id",
             "committed_payload_hash",
-            "committed_analysis_run_row",
+            "committed_analysis_run_row_id",
             "utime",
         )
         await manifest.save(using_db=connection, update_fields=fields)

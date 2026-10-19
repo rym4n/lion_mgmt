@@ -3,6 +3,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import orjson
@@ -177,6 +179,39 @@ class _Repository:
 
     async def save_manifest(self, manifest, connection):
         connection.pending["manifest"] = manifest
+
+
+def test_orm_manifest_save_compiles_foreign_key_updates():
+    # Model/connection initialization is process-global in Tortoise. Keep the
+    # real SQL compiler isolated from the suite's in-memory repository tests.
+    probe = """
+import asyncio
+from tortoise import Tortoise, connections
+from models.network_topology_v2 import TopologyCollectionManifest
+from services.network_topology.snapshot import OrmSnapshotRepository
+
+async def main():
+    await Tortoise.init(db_url="sqlite://:memory:", modules={"models": ["models"]})
+    try:
+        class Manifest:
+            async def save(self, *, using_db, update_fields):
+                executor = using_db.executor_class(
+                    model=TopologyCollectionManifest, db=using_db
+                )
+                sql = executor.get_update_sql(update_fields, {})
+                assert '"committed_snapshot_row_id"=' in sql
+                assert '"committed_analysis_run_row_id"=' in sql
+
+        await OrmSnapshotRepository().save_manifest(Manifest(), connections.get("default"))
+    finally:
+        await Tortoise.close_connections()
+
+asyncio.run(main())
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 class _PayloadStore:
