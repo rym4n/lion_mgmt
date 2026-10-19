@@ -279,10 +279,19 @@ async def _timer_serialization(plan):
     # A dedicated session avoids exhausting the ORM pool with advisory-lock
     # waiters while the lock owner needs pooled transactions to commit state.
     client = connections.get('default')
+    # Tortoise's extras target create_pool(); a standalone connection must not
+    # receive pool lifecycle, sizing or callback options. Keep connection options
+    # such as SSL and timeouts, and leave the shared ORM configuration untouched.
+    connection_options = client.extra.copy()
+    for option in (
+        'min_size', 'max_size', 'max_queries', 'max_inactive_connection_lifetime',
+        'connect', 'setup', 'init', 'reset',
+    ):
+        connection_options.pop(option, None)
     connection = await asyncpg.connect(
         host=client.host, port=client.port, user=client.user,
         password=client.password, database=client.database,
-        server_settings=client.server_settings, **client.extra,
+        server_settings=client.server_settings, **connection_options,
     )
     key = int.from_bytes(sha256(f'network_topology_collection:{plan.tenant_id}:{plan.id}'.encode()).digest()[:8], 'big', signed=True)
     try:
