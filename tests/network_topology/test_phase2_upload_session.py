@@ -241,6 +241,41 @@ async def test_chunks_are_accepted_out_of_order_and_same_hash_retry_is_idempoten
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("data", [
+    {"output": {"configs": {"scopes": [{"query": {"tableId": 251}}, {"query": {"tableId": 250}}]}}},
+    {"tags": ["z", "a"]},
+])
+async def test_chunk_staging_preserves_vendor_arrays_and_content_hashes(data):
+    from services.network_topology.collection.observations import raw_observation
+    from services.network_topology.canonicalization import validate_observation_hashes
+    from services.network_topology.upload_commit import _staged_observation
+
+    repository = MemoryRepository(_manifest())
+    payload = _start_payload()
+    manifest = payload["snapshot_envelope_without_observations"]["target_manifest"]
+    manifest["expected_resources"][0]["optional_kinds"].append("raw.action_output")
+    manifest.pop("manifest_hash")
+    manifest["manifest_hash"] = canonicalize_and_hash_manifest(manifest).manifest_hash
+    repository.manifest.manifest_hash = manifest["manifest_hash"]
+    repository.manifest.expected_resources_json = orjson.dumps(manifest["expected_resources"])
+    await start_upload(AUTHORITY, payload, repository=repository, clock=lambda: NOW,
+                       id_factory=lambda: "upload-1")
+    observation = raw_observation(
+        observation_id="raw-1", app_name="device-app", action_func="collect",
+        app_version="v1", resource_id="synthetic-router-1", output=data,
+        observed_at="2026-07-30T00:01:30Z",
+    )
+
+    await stage_chunk(_owner(), _chunk(observation), repository=repository, clock=lambda: NOW)
+    retry = await stage_chunk(_owner(), _chunk(observation), repository=repository, clock=lambda: NOW)
+
+    assert retry["duplicate"] is True
+    stored = _staged_observation(next(iter(repository.staging.values())))
+    assert stored == observation
+    validate_observation_hashes(stored)
+
+
+@pytest.mark.asyncio
 async def test_same_observation_id_with_different_authoritative_hash_conflicts():
     repository = MemoryRepository(_manifest())
     await _open_session(repository)
