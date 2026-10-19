@@ -20,6 +20,7 @@ UPDATED_PROGRESS = []
 FINALIZED_SAVES = []
 PERSISTED_RUN_METADATA = {}
 RUNTIME_EVENT_BUFFER = {}
+RUNTIME_EVENT_BUFFER_SEALS = set()
 RUNTIME_EVENT_BULK_CREATES = []
 PERSISTED_RUNTIME_EVENTS = {}
 STUB_MODULES = [
@@ -63,6 +64,7 @@ def _install_stubs():
     FINALIZED_SAVES.clear()
     PERSISTED_RUN_METADATA.clear()
     RUNTIME_EVENT_BUFFER.clear()
+    RUNTIME_EVENT_BUFFER_SEALS.clear()
     RUNTIME_EVENT_BULK_CREATES.clear()
     PERSISTED_RUNTIME_EVENTS.clear()
     for name in STUB_MODULES:
@@ -321,9 +323,23 @@ def _install_stubs():
     sys.modules["tortoise.transactions"] = transactions
 
     class RedisClient:
+        async def eval(self, script, numkeys, *args):
+            keys = args[:numkeys]
+            values = args[numkeys:]
+            if "command_center_runtime_event_append" not in script:
+                raise AssertionError("unexpected runtime Redis script")
+            if keys[1] in RUNTIME_EVENT_BUFFER_SEALS:
+                return 0
+            RUNTIME_EVENT_BUFFER.setdefault(keys[0], []).append(values[0])
+            return 1
+
         async def rpush(self, key, value):
             RUNTIME_EVENT_BUFFER.setdefault(key, []).append(value)
             return len(RUNTIME_EVENT_BUFFER[key])
+
+        async def set(self, key, _value, ex=None):
+            RUNTIME_EVENT_BUFFER_SEALS.add(key)
+            return True
 
         async def expire(self, _key, _ttl):
             return True
@@ -654,7 +670,10 @@ def test_ambiguous_redis_append_and_database_fallback_share_one_event_id():
     run = asyncio.run(run_manager.checkout_run(task, _employee()))
 
     class AppendThenTimeout:
-        async def rpush(self, key, value):
+        async def eval(self, script, numkeys, *args):
+            assert "command_center_runtime_event_append" in script
+            key = args[0]
+            value = args[numkeys]
             RUNTIME_EVENT_BUFFER.setdefault(key, []).append(value)
             raise RuntimeError("response lost after append")
 
@@ -691,7 +710,10 @@ def test_runtime_event_expire_failure_does_not_duplicate_successful_append():
     run = asyncio.run(run_manager.checkout_run(task, _employee()))
 
     class ExpireFails:
-        async def rpush(self, key, value):
+        async def eval(self, script, numkeys, *args):
+            assert "command_center_runtime_event_append" in script
+            key = args[0]
+            value = args[numkeys]
             RUNTIME_EVENT_BUFFER.setdefault(key, []).append(value)
             return 1
 
@@ -1114,6 +1136,180 @@ def test_finalize_and_stale_recovery_mark_terminal_run():
     assert UPDATED_PROGRESS[-1][0]["status"] == "failed"
     assert RECORDED_EVENTS[-1][0] == "run_stale_recovered"
 
+
+@pytest.mark.parametrize(
+    "task_status,new_run", [("running", False), ("completed", False), ("running", True)]
+)
+def test_stale_recovery_persists_transcript_before_terminal_state(
+    monkeypatch, task_status, new_run
+):
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(
+        run_manager.record_runtime_event(task, run, "thinking", {"content": "已分析"})
+    )
+    asyncio.run(
+        run_manager.record_runtime_event(task, run, "delta", {"content": "部分结果"})
+    )
+    key = run_manager.runtime_event_buffer_key(task, run)
+    envelopes = [json.loads(value) for value in RUNTIME_EVENT_BUFFER[key]]
+    run.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    task.status = task_status
+    if new_run:
+        task.run_id = "new-run"
+    other_key = key + ":other-run"
+    RUNTIME_EVENT_BUFFER[other_key] = ["other transcript"]
+    save_run = type(run).save
+
+    async def save_after_transcript(self, using_db=None, update_fields=None):
+        if self.status == "stale":
+            assert len(PERSISTED_RUNTIME_EVENTS) == 2
+            assert using_db is not None
+        await save_run(self, using_db=using_db, update_fields=update_fields)
+
+    monkeypatch.setattr(type(run), "save", save_after_transcript)
+
+    recovered = asyncio.run(run_manager.recover_stale_runs())
+
+    assert recovered == [run]
+    assert run.status == "stale"
+    rows = list(PERSISTED_RUNTIME_EVENTS.values())
+    assert [(row.event_type, row.message) for row in rows] == [
+        ("runtime_thinking", "已分析"),
+        ("runtime_delta", "部分结果"),
+    ]
+    assert [row.id for row in rows] == [item["event_id"] for item in envelopes]
+    assert [row.ctime.isoformat() for row in rows] == [
+        item["ctime"] for item in envelopes
+    ]
+    assert all(
+        row.metadata["run_id"] == run.run_id and row.tenant_id == "tenant-1"
+        for row in rows
+    )
+    assert key not in RUNTIME_EVENT_BUFFER
+    assert f"{key}:sealed" in RUNTIME_EVENT_BUFFER_SEALS
+    assert RUNTIME_EVENT_BUFFER[other_key] == ["other transcript"]
+    assert task.status == (
+        "failed" if task_status == "running" and not new_run else task_status
+    )
+    if new_run:
+        assert task.run_id == "new-run"
+
+
+def test_stale_recovery_persists_inflight_event_after_snapshot(monkeypatch):
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(
+        run_manager.record_runtime_event(task, run, "thinking", {"content": "已分析"})
+    )
+    run.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stale_task = deepcopy(task)
+    stale_run = deepcopy(run)
+    event_time = datetime.now(timezone.utc) - timedelta(seconds=30)
+    real_now = run_manager._now
+    late_results = []
+    save_run = type(run).save
+
+    async def save_with_inflight_event(self, using_db=None, update_fields=None):
+        await save_run(self, using_db=using_db, update_fields=update_fields)
+        if self.status == "stale":
+            self.finished_at = self.finished_at.replace(tzinfo=None)
+            assert self.finished_at.tzinfo is None
+            monkeypatch.setattr(run_manager, "_now", lambda: event_time)
+            late_results.append(
+                await run_manager.record_runtime_event(
+                    stale_task, stale_run, "thinking", {"content": "迟到事件"}
+                )
+            )
+            monkeypatch.setattr(run_manager, "_now", real_now)
+
+    monkeypatch.setattr(type(run), "save", save_with_inflight_event)
+
+    recovered = asyncio.run(run_manager.recover_stale_runs())
+
+    assert recovered == [run]
+    assert late_results == [None]
+    assert [
+        (row.event_type, row.message) for row in PERSISTED_RUNTIME_EVENTS.values()
+    ] == [
+        ("runtime_thinking", "已分析"),
+        ("runtime_thinking", "迟到事件"),
+    ]
+
+
+@pytest.mark.parametrize("failure", ["read", "write"])
+def test_stale_recovery_keeps_transcript_retryable_when_persistence_fails(
+    monkeypatch, failure
+):
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(
+        run_manager.record_runtime_event(task, run, "thinking", {"content": "working"})
+    )
+    run.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    key = run_manager.runtime_event_buffer_key(task, run)
+
+    async def unavailable(*_args, **_kwargs):
+        raise RuntimeError("transcript persistence unavailable")
+
+    if failure == "read":
+        client = sys.modules["aiocache"].caches.get("redis_mgmt").client
+        client.lrange = unavailable
+        sys.modules["aiocache"].caches = SimpleNamespace(
+            get=lambda _name: SimpleNamespace(client=client)
+        )
+    else:
+        monkeypatch.setattr(
+            sys.modules["models.command_center"].CommandTaskEvent,
+            "bulk_create",
+            unavailable,
+        )
+
+    with pytest.raises(RuntimeError, match="transcript persistence unavailable"):
+        asyncio.run(run_manager.recover_stale_runs())
+
+    assert run.status == "running"
+    assert task.status == "running"
+    assert len(RUNTIME_EVENT_BUFFER[key]) == 1
+    assert PERSISTED_RUNTIME_EVENTS == {}
+    assert UPDATED_PROGRESS == []
+    assert not any(event[0] == "run_stale_recovered" for event in RECORDED_EVENTS)
+
+
+def test_stale_recovery_does_not_duplicate_retained_transcript():
+    run_manager = _load_run_manager()
+    task = _task()
+    run = asyncio.run(run_manager.checkout_run(task, _employee()))
+    asyncio.run(
+        run_manager.record_runtime_event(task, run, "thinking", {"content": "working"})
+    )
+    stale_task = deepcopy(task)
+    stale_run = deepcopy(run)
+    run.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    assert asyncio.run(run_manager.recover_stale_runs()) == [run]
+    key = run_manager.runtime_event_buffer_key(task, run)
+    assert key not in RUNTIME_EVENT_BUFFER
+    assert len(PERSISTED_RUNTIME_EVENTS) == 1
+    assert (
+        asyncio.run(
+            run_manager.record_runtime_event(
+                stale_task, stale_run, "thinking", {"content": "after stale"}
+            )
+        )
+        is None
+    )
+    assert len(PERSISTED_RUNTIME_EVENTS) == 1
+    assert asyncio.run(run_manager.recover_stale_runs()) == []
+    asyncio.run(run_manager.finalize_run(run, "failed"))
+
+    assert run.status == "stale"
+    assert task.status == "failed"
+    assert key not in RUNTIME_EVENT_BUFFER
+    assert len(PERSISTED_RUNTIME_EVENTS) == 1
+    assert sum(len(batch) for batch in RUNTIME_EVENT_BULK_CREATES) == 1
 
 def test_stale_recovery_does_not_overwrite_terminal_task():
     run_manager = _load_run_manager()

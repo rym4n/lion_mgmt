@@ -75,6 +75,14 @@ RUNTIME_BINARY_MARKER = "[binary runtime output omitted]"
 RUNTIME_TRUNCATION_MARKER = "[runtime event truncated]"
 RUNTIME_EVENT_BUFFER_TTL_SECONDS = 24 * 60 * 60
 RUNTIME_EVENT_BUFFER_KEY_PREFIX = "command_center:runtime_events"
+RUNTIME_EVENT_BUFFER_APPEND_SCRIPT = """
+-- command_center_runtime_event_append
+if redis.call("EXISTS", KEYS[2]) == 1 then
+    return 0
+end
+redis.call("RPUSH", KEYS[1], ARGV[1])
+return 1
+"""
 RUNTIME_EVENT_PERSISTED_COUNT_KEY = "_runtime_event_persisted_count"
 RUN_SYNC_FIELDS = (
     "status",
@@ -235,6 +243,10 @@ def runtime_event_buffer_key(task: CommandTask, run: CommandTaskRun) -> str:
     )
 
 
+def _runtime_event_buffer_seal_key(task: CommandTask, run: CommandTaskRun) -> str:
+    return f"{runtime_event_buffer_key(task, run)}:sealed"
+
+
 def _runtime_event_cache():
     from aiocache import caches
 
@@ -270,15 +282,21 @@ async def _buffer_runtime_event(
     key = runtime_event_buffer_key(task, run)
     try:
         client = _runtime_event_cache().client
-        await client.rpush(
-            key,
-            json.dumps(
-                envelope,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                allow_nan=False,
-            ),
+        payload = json.dumps(
+            envelope,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
         )
+        appended = await client.eval(
+            RUNTIME_EVENT_BUFFER_APPEND_SCRIPT,
+            2,
+            key,
+            _runtime_event_buffer_seal_key(task, run),
+            payload,
+        )
+        if not appended:
+            return False
     except Exception as exc:
         logger.warning(
             "command-center runtime event Redis buffer failed: task_id=%s run_id=%s error=%s",
@@ -297,6 +315,16 @@ async def _buffer_runtime_event(
             exc,
         )
     return True
+
+
+async def _seal_runtime_event_buffer(task: CommandTask, run: CommandTaskRun) -> None:
+    sealed = await _runtime_event_cache().client.set(
+        _runtime_event_buffer_seal_key(task, run),
+        "1",
+        ex=RUNTIME_EVENT_BUFFER_TTL_SECONDS,
+    )
+    if not sealed:
+        raise RuntimeError(f"unable to seal runtime event buffer for run {run.run_id}")
 
 
 async def _read_runtime_event_buffer(task: CommandTask, run: CommandTaskRun) -> list[dict]:
@@ -919,7 +947,6 @@ async def record_runtime_event(
     from services.command_center.manager import (
         apply_task_progress_in_transaction,
         complete_task_progress_after_commit,
-        record_task_event,
     )
 
     task_transition = None
@@ -933,6 +960,33 @@ async def record_runtime_event(
         )
         if not locked_run or locked_run.status not in RECOVERABLE_RUN_STATUSES:
             if locked_run:
+                if locked_run.status == COMMAND_RUN_STATUS_STALE and not buffered:
+                    try:
+                        event_time = datetime.fromisoformat(envelope["ctime"])
+                    except (KeyError, TypeError, ValueError):
+                        logger.warning(
+                            "command-center stale runtime event timestamp invalid: task_id=%s run_id=%s",
+                            getattr(task, "id", None),
+                            getattr(run, "run_id", None),
+                        )
+                        event_time = None
+                    finished_at = locked_run.finished_at
+                    if event_time and finished_at:
+                        if event_time.tzinfo is not None:
+                            event_time = event_time.astimezone(TZ).replace(tzinfo=None)
+                        if finished_at.tzinfo is not None:
+                            finished_at = finished_at.astimezone(TZ).replace(
+                                tzinfo=None
+                            )
+                        generated_before_finish = event_time <= finished_at
+                        if generated_before_finish:
+                            from models.command_center import CommandTaskEvent
+
+                            await CommandTaskEvent.bulk_create(
+                                [_runtime_event_row(task, locked_run, envelope)],
+                                ignore_conflicts=True,
+                                using_db=connection,
+                            )
                 _sync_run(run, locked_run)
             return None
 
@@ -1588,6 +1642,10 @@ async def recover_stale_runs(tenant_id: str | None = None, now: datetime | None 
                 .using_db(connection)
                 .first()
             )
+            if task:
+                # Seal before the snapshot; concurrent events fall back to PostgreSQL.
+                await _seal_runtime_event_buffer(task, run)
+                await _persist_runtime_event_buffer(task, run, connection)
             if task and task.status not in COMMAND_TASK_TERMINAL_STATUSES:
                 task_transition = await apply_task_progress_in_transaction(
                     connection,
@@ -1618,6 +1676,8 @@ async def recover_stale_runs(tenant_id: str | None = None, now: datetime | None 
                     using_db=connection,
                 )
             recovered.append(run)
+        if task:
+            await _clear_runtime_event_buffer(task, run)
         if task_transition is not None:
             await complete_task_progress_after_commit(
                 task,
