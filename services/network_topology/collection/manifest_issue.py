@@ -44,6 +44,7 @@ async def issue_action_manifest(plan, run, targets, *, now) -> dict:
         sequence = await manifest._next_sequence(connection, authority, topology)
         target = manifest._target_manifest(topology, profile_row, expected, sequence, str(uuid.uuid4()), issued_at, registry)
         target["expires_at"] = manifest._utc_text(issued_at + timedelta(seconds=plan.run_timeout_seconds))
+        target.pop("manifest_hash", None)
         canonical = canonicalize_and_hash_manifest(target)
         target = {**canonical.projection["target_manifest"], "manifest_hash": canonical.manifest_hash}
         await manifest._persist_manifest(connection, authority, topology, profile_row, intent, provenance, target, registry)
