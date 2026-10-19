@@ -313,6 +313,10 @@ def reject_credential_blocks(value: Any) -> None:
 def _normalize_snapshot_value(
     value: Any, path: tuple[str, ...], field: str | None
 ) -> Any:
+    if path == ("sources", "resources", "result", "observations", "data"):
+        # Observation data has its own JCS/content hashes. Vendor field names
+        # must not trigger envelope sorting or change evidence locator indices.
+        return value
     if isinstance(value, dict):
         return {
             key: _normalize_snapshot_value(child, (*path, key), key)

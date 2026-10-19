@@ -426,6 +426,31 @@ def test_snapshot_reordering_is_stable_and_business_arrays_are_sorted() -> None:
     ]
 
 
+@pytest.mark.parametrize("data", [
+    {"output": {"configs": {"routes_ipv4": {"scopes": [
+        {"query": {"tableId": 251}, "data": {"items": []}},
+        {"query": {"tableId": 250}, "data": {"items": []}},
+    ]}}}},
+    {"tags": ["z", "a"], "management_ips": ["192.0.2.2", "192.0.2.1"]},
+    {"sources": [{"vendor_field": "z"}, {"vendor_field": "a"}]},
+])
+def test_snapshot_preserves_observation_data_and_its_hashes(data) -> None:
+    snapshot = stored_snapshot()
+    observation = snapshot["sources"][0]["resources"][0]["result"]["observations"][0]
+    digest = sha256_uri(canonicalize_json(data))
+    observation.update(content_type="application/json", data=deepcopy(data),
+                       raw_sha256=digest, content_sha256=digest)
+
+    normalized = canonicalize_and_hash_snapshot(snapshot).normalized
+
+    source_item = next(item for item in normalized["sources"] if item["action_id"] == "z.collect")
+    resource_item = next(item for item in source_item["resources"] if item["resource_id"] == "resource-z")
+    stored = next(item for item in resource_item["result"]["observations"] if item["observation_id"] == "observation-z")
+    assert stored["data"] == data
+    validate_observation_hashes(stored)
+    assert observation["data"] == data
+
+
 def test_payload_hash_includes_run_and_collection_time_but_excludes_transport() -> None:
     baseline = stored_snapshot()
     changed_run = deepcopy(baseline)

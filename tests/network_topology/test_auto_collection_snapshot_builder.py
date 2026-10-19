@@ -114,3 +114,36 @@ def test_linked_asset_identity_normalizes_sets_and_defaults():
         "platform": "unknown", "os_family": "unknown", "os_version": "unknown",
         "device_type": "switch", "role": "unknown", "importance": "critical",
         "scope_ids": ["scope-1"], "tags": ["a", "b"], "provenance_ref": "asset:asset-1"}
+
+
+def test_raw_action_scopes_survive_snapshot_admission_and_storage():
+    from copy import deepcopy
+    from dataclasses import replace
+    from datetime import datetime, timezone
+    from services.network_topology.canonicalization import (
+        canonicalize_and_hash_manifest, canonicalize_json, validate_observation_hashes,
+    )
+    from services.network_topology.payload_store import prepare_stored_envelope
+    from services.network_topology.snapshot import validate_direct_snapshot
+
+    manifest = deepcopy(MANIFEST)
+    manifest.pop("manifest_hash")
+    canonical = canonicalize_and_hash_manifest(manifest)
+    manifest = {**canonical.projection["target_manifest"], "manifest_hash": canonical.manifest_hash}
+    output = {"code": 200, "data": {"configs": {"routes_ipv4": {"scopes": [
+        {"query": {"tableId": 251}, "data": {"totalItems": 0, "items": []}},
+        {"query": {"tableId": 250}, "data": {"totalItems": 0, "items": []}},
+    ]}}}}
+    snapshot = _build([replace(_outcome("a"), output=output)], manifest=manifest)
+
+    admitted = validate_direct_snapshot(
+        "topo-1", snapshot, body_size=len(canonicalize_json(snapshot)),
+        now=datetime(2026, 10, 14, 0, 20, tzinfo=timezone.utc),
+    )
+    prepared = prepare_stored_envelope(snapshot)
+    stored = prepare_stored_envelope(prepared.normalized)
+
+    assert admitted.payload_hash == prepared.payload_hash == stored.payload_hash
+    observation = stored.normalized["sources"][0]["resources"][0]["result"]["observations"][0]
+    assert observation["data"]["output"] == output
+    validate_observation_hashes(observation)
