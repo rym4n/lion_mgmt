@@ -707,12 +707,7 @@ async def action_view(request: Request):
         if not is_ticket_admin(session):
             raise CustomError(ErrorCode.TICKET_ADMIN_ONLY)
 
-        callback_decision = payload.get("callback_decision")  # "approve" / "reject" / None
         comment = payload.get("comment", "")
-
-        # 剧本触发的需要选择回传方式
-        if ticket.source == SOURCE_PLAYBOOK and not callback_decision:
-            raise CustomError(ErrorCode.PARAM_ERROR)
 
         from tortoise.transactions import in_transaction
         async with in_transaction() as conn:
@@ -727,12 +722,12 @@ async def action_view(request: Request):
             tenant_id, ticket.id, previous_user_ids
         )
 
-        # 强关绕过状态机，显式触发终态回传。
-        if ticket.source == SOURCE_PLAYBOOK and callback_decision and callback_decision != "none":
+        # 强关绕过状态机，剧本工单统一按拒绝回传，不接受客户端选择。
+        if ticket.source == SOURCE_PLAYBOOK:
             from services.ticket.playbook_bridge import callback_playbook
             await callback_playbook(
-                ticket, operator=user_id, result=callback_decision,
-                approval_result={"decision": callback_decision, "comment": comment},
+                ticket, operator=user_id, result="reject",
+                approval_result={"decision": "reject", "comment": comment},
             )
 
         return response_ok({"message": "关闭成功"})

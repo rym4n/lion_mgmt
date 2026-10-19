@@ -7,7 +7,10 @@ active_nodes 等），但因无测试覆盖而未被发现。本文件通过导�
 """
 
 from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from inspect import unwrap
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -19,6 +22,7 @@ from models.ticket import (
     NODE_STATUS_RUNNING,
     SOURCE_PLAYBOOK,
     TICKET_STATUS_COMPLETED,
+    TICKET_STATUS_FORCE_CLOSED,
     TICKET_STATUS_PROCESSING,
     TICKET_STATUS_REJECTED,
     TICKET_STATUS_WITHDRAWN,
@@ -204,25 +208,62 @@ def test_force_close_requires_admin():
     assert callable(is_ticket_admin)
 
 
-def test_force_close_playbook_requires_callback_decision():
-    """force_close 剧本工单必须提供 callback_decision"""
-    ticket_playbook = make_ticket(source=SOURCE_PLAYBOOK)
-    ticket_manual = make_ticket(source=0)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", [SOURCE_PLAYBOOK, 0])
+@pytest.mark.parametrize("legacy_decision", [None, "approve", "reject", "none"])
+async def test_force_close_always_rejects_playbook_without_user_choice(
+    monkeypatch, source, legacy_decision
+):
+    """关闭自动拒绝剧本，兼容旧客户端传值；手动工单不回传。"""
+    from services.ticket import playbook_bridge, views
 
-    assert ticket_playbook.source == SOURCE_PLAYBOOK
-    assert ticket_manual.source != SOURCE_PLAYBOOK
+    ticket = make_ticket(source=source, status=TICKET_STATUS_PROCESSING)
+    ticket_filter = Mock(return_value=FakeQuery([ticket]))
+    monkeypatch.setattr(views, "Ticket", SimpleNamespace(filter=ticket_filter))
+    monkeypatch.setattr(
+        views, "TicketNodeInstance",
+        SimpleNamespace(filter=Mock(return_value=FakeQuery())),
+    )
+    monkeypatch.setattr(views, "is_ticket_admin", lambda session: True)
+    activity = AsyncMock()
+    push_pending = AsyncMock()
+    callback = AsyncMock()
+    monkeypatch.setattr(views, "record_activity", activity)
+    monkeypatch.setattr(views, "_push_pending_after_commit", push_pending)
+    monkeypatch.setattr(playbook_bridge, "callback_playbook", callback)
+    connection = object()
 
-    # 剧本工单需要 callback_decision
-    # 手动工单不需要
+    @asynccontextmanager
+    async def transaction():
+        yield connection
 
+    monkeypatch.setattr("tortoise.transactions.in_transaction", transaction)
+    payload = {"ticket_id": ticket.id, "action": "force_close", "comment": "关闭原因"}
+    if legacy_decision is not None:
+        payload["callback_decision"] = legacy_decision
+    request = SimpleNamespace(
+        json=payload,
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1", "sub": "admin"}),
+    )
 
-def test_force_close_callback_decision_mapping():
-    """force_close 的 callback_decision 到 approval_status 的映射"""
-    # approve -> 1
-    # reject -> 2
-    # none -> 不回传
-    assert 1 in (1, 2)  # approval_status 守卫
-    assert 2 in (1, 2)
+    response = await unwrap(views.action_view)(request)
+
+    assert response.status == 200
+    ticket_filter.assert_called_once_with(id=ticket.id, tenant_id="tenant-1", deleted=False)
+    assert ticket.status == TICKET_STATUS_FORCE_CLOSED
+    assert ticket.closed_at is not None
+    assert ticket.saved_using_db == [connection]
+    activity.assert_awaited_once_with(
+        ticket, "force_close", actor_id="admin", content="关闭原因", connection=connection
+    )
+    push_pending.assert_awaited_once_with("tenant-1", ticket.id, set())
+    if source == SOURCE_PLAYBOOK:
+        callback.assert_awaited_once_with(
+            ticket, operator="admin", result="reject",
+            approval_result={"decision": "reject", "comment": "关闭原因"},
+        )
+    else:
+        callback.assert_not_awaited()
 
 
 # ==================== 通用场景 ====================
