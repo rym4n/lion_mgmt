@@ -46,3 +46,25 @@ async def policy_agent_job_input(request):
         })
     except CollectionError as exc:
         return _error(exc)
+
+
+@policy_agent_internal_bp.post("/policy-agent-facts/submit")
+async def policy_agent_facts_submit(request):
+    try:
+        body = _body(request)
+        job = await _job(request, body)
+        raw_outputs, _ = await agent_jobs.load_context(job)
+        documents, failed = body.get("documents"), body.get("failed", [])
+        errors = agent_jobs.check_submission(
+            raw_outputs, list(job.resource_ids or []), documents, failed,
+            max_rules=await max_rules_per_device(),
+        )
+        if errors:
+            return sanic_json({"code": 4000, "msg": "策略文档校验失败",
+                               "data": {"error_code": "AGENT_SUBMISSION_INVALID", "errors": errors}},
+                              status=422, dumps=orjson.dumps)
+        if not await agent_jobs.store_submission(job, documents, agent_jobs.clean_failed(failed)):
+            raise CollectionError("AGENT_JOB_FORBIDDEN", 403)
+        return response_ok({"accepted": True})
+    except CollectionError as exc:
+        return _error(exc)
