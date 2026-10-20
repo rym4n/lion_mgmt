@@ -266,6 +266,33 @@ def _replace_builtin_resource_placeholder(value, resource_id):
     return value
 
 
+def _bind_imported_action_versions(flow_json, app_versions):
+    """Bind unversioned action nodes to versions imported in this archive.
+
+    A playbook action must carry the exact tool version used by the worker.
+    The mapping is deliberately limited to the packages uploaded by the
+    current init-data request, so another tenant or execution scope can never
+    supply a coincidentally named "latest" version.
+    """
+    if not isinstance(flow_json, dict):
+        return flow_json
+
+    for node in flow_json.get("nodes") or []:
+        if not isinstance(node, dict) or node.get("type") != "action-node":
+            continue
+        properties = node.get("properties")
+        if not isinstance(properties, dict) or properties.get("version"):
+            continue
+        app_name = properties.get("app_name")
+        versions = app_versions.get(app_name)
+        if isinstance(versions, str):
+            versions = {versions}
+        if not versions or len(versions) != 1:
+            raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
+        properties["version"] = next(iter(versions))
+    return flow_json
+
+
 async def _cache_imported_resource(resource, fallback_resources):
     resources = resource.resources_json or fallback_resources or {}
     cached = {
@@ -2450,6 +2477,7 @@ async def init_data(request):
 
     imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
     builtin_resource_id = None
+    imported_tool_versions = {}
 
     buf = io.BytesIO(file_obj.body)
     with zipfile.ZipFile(buf, "r", metadata_encoding="utf-8") as zf:
@@ -2520,8 +2548,12 @@ async def init_data(request):
 
             if result and result.get("msg") == "success":
                 imported["tools"] += 1
+                if result.get("name") and result.get("version"):
+                    imported_tool_versions.setdefault(result["name"], set()).add(result["version"])
             elif result and result.get("msg") == "工具已存在":
                 imported["skipped_versions"] += 1
+                if result.get("name") and result.get("version"):
+                    imported_tool_versions.setdefault(result["name"], set()).add(result["version"])
 
         # 导入剧本
         if "workflow.json" in names:
@@ -2543,6 +2575,7 @@ async def init_data(request):
                 raw_flow_timeout = item.get("flow_timeout", 300)
                 if type(raw_flow_timeout) is not int or not 300 <= raw_flow_timeout <= 259200:
                     raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
+                flow_json = _bind_imported_action_versions(flow_json, imported_tool_versions)
                 if builtin_resource_id:
                     flow_json = _replace_builtin_resource_placeholder(flow_json, builtin_resource_id)
                 async with in_transaction():

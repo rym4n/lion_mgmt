@@ -724,7 +724,13 @@ async def upload_tool(
         maintenance_mode,
     )
     if msg != "success":
-        return {"tool": zip_filename, "msg": msg, "tool_name": tool_description or ""}
+        return {
+            "tool": zip_filename,
+            "msg": msg,
+            "tool_name": tool_description or "",
+            "name": tool_name,
+            "version": version,
+        }
 
     if "actions" in config_data.keys():
         action_key = "actions"
