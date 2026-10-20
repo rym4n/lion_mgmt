@@ -1369,7 +1369,7 @@ def _policy_content(snapshot: dict) -> dict:
     return {
         key: value
         for key, value in snapshot.items()
-        if key not in {"id", "revision", "last_synced_at"}
+        if key not in {"id", "revision", "last_synced_at", "collection_run_id"}
     }
 
 
@@ -1556,10 +1556,12 @@ async def delete_actual_policy(
     return {"id": record.id}
 
 
-async def sync_actual_policies(tenant: str, data: dict, operator: str | None) -> dict:
+async def apply_actual_policies(
+    tenant: str, data: dict, operator: str | None, *, max_items: int
+) -> dict:
     data = require_dict(data)
     policies = data.get("policies")
-    if not isinstance(policies, list) or len(policies) > MAX_POLICY_SYNC_ITEMS:
+    if not isinstance(policies, list) or len(policies) > max_items:
         raise CustomError(ErrorCode.PARAM_ERROR)
     replace = data.get("replace", False)
     if not isinstance(replace, bool):
@@ -1718,6 +1720,12 @@ async def sync_actual_policies(tenant: str, data: dict, operator: str | None) ->
         "synced": counts["unchanged"],
         "history_count": sum(counts[key] for key in POLICY_CHANGE_TYPES),
     }
+
+
+async def sync_actual_policies(tenant: str, data: dict, operator: str | None) -> dict:
+    return await apply_actual_policies(
+        tenant, data, operator, max_items=MAX_POLICY_SYNC_ITEMS
+    )
 
 
 async def run_collection_task(tenant: str, task_id: str, operator: str | None) -> dict:

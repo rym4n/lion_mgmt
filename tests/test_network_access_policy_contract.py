@@ -531,3 +531,34 @@ def test_policy_identity_is_non_null_and_unique_for_active_inventory_rows():
         in migration
     )
     assert "NULLIF(\"rule_name\", '')" not in migration
+
+
+def test_apply_actual_policies_uses_caller_limit():
+    policies = [{"policy_key": f"k{i}", "action": "permit"} for i in range(3)]
+    with pytest.raises(CustomError):
+        asyncio.run(manager.apply_actual_policies(
+            "tenant-a", {"device_key": "resource:r1", "replace": True, "policies": policies}, "op", max_items=2))
+    result = asyncio.run(manager.apply_actual_policies(
+        "tenant-a", {"device_key": "resource:r1", "replace": True, "policies": policies}, "op", max_items=3))
+    assert result["added"] == 3
+    # The automatic collection cap can exceed the external sync endpoint's 5000.
+    large = {"device_key": "resource:r2", "replace": True, "policies": [
+        {"policy_key": f"large-{i}", "action": "permit"} for i in range(5001)]}
+    with pytest.raises(CustomError):
+        asyncio.run(manager.sync_actual_policies("tenant-a", large, "op"))
+    result = asyncio.run(manager.apply_actual_policies("tenant-a", large, "op", max_items=20000))
+    assert result["added"] == 5001
+
+
+def test_resync_with_new_run_id_is_unchanged():
+    store = _FakePolicyModel
+    body = {"device_key": "resource:r1", "replace": True, "sync_source": "auto_collection",
+            "policies": [{"policy_key": "k1", "action": "permit", "source_address": "10.0.0.1",
+                          "policy_data": {"policy_order": 1}}]}
+    asyncio.run(manager.apply_actual_policies("tenant-a", {**body, "collection_run_id": "run-1"}, "op",
+                                              max_items=10))
+    second = asyncio.run(manager.apply_actual_policies("tenant-a", {**body, "collection_run_id": "run-2"}, "op",
+                                                       max_items=10))
+    assert second["unchanged"] == 1 and second["history_count"] == 0
+    (row,) = [r for r in store.rows if not r.deleted]
+    assert row.collection_run_id == "run-2"

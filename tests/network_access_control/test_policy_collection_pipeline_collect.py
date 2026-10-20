@@ -250,14 +250,19 @@ async def test_pipeline_exception_terminalizes_without_exception_text(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_pipeline_collect_only_does_not_invoke_future_normalizer(monkeypatch):
+async def test_pipeline_continues_from_collect_through_normalize_apply_finalize(monkeypatch):
     monkeypatch.setattr(pipeline, "execute_targets", AsyncMock(return_value=[outcome(output={"code": 200})]))
     repo = FakePolicyRunRepository(plans=[plan()])
     row = collecting(repo)
-    normalizer = AsyncMock(side_effect=AssertionError("Task 5 owns normalize"))
+    normalizer = AsyncMock(return_value={"r1": pipeline.NormalizeResult("r1", "success", {
+        "resource_id": "r1", "device_type": "firewall", "policy_type": "firewall", "policies": []}, None)})
+    monkeypatch.setattr(pipeline, "max_rules_per_device", AsyncMock(return_value=20000))
+    monkeypatch.setattr(pipeline.manager, "apply_actual_policies", AsyncMock(return_value={"added": 0}))
     await pipeline.run_pipeline(plan(), row, normalizer=normalizer, repository=repo)
-    assert row.state == "NORMALIZING" and row.raw_outputs is not None
-    normalizer.assert_not_awaited()
+    assert row.state == "SUCCEEDED" and row.raw_outputs is not None
+    assert row.item_results[0]["stage"] == "apply" and row.device_succeeded == 1
+    normalizer.assert_awaited_once()
+    assert normalizer.await_args.args[2] == ["r1"]
 
 
 @pytest.mark.asyncio
