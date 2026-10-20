@@ -215,6 +215,38 @@ async def test_terminal_duplicate_dispatch_returns_current_state_without_pipelin
 
 
 @pytest.mark.asyncio
+async def test_dispatch_returns_terminal_state_when_run_finishes_between_verified_reads(monkeypatch):
+    owner = plan(tenant_id="ordinary-tenant")
+    row = run_row("r1", tenant_id="ordinary-tenant")
+
+    class TransitioningRepository(FakePolicyRunRepository):
+        def __init__(self):
+            super().__init__(plans=[owner])
+            self.runs[row.id] = row
+            self.reads = 0
+
+        async def get_run(self, run_id, *, tenant_id=None):
+            self.reads += 1
+            if self.reads == 2:
+                row.state = "SUCCEEDED"
+                row.error_code = None
+            return await super().get_run(run_id, tenant_id=tenant_id)
+
+    repo = TransitioningRepository()
+    monkeypatch.setattr(views.runs, "OrmPolicyRunRepository", lambda: repo)
+    start = AsyncMock()
+    monkeypatch.setattr(views.pipeline, "start_pipeline", start)
+
+    response = await _handler("dispatch_policy_collection_internal")(
+        _request({"plan_id": "p1", "collection_run_id": "r1"}, DEFAULT_TENANT_ID))
+
+    assert response.status == 202
+    assert _data(response) == {"code": 0, "data": {"collection_run_id": "r1", "run_state": "SUCCEEDED"}}
+    assert repo.reads == 3
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["PENDING", "COLLECTING", "NORMALIZING", "APPLYING"])
 async def test_active_timed_out_dispatch_closes_without_pipeline(monkeypatch, state):
     repo = FakePolicyRunRepository(plans=[plan(run_timeout_seconds=600)])

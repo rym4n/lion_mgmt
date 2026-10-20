@@ -149,8 +149,26 @@ async def dispatch_policy_collection_internal(request: Request):
         if run.state in POLICY_RUN_TERMINAL_STATES:
             result = {"collection_run_id": str(run.id), "run_state": run.state}
         else:
-            plan, run = await runs.require_open_run(plan_id, run_id)
-            result = await pipeline.start_pipeline(plan, run)
+            try:
+                plan, run = await runs.require_open_run(plan_id, run_id)
+            except CollectionError as error:
+                if error.code != "COLLECTION_RUN_CLOSED":
+                    raise
+                try:
+                    _plan, current = await runs.get_run_for_plan(plan_id, run_id)
+                except CollectionError:
+                    raise error
+                # The timeout guard terminalizes the run itself and must keep
+                # its 409 contract. Other verified terminal transitions make
+                # a duplicate dispatch idempotent, even across the reread race.
+                if (current.state not in POLICY_RUN_TERMINAL_STATES
+                        or current.error_code == "COLLECTION_RUN_TIMEOUT"):
+                    raise error
+                run = current
+            if run.state in POLICY_RUN_TERMINAL_STATES:
+                result = {"collection_run_id": str(run.id), "run_state": run.state}
+            else:
+                result = await pipeline.start_pipeline(plan, run)
         return sanic_json({"code": 0, "data": result}, status=202, dumps=orjson.dumps)
     except CollectionError as error:
         return _error(error)
