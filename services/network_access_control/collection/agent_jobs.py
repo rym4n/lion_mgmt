@@ -100,3 +100,34 @@ async def store_submission(job, documents: list[dict], failed: list[dict]) -> bo
     ).update(documents=orjson.dumps(documents).decode(), failed=orjson.dumps(failed).decode(),
              state="SUBMITTED", utime=now)
     return changed == 1
+
+
+def policy_agent_summary(job, *, maintenance: bool) -> dict | None:
+    if job is None:
+        return None
+    result = {
+        "state": job.state,
+        "resources": len(job.resource_ids or []),
+        "cache_hits": job.cache_hits,
+        "cache_misses": job.cache_misses,
+    }
+    if not maintenance:
+        return result
+    result.update(
+        job_id=str(job.id),
+        **{name: getattr(job, name, None) for name in (
+            "attempt", "iterations", "token_usage", "profile_version", "error_code", "error_message",
+        )},
+    )
+    try:
+        transcript = orjson.loads(job.transcript) if job.transcript else []
+    except (orjson.JSONDecodeError, TypeError):
+        transcript = []
+    result["transcript"] = transcript if isinstance(transcript, list) else []
+    return result
+
+
+async def latest_job(tenant_id: str, collection_run_id: str):
+    return await NetworkAccessPolicyAgentJob.filter(
+        tenant_id=tenant_id, collection_run_id=collection_run_id, deleted=False,
+    ).order_by("-attempt", "-ctime", "-id").first()

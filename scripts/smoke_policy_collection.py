@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -24,8 +25,9 @@ from tortoise import Tortoise
 import models
 import settings
 from services.action_collection.executor import ExecResult
-from services.network_access_control.collection import pipeline, runs
-from services.network_access_control.collection.pipeline import NormalizeResult
+from services.network_access_control.collection import agent_jobs, pipeline, runs
+from services.network_access_control.collection.agent_stage import AgentNormalizer
+from tests.network_access_control.policy_agent_fixtures import RULE_TEXT, document
 
 TENANT = f"smoke-policy-{uuid.uuid4()}"
 RULE = {
@@ -46,27 +48,26 @@ async def fake_executor(tenant_id, target, *, timeout, executor_id):
     del tenant_id, target, timeout, executor_id
     return ExecResult(
         0,
-        '{"code":200,"data":{"outputs":[{"source":"display security-policy rule all","content":"rule name smoke-1"}]}}',
+        '{"code":200,"data":{"outputs":[{"source":"display security-policy rule all","content":%s}]}}'
+        % json.dumps(RULE_TEXT),
         5,
     )
 
 
-class FakeNormalizer:
-    async def __call__(self, plan, run, resource_ids):
-        return {
-            rid: NormalizeResult(
-                rid,
-                "success",
-                {
-                    "resource_id": rid,
-                    "device_type": "firewall",
-                    "policy_type": "firewall",
-                    "policies": [RULE],
-                },
-                None,
-            )
-            for rid in resource_ids
-        }
+async def smoke_llm(tenant_id, *, purpose="chat", config_id=None):
+    del tenant_id, purpose, config_id
+    return type("SmokeLlm", (), {"to_payload": lambda self: {"model": "smoke"}})()
+
+
+class SmokeClient:
+    async def execute(self, payload):
+        job = await models.NetworkAccessPolicyAgentJob.get(id=payload["job_id"])
+        documents = [{"resource_id": resource_id, "document": document(resource_id)}
+                     for resource_id in job.resource_ids]
+        assert await agent_jobs.store_submission(job, documents, [])
+        return 200, {"submitted": True, "cache_hits": 0, "cache_misses": 1,
+                      "iterations": 1, "profile_version": "policy-normalizer/1",
+                      "usage": {}, "transcript": [], "failed": []}
 
 
 async def smoke():
@@ -126,11 +127,12 @@ async def smoke():
                 }
             ],
         )
-        await pipeline.run_pipeline(
-            plan, run, executor=fake_executor, normalizer=FakeNormalizer()
-        )
+        normalizer = AgentNormalizer(client=SmokeClient(), llm_resolver=smoke_llm)
+        await pipeline.run_pipeline(plan, run, executor=fake_executor, normalizer=normalizer)
         row = await models.NetworkAccessPolicyCollectionRun.get(id=run.id)
         assert row.state == "SUCCEEDED", (row.state, row.error_code, row.item_results)
+        job = await models.NetworkAccessPolicyAgentJob.get(collection_run_id=str(run.id))
+        assert job.state == "SUCCEEDED"
         assert row.compare_run_id, "compare did not run"
         policies = await models.NetworkAccessActualPolicy.filter(
             tenant_id=TENANT, deleted=False
@@ -152,9 +154,8 @@ async def smoke():
             device_total=1,
             frozen_targets=row.frozen_targets,
         )
-        await pipeline.run_pipeline(
-            plan, run2, executor=fake_executor, normalizer=FakeNormalizer()
-        )
+        await pipeline.run_pipeline(plan, run2, executor=fake_executor,
+                                    normalizer=AgentNormalizer(client=SmokeClient(), llm_resolver=smoke_llm))
         assert (
             await models.NetworkAccessPolicyChange.filter(tenant_id=TENANT).count()
             == changes_before
@@ -180,6 +181,7 @@ async def smoke():
             models.NetworkAccessPolicyChange,
             models.NetworkAccessActualPolicy,
             models.NetworkAccessPresetPolicy,
+            models.NetworkAccessPolicyAgentJob,
             models.NetworkAccessPolicyCollectionRun,
             models.NetworkAccessPolicyCollectionPlan,
             models.AssetInstance,

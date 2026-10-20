@@ -100,7 +100,7 @@ async def test_finish_run_is_idempotent():
 
 
 @pytest.mark.asyncio
-async def test_cancel_and_detail_projection():
+async def test_cancel_and_detail_projection(monkeypatch):
     repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
     created = await runs.trigger_manual("t1", account_id="acc", repository=repo)
     repo.runs[created["collection_run_id"]].item_results = [
@@ -110,6 +110,8 @@ async def test_cancel_and_detail_projection():
          "sync": None, "duration_ms": 5, "lion_action_run_id": "x"}]
     cancelled = await runs.cancel_run("t1", account_id="acc", repository=repo)
     assert cancelled["state"] == "CANCELLED"
+    from services.network_access_control.collection import agent_jobs
+    monkeypatch.setattr(agent_jobs, "latest_job", AsyncMock(return_value=None))
     detail = await runs.run_detail("t1", created["collection_run_id"], repository=repo)
     assert detail["state"] == "CANCELLED" and detail["agent"] is None
     assert set(detail["devices"][0]) == set(runs.DEVICE_FIELDS)
@@ -117,6 +119,23 @@ async def test_cancel_and_detail_projection():
     with pytest.raises(CollectionError) as exc:
         await runs.run_detail("t2", created["collection_run_id"], repository=repo)
     assert exc.value.code == "COLLECTION_RUN_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_run_detail_includes_public_agent_summary(monkeypatch):
+    from services.network_access_control.collection import agent_jobs
+
+    repo = FakePolicyRunRepository(plans=[plan()])
+    repo.runs["run-1"] = run_row()
+    agent = SimpleNamespace(id="j1", state="SUCCEEDED", resource_ids=["r1", "r2"], cache_hits=2,
+                            cache_misses=0, attempt=1, iterations=0, token_usage={},
+                            profile_version="policy-normalizer/1", error_code=None, error_message=None,
+                            transcript='[{"type":"cache_hit"}]')
+    latest = AsyncMock(return_value=agent)
+    monkeypatch.setattr(agent_jobs, "latest_job", latest)
+    detail = await runs.run_detail("t1", "run-1", maintenance=False, repository=repo)
+    assert detail["agent"]["cache_hits"] == 2
+    latest.assert_awaited_once_with("t1", "run-1")
 
 
 def test_status_projection_terminal_flag():

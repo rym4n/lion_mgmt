@@ -393,5 +393,8 @@ async def run_detail(tenant_id, run_id, *, maintenance=False, repository=None):
     run = await _repo(repository).get_run(run_id, tenant_id=tenant_id)
     if run is None:
         raise CollectionError("COLLECTION_RUN_NOT_FOUND", 404)
-    # 03 replaces "agent" with agent_jobs.policy_agent_summary(...).
-    return {**run_summary(run), "devices": public_devices(run.item_results), "agent": None}
+    from services.network_access_control.collection import agent_jobs
+
+    agent = await agent_jobs.latest_job(tenant_id, str(run.id))
+    return {**run_summary(run), "devices": public_devices(run.item_results),
+            "agent": agent_jobs.policy_agent_summary(agent, maintenance=maintenance)}
