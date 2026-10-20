@@ -10,10 +10,17 @@ from sanic import json as sanic_json
 from sanic.request import Request
 from sanic_ext import openapi
 
-from core.maintenance import DEFAULT_TENANT_ID, current_maintenance_mode
+from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs.security.authorization import requires_permission
 from models.network_topology import NetworkTopology
+from services.action_collection.internal_auth import (
+    actor_id as _actor_id,
+    reject_tenant_fields as _reject_tenant_fields,
+    require_internal_caller,
+    session as _session,
+    session_tenant_id as _tenant_id,
+)
 from services.network_topology import manifest as topology_manifest
 from services.network_topology.collection import dispatch, manifest_issue, plans, runs, submit, targets
 from services.network_topology.collection.errors import CollectionError
@@ -40,40 +47,6 @@ def _body(request: Request) -> dict:
     if not isinstance(value, dict):
         raise CollectionError("COLLECTION_INVALID_REQUEST", 400)
     return value
-
-
-def _reject_tenant_fields(value):
-    if isinstance(value, dict):
-        if "tenant" in value or "tenant_id" in value:
-            raise CollectionError("COLLECTION_CALLER_FORBIDDEN", 403)
-        for child in value.values():
-            _reject_tenant_fields(child)
-    elif isinstance(value, list):
-        for child in value:
-            _reject_tenant_fields(child)
-
-
-def _session(request: Request) -> dict:
-    session = getattr(getattr(request, "ctx", None), "session", None)
-    if not isinstance(session, dict):
-        raise CollectionError("COLLECTION_CALLER_FORBIDDEN", 403)
-    return session
-
-
-def _tenant_id(request: Request) -> str:
-    tenant_id = _session(request).get("tenant_id")
-    if not tenant_id:
-        raise CollectionError("COLLECTION_CALLER_FORBIDDEN", 403)
-    return str(tenant_id)
-
-
-def _actor_id(request: Request) -> str:
-    session = _session(request)
-    account = session.get("account_info")
-    actor = session.get("sub") or getattr(account, "id", None)
-    if not actor:
-        raise CollectionError("COLLECTION_CALLER_FORBIDDEN", 403)
-    return str(actor)
 
 
 def _required_string(data: dict, key: str) -> str:
@@ -121,10 +94,7 @@ def _internal_body(request: Request) -> dict:
 
 
 def _require_internal_caller(request: Request, data: dict | None = None) -> None:
-    session = _session(request)
-    if str(session.get("tenant_id") or "") != DEFAULT_TENANT_ID:
-        raise CollectionError("COLLECTION_CALLER_FORBIDDEN", 403)
-    _reject_tenant_fields(_body(request) if data is None else data)
+    require_internal_caller(request, _body(request) if data is None else data)
 
 
 async def _open_internal_run(data: dict):

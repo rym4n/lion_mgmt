@@ -1,15 +1,12 @@
 """Internal job input and candidate submission helpers for the topology agent."""
 from __future__ import annotations
 
-import hashlib
-import hmac
-from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 from typing import Any
 
 import settings
 from models.network_topology_v2 import TopologyAgentJob
-from services.network_topology.collection.errors import CollectionError
+from services.action_collection.agent_tokens import authenticate_job
 from services.network_topology.contracts import iter_schemas
 from services.network_topology.facts.candidate_conversion import (
     CandidateConversionError,
@@ -105,30 +102,6 @@ def convert_documents(collection: dict, run: Any, documents: list[dict]) -> tupl
 
 async def authenticate(request_headers: Any, body: dict) -> TopologyAgentJob:
     """Authenticate an internal caller and bind its one-time job token."""
-    supplied = request_headers.get("X-Internal-Token", "") if request_headers else ""
-    configured = getattr(settings, "LION_AGENT_INTERNAL_TOKEN", "")
-    if (not isinstance(supplied, str) or not configured or not supplied
-            or not hmac.compare_digest(supplied.encode(), configured.encode())):
-        raise CollectionError("AGENT_JOB_FORBIDDEN", 403)
-    if not isinstance(body, dict):
-        raise CollectionError("AGENT_JOB_FORBIDDEN", 403)
-    from services.network_topology.collection.views import _reject_tenant_fields
-    try:
-        _reject_tenant_fields(body)
-    except CollectionError:
-        raise CollectionError("AGENT_JOB_FORBIDDEN", 403) from None
-    job_id = body.get("job_id")
-    token = body.get("agent_job_token")
-    if not isinstance(job_id, str) or not isinstance(token, str) or not token:
-        raise CollectionError("AGENT_JOB_FORBIDDEN", 403)
-    job = await TopologyAgentJob.filter(id=job_id, deleted=False).first()
-    if job is None or job.state != "RUNNING":
-        raise CollectionError("AGENT_JOB_FORBIDDEN", 403)
-    started_at = job.started_at
-    now = datetime.now(timezone.utc)
-    if (started_at is None or started_at.tzinfo is None or started_at > now
-            or started_at + timedelta(seconds=AGENT_TIMEOUT_SECONDS) <= now):
-        raise CollectionError("AGENT_JOB_FORBIDDEN", 403)
-    if not hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(), job.job_token_hash):
-        raise CollectionError("AGENT_JOB_FORBIDDEN", 403)
-    return job
+    # Resolve the model per call: tests replace agent_jobs.TopologyAgentJob.
+    return await authenticate_job(request_headers, body, job_model=TopologyAgentJob,
+                                  timeout_seconds=AGENT_TIMEOUT_SECONDS)
