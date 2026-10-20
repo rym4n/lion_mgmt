@@ -1,6 +1,7 @@
 """Frozen policy collection; later stages normalize, apply, and compare per device."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -22,6 +23,13 @@ from services.network_access_control.collection.constants import SYNC_SOURCE
 from services.network_access_control.collection.limits import max_rules_per_device
 
 logger = logging.getLogger(__name__)
+
+
+def _policy_batch_id(run_id, resource_id) -> str:
+    batch_id = f"{run_id}:{resource_id}"
+    if len(batch_id) <= 64:
+        return batch_id
+    return hashlib.sha256(batch_id.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -254,7 +262,8 @@ async def apply_stage(plan, run, devices, *, repository) -> list[dict]:
                     "device_key": device_key, "device_asset_id": d.get("device_asset_id"),
                     "device_name": d.get("resource_name"), "device_type": document.get("device_type"),
                     "policy_type": document.get("policy_type"), "collection_run_id": str(run.id),
-                    "sync_source": SYNC_SOURCE, "batch_id": f"{run.id}:{d['resource_id']}",
+                    "sync_source": SYNC_SOURCE,
+                    "batch_id": _policy_batch_id(run.id, d["resource_id"]),
                     "replace": True, "policies": [policy_item(p) for p in policies],
                 }, operator, max_items=max_items)
                 if await _live_in_state(run, "APPLYING", repository) is None:
