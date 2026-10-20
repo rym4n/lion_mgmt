@@ -19,3 +19,10 @@
 ## Boundaries and concerns
 
 No deployment, push, device, shared-database, or live-agent operation was performed. The endpoint's token/job binding uses the existing `authenticate_job` contract; this task tests route-level forbidden behavior with a mocked authenticator, not live credentials. The full application suite was not run; validation was focused on both Task 1 test files and import/compile checks.
+
+## Review follow-up: explicit authentication timeout
+
+- Updated the input route's `_job` adapter to pass `timeout_seconds=1800` explicitly to `authenticate_job`, preserving the binding contract if the helper's default changes.
+- Extended the input endpoint test to assert the authenticator receives `job_model=NetworkAccessPolicyAgentJob` and `timeout_seconds=1800`.
+- Confirmed the unchanged helper fails closed when `LION_AGENT_INTERNAL_TOKEN` is empty and rejects jobs unless `state == "RUNNING"`.
+- Verification: both Task 1 focused test files passed (20 tests; `/tmp/p03t1-fix.log`); `git diff --check` passed.

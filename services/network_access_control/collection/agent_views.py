@@ -30,7 +30,8 @@ def _body(request) -> dict:
 
 
 async def _job(request, body):
-    return await authenticate_job(request.headers, body, job_model=NetworkAccessPolicyAgentJob)
+    return await authenticate_job(request.headers, body, job_model=NetworkAccessPolicyAgentJob,
+                                 timeout_seconds=1800)
 
 
 @policy_agent_internal_bp.post("/policy-agent-jobs/input")

@@ -29,7 +29,8 @@ def request(body, headers=None):
 @pytest.mark.asyncio
 async def test_input_endpoint_returns_job_resources_schema_and_limit(monkeypatch):
     job = SimpleNamespace(id="j1", tenant_id="t1", collection_run_id="cr1", resource_ids=["r2"])
-    monkeypatch.setattr(agent_views, "authenticate_job", AsyncMock(return_value=job))
+    authenticate = AsyncMock(return_value=job)
+    monkeypatch.setattr(agent_views, "authenticate_job", authenticate)
     monkeypatch.setattr(agent_views.agent_jobs, "load_context", AsyncMock(return_value=(RAW_OUTPUTS, TARGETS)))
     monkeypatch.setattr(agent_views, "max_rules_per_device", AsyncMock(return_value=20000))
     response = await agent_views.policy_agent_job_input(request({"job_id": "j1", "agent_job_token": "t"}))
@@ -37,6 +38,10 @@ async def test_input_endpoint_returns_job_resources_schema_and_limit(monkeypatch
     assert [r["resource_id"] for r in data["resources"]] == ["r2"]
     assert data["document_schema"]["$id"].endswith("aioe.network-policy.normalized/v1")
     assert data["max_rules_per_device"] == 20000
+    authenticate.assert_awaited_once_with({"X-Internal-Token": "x"},
+                                          {"job_id": "j1", "agent_job_token": "t"},
+                                          job_model=agent_views.NetworkAccessPolicyAgentJob,
+                                          timeout_seconds=1800)
 
 
 @pytest.mark.asyncio
