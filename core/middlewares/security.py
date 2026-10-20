@@ -305,6 +305,9 @@ class SecurityMiddleware(BaseMiddleware):
             # Internal topology agent routes authenticate their own token and job binding.
             "/network-topology/internal/agent-jobs/",
             "/network-topology/internal/agent-facts/",
+            # Internal policy agent routes authenticate their own token and job binding.
+            "/network-access-control/internal/policy-agent-jobs/",
+            "/network-access-control/internal/policy-agent-facts/",
         ]
         request_method = getattr(request, "method", "GET").upper()
         if (
