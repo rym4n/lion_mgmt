@@ -3,29 +3,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
+from services.action_collection.execute import ItemOutcome  # noqa: F401
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.observations import raw_observation, typed_observations
 
 ACTION_ID = "aioe.network-topology.action-collection"
 PLAYBOOK_ID = "aioe-builtin-network-topology-collection"
-
-
-@dataclass(frozen=True)
-class ItemOutcome:
-    item_id: str
-    app_name: str
-    action_func: str
-    app_version: str
-    resource_id: str
-    status: str
-    output: Any
-    observed_at: str
-    error_code: str | None
-    error_message: str | None
-    duration_ms: int
 
 
 def _text(value: Any, default: str = "unknown") -> str:
