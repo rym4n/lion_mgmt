@@ -27,3 +27,8 @@
 - `python3 -m compileall -q scripts/smoke_policy_collection.py services/network_access_control/collection/pipeline.py tests/network_access_control/test_policy_collection_pipeline_collect.py`: passed.
 - `git diff --check`: passed.
 - Scope includes the requested smoke script plus the minimal production fix and regression test required by its real-DB finding. No source migrations, shared databases, generated schemas, deployments, pushes, or merges were used.
+
+## Round 1 follow-up
+
+- Strengthened the batch-ID regression to use UUID-length run/resource identifiers, assert repeatable 64-character SHA-256 values that differ by resource, and retain the short readable `run:resource` case.
+- Corrected the smoke script docstring to name the actual `settings.TORTOISE` setting.

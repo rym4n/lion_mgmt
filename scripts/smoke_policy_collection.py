@@ -2,7 +2,7 @@
 
 Run: uv run python scripts/smoke_policy_collection.py --confirmed-test-database
      (container: docker exec -w /app lion-mgmt /app/.venv/bin/python /tmp/smoke_policy_collection.py --confirmed-test-database)
-The switch attests that settings.TORTOISE_ORM points to a verified test DB with
+The switch attests that settings.TORTOISE points to a verified test DB with
 migration 135 applied and no running application workers. Uses a throwaway
 tenant and deletes every row it created in ``finally``.
 """

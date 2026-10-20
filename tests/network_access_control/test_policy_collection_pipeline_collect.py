@@ -268,15 +268,19 @@ async def test_pipeline_continues_from_collect_through_normalize_apply_finalize(
 @pytest.mark.asyncio
 async def test_pipeline_batch_ids_are_bounded_and_unique_per_run_resource(monkeypatch):
     run_id = "e5c53012-0be2-4f4d-9b2b-d1bdb6853d2e"
+    resource_ids = (
+        "8cccbf9a-1704-48b2-b255-31d4d728c3f1",
+        "9dddc0ab-2815-49c3-a366-42e5e839d4a2",
+    )
     row = collecting(FakePolicyRunRepository(plans=[plan()]), frozen_targets=[
-        asdict(target("resource-" + str(index))) for index in range(2)
+        asdict(target(resource_id)) for resource_id in resource_ids
     ])
     row.id = run_id
     repo = FakePolicyRunRepository(plans=[plan()])
     repo.runs[row.id] = row
     monkeypatch.setattr(pipeline, "execute_targets", AsyncMock(return_value=[
-        outcome("resource-0", output={"code": 200}),
-        outcome("resource-1", output={"code": 200}),
+        outcome(resource_ids[0], output={"code": 200}),
+        outcome(resource_ids[1], output={"code": 200}),
     ]))
     monkeypatch.setattr(pipeline, "max_rules_per_device", AsyncMock(return_value=20000))
     calls = []
@@ -291,12 +295,15 @@ async def test_pipeline_batch_ids_are_bounded_and_unique_per_run_resource(monkey
             "resource_id": resource_id, "device_type": "firewall", "policy_type": "firewall",
             "policies": [],
         }, None)
-        for resource_id in ("resource-0", "resource-1")
+        for resource_id in resource_ids
     })
     await pipeline.run_pipeline(plan(), row, normalizer=normalizer, repository=repo)
     assert row.state == "SUCCEEDED"
     assert len(calls) == 2 and len(set(calls)) == 2
-    assert all(len(batch_id) <= 64 for batch_id in calls)
+    expected = [pipeline._policy_batch_id(run_id, resource_id) for resource_id in resource_ids]
+    assert calls == expected
+    assert all(len(batch_id) == 64 for batch_id in calls)
+    assert len(pipeline._policy_batch_id(run_id, resource_ids[0])) == 64
     assert pipeline._policy_batch_id("run", "resource") == "run:resource"
 
 
