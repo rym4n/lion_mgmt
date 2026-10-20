@@ -74,6 +74,7 @@ class TopologyCollectionRun(TopologyTenantModel):
     error_message = fields.TextField(null=True)
     started_at = fields.DatetimeField(null=True)
     finished_at = fields.DatetimeField(null=True)
+    heartbeat_at = fields.DatetimeField(null=True)
 
     class Meta:
         table = "network_topology_collection_run"

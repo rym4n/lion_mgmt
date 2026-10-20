@@ -26,6 +26,7 @@ from models.network_topology_v2 import (
 )
 from services.network_topology import analysis_runs
 from services.action_collection import timer as collection_timer
+from services.action_collection.background import heartbeat_stale
 from services.action_collection.notify import notify_after_commit as _core_notify_after_commit
 from services.action_collection.notify import notify_failure  # tests patch runs.notify_failure
 from services.network_topology.collection.errors import CollectionError
@@ -540,6 +541,11 @@ async def sweep_runs(repository=None):
                 await finish_run(run, "FAILED", error_code="COLLECTION_RUN_TIMEOUT", repository=repo)
                 count += 1
                 continue
+        # Only COLLECTING is owned by an in-process background worker.
+        if _state(run.state) == "COLLECTING" and heartbeat_stale(run, _now()):
+            await finish_run(run, "FAILED", error_code="COLLECTION_WORKER_LOST", repository=repo)
+            count += 1
+            continue
         if _state(run.state) == "SUBMITTED":
             await refresh_from_analysis(run, repository=repo)
             count += 1

@@ -1,7 +1,6 @@
 """Dispatch frozen action targets and store only complete sanitized snapshots."""
 from __future__ import annotations
 
-import asyncio
 from dataclasses import asdict
 from datetime import datetime, timezone
 import logging
@@ -11,6 +10,7 @@ import orjson
 from models.asset_management import AssetInstance
 from models.network_topology_v2 import RUN_TERMINAL_STATES, TopologyCollectionManifest, TopologyCollectionRun
 from services.network_topology import snapshot
+from services.action_collection.background import start_tracked
 from services.action_collection.execute import ItemOutcome, execute_targets, text_time as _text_time
 from services.action_collection.executor import ActionExecutor, ExecResult, KafkaRunlogExecutor  # noqa: F401
 from services.network_topology.collection.errors import CollectionError
@@ -19,7 +19,6 @@ from services.network_topology.collection.snapshot_builder import asset_context_
 from services.network_topology.collection.targets import Target
 
 logger = logging.getLogger(__name__)
-_ACTIVE_TASKS: set[asyncio.Task] = set()
 
 
 def _now():
@@ -81,25 +80,19 @@ async def collect_and_store(plan, run, *, executor=None, repository=None) -> dic
                 "item_results": getattr(run, "item_results", None) or []}
 
 
-def _task_done(task):
-    _ACTIVE_TASKS.discard(task)
-    if not task.cancelled() and task.exception() is not None:
-        logger.error("Background collection terminal accounting failed")
-
-
 async def start_background(plan, run, *, repository=None) -> dict:
     if run.state == "MANIFEST_FROZEN":
         if repository is not None:
             claimed = await repository.claim_collection_start(run)
         else:
+            # Claim liveness atomically: a long queue wait must not look like a lost worker.
             claimed = await TopologyCollectionRun.filter(
                 id=run.id, tenant_id=run.tenant_id, topology_id=run.topology_id,
-                deleted=False, state="MANIFEST_FROZEN").update(state="COLLECTING")
+                deleted=False, state="MANIFEST_FROZEN").update(state="COLLECTING", heartbeat_at=_now())
         if claimed:
             run.state = "COLLECTING"
-            task = asyncio.create_task(collect_and_store(plan, run, repository=repository))
-            _ACTIVE_TASKS.add(task)
-            task.add_done_callback(_task_done)
+            start_tracked(collect_and_store(plan, run, repository=repository),
+                          run=run, run_model=TopologyCollectionRun)
         else:
             if repository is not None:
                 current = await repository.get_run(run.id, tenant_id=run.tenant_id)
