@@ -136,7 +136,8 @@ class OrmPolicyRunRepository:
                 setattr(run, key, value)
         return bool(changed)
 
-    async def finish_terminal(self, run, state, finished_at, values):
+    async def finish_terminal(self, run, state, finished_at, values, *, expected_state=None):
+        """Commit terminal accounting; False means the optional source guard lost."""
         _validate_values(values)
         if not _terminal(state):
             raise ValueError("Expected a terminal collection run state")
@@ -144,12 +145,16 @@ class OrmPolicyRunRepository:
             current = await NetworkAccessPolicyCollectionRun.filter(
                 id=run.id, tenant_id=run.tenant_id, deleted=False,
             ).using_db(connection).select_for_update().first()
-            if current is None or _terminal(current.state):
+            if (current is None or _terminal(current.state)
+                    or (expected_state is not None and current.state != expected_state)):
                 if current is not None:
-                    # Refresh a stale caller after cancellation/sweep won the
-                    # lock, so its response does not claim its requested state.
+                    # Refresh a stale caller after another worker/cancel/sweep
+                    # won the lock. Check the source state under this same lock
+                    # before terminal writes, plan accounting, or notification.
                     run.state, run.finished_at = current.state, current.finished_at
-                return None
+                # Guarded callers need to distinguish a lost claim from a
+                # committed terminal write whose plan was concurrently deleted.
+                return False if expected_state is not None else None
             plan = await NetworkAccessPolicyCollectionPlan.filter(
                 id=current.plan_id, tenant_id=current.tenant_id, deleted=False,
             ).using_db(connection).select_for_update().first()
@@ -193,7 +198,9 @@ def _result(run) -> dict:
     return {"collection_run_id": str(run.id), "state": run.state}
 
 
-async def finish_run(run, state, *, error_code=None, error_message=None, values=None, repository=None):
+async def finish_run(run, state, *, error_code=None, error_message=None, values=None, repository=None,
+                     expected_state=None):
+    """Finalize and notify; guarded calls return whether the terminal CAS committed."""
     if state not in POLICY_RUN_STATES or state not in POLICY_RUN_TERMINAL_STATES:
         raise CollectionError("COLLECTION_RUN_STATE_INVALID", 400)
     payload = dict(values or {})
@@ -201,9 +208,15 @@ async def finish_run(run, state, *, error_code=None, error_message=None, values=
         payload["error_code"] = error_code
     if error_message is not None:
         payload["error_message"] = error_message
-    plan = await _repo(repository).finish_terminal(run, state, _now(), payload)
+    guard = {"expected_state": expected_state} if expected_state is not None else {}
+    plan = await _repo(repository).finish_terminal(run, state, _now(), payload, **guard)
+    if plan is False:
+        return False
     if plan is not None:
         await notify_after_commit(plan, run)
+    # Preserve the original unguarded return contract; guarded callers receive
+    # an explicit CAS result even when no live plan remains to notify/account.
+    return True if expected_state is not None else None
 
 
 async def _playbook_version():

@@ -258,3 +258,36 @@ async def test_pipeline_collect_only_does_not_invoke_future_normalizer(monkeypat
     await pipeline.run_pipeline(plan(), row, normalizer=normalizer, repository=repo)
     assert row.state == "NORMALIZING" and row.raw_outputs is not None
     normalizer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_duplicate_freezer_cannot_terminalize_winner_at_terminal_lock_boundary(monkeypatch):
+    """The source-state guard must live in the terminal transaction, not a precheck."""
+    entered_terminal = asyncio.Event()
+    resume_terminal = asyncio.Event()
+
+    class GatedRepository(FakePolicyRunRepository):
+        async def finish_terminal(self, *args, **kwargs):
+            entered_terminal.set()
+            await resume_terminal.wait()
+            return await super().finish_terminal(*args, **kwargs)
+
+    repo = GatedRepository(plans=[plan()], items=[item()])
+    row = run_row()
+    repo.runs[row.id] = row
+    stale = deepcopy(row)
+    monkeypatch.setattr(pipeline, 'freeze_targets', AsyncMock(
+        side_effect=CollectionError('RESOURCE_NOT_FOUND', 409, 'private-resource')))
+    loser = asyncio.create_task(pipeline.start_pipeline(plan(), stale, repository=repo))
+    await asyncio.wait_for(entered_terminal.wait(), 1)
+    monkeypatch.setattr(pipeline, 'freeze_targets', AsyncMock(return_value=[target()]))
+    try:
+        assert await pipeline.freeze_and_claim(plan(), deepcopy(row), repository=repo) is True
+    finally:
+        resume_terminal.set()
+    result = await asyncio.wait_for(loser, 1)
+    assert result == {'collection_run_id': 'run-1', 'run_state': 'COLLECTING'}
+    assert (row.state, row.error_code, row.finished_at) == ('COLLECTING', None, None)
+    assert row.device_total == 1 and row.frozen_targets[0]['resource_id'] == 'r1'
+    assert repo.plans['p1'].consecutive_failures == 0 and repo.plans['p1'].last_run_id is None
+    pipeline.runs.notify_after_commit.assert_not_awaited()

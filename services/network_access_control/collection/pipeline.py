@@ -63,8 +63,9 @@ async def freeze_and_claim(plan, run, *, target_repository=None, repository=None
         if not targets:
             raise CollectionError("PLAN_EMPTY", 400)
     except CollectionError as error:
-        if await _live_in_state(run, "PENDING", repo) is not None:
-            await runs.finish_run(run, "FAILED", error_code=error.code, repository=repo)
+        if not await runs.finish_run(run, "FAILED", error_code=error.code,
+                                     expected_state="PENDING", repository=repo):
+            return False
         # Target errors may name resources; only the stable code crosses the API.
         raise CollectionError(error.code, error.status) from None
     return await repo.transition(run, "PENDING", "COLLECTING", {

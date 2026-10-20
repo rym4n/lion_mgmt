@@ -440,3 +440,58 @@ async def test_cancel_racing_with_completion_reports_winning_terminal(orm):
     result = await runs.cancel_run('t1', account_id='acc', repository=repo)
     assert result['state'] == 'SUCCEEDED'
     runs.notify_after_commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('source', ['PENDING', 'COLLECTING', 'CANCELLED'])
+async def test_orm_expected_source_guards_terminal_write_and_accounting_under_row_lock(orm, source):
+    from copy import copy
+    repo, rows, calls = orm
+    current = run_row(state=source, save=AsyncMock())
+    p = plan(consecutive_failures=2, save=AsyncMock())
+    rows['NetworkAccessPolicyCollectionRun'].append(current)
+    rows['NetworkAccessPolicyCollectionPlan'].append(p)
+    stale = copy(current)
+    stale.state = 'PENDING'
+    committed = await runs.finish_run(stale, 'FAILED', expected_state='PENDING',
+                                      error_code='RESOURCE_NOT_FOUND', repository=repo)
+    if source == 'PENDING':
+        assert committed is True
+        assert current.state == stale.state == 'FAILED'
+        assert p.consecutive_failures == 3 and p.last_run_id == current.id
+        current.save.assert_awaited_once()
+        p.save.assert_awaited_once()
+        runs.notify_after_commit.assert_awaited_once()
+    else:
+        assert committed is False
+        assert current.state == stale.state == source
+        assert current.error_code is None and current.finished_at is None
+        assert p.consecutive_failures == 2 and p.last_run_id is None
+        current.save.assert_not_awaited()
+        p.save.assert_not_awaited()
+        runs.notify_after_commit.assert_not_awaited()
+        assert not any(c[0] == 'NetworkAccessPolicyCollectionPlan' for c in calls)
+    assert calls[:3] == [
+        ('NetworkAccessPolicyCollectionRun', {'id': 'run-1', 'tenant_id': 't1', 'deleted': False}),
+        ('db', 'transaction'),
+        ('lock', {'id': 'run-1', 'tenant_id': 't1', 'deleted': False}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_guarded_finish_without_live_row_does_not_create_fake_or_notify():
+    repo = FakePolicyRunRepository(plans=[plan()])
+    assert await runs.finish_run(run_row(), 'FAILED', expected_state='PENDING', repository=repo) is False
+    assert repo.runs == {} and repo.plans['p1'].consecutive_failures == 0
+    runs.notify_after_commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_guarded_orm_finish_can_commit_without_live_plan(orm):
+    repo, rows, _ = orm
+    current = run_row(save=AsyncMock())
+    rows['NetworkAccessPolicyCollectionRun'].append(current)
+    assert await runs.finish_run(current, 'FAILED', expected_state='PENDING', repository=repo) is True
+    assert current.state == 'FAILED' and current.finished_at is not None
+    current.save.assert_awaited_once()
+    runs.notify_after_commit.assert_not_awaited()
