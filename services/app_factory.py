@@ -74,6 +74,7 @@ LICENSED_BLUEPRINT_SPECS: dict[str, tuple[BlueprintSpec, ...]] = {
         ("services.network_access_control.views", "network_access_control_bp"),
         ("services.network_access_control.collection.views", "policy_collection_bp"),
         ("services.network_access_control.collection.agent_views", "policy_agent_internal_bp"),
+        ("services.network_access_control.collection.agent_maintenance_views", "policy_agent_maintenance_bp"),
     ),
     "topology_bp": (
         ("services.network_topology.views", "topology_bp"),
