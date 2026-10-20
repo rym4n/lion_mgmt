@@ -1,7 +1,6 @@
 """Lifecycle orchestration for network topology collection runs."""
 from __future__ import annotations
 
-import inspect
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -27,6 +26,8 @@ from models.network_topology_v2 import (
 )
 from services.network_topology import analysis_runs
 from services.action_collection import timer as collection_timer
+from services.action_collection.notify import notify_after_commit as _core_notify_after_commit
+from services.action_collection.notify import notify_failure  # tests patch runs.notify_failure
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.plans import BUILTIN_PLAYBOOK_NAME
 from settings import TASK_TOPIC
@@ -294,38 +295,8 @@ async def require_open_run(plan_id: str, collection_run_id: str, repository=None
     return plan, run
 
 
-async def notify_failure(plan, run):
-    """Publish configured failure notification actions using inspection conventions."""
-    from services.inspection.views import _build_action_input, _extract_config_actions, _safe_int
-    from services.inspection.views import _get_account_id
-    actions = _extract_config_actions(getattr(plan, "notify_config", None))
-    for action in actions:
-        params = {
-            "resource": action.get("resource", ""), "node_name": action.get("description", ""),
-            "action": action.get("func", ""), "action_name": action.get("name", ""),
-            "app_name": action.get("tool_name", action.get("app_name", "")),
-            "name": action.get("description", ""), "app_ver": action.get("version", ""),
-            "main": action.get("tool_main", ""),
-            "action_input": _build_action_input(action, {"${采集结果}": str(getattr(run, "error_message", "") or "")}, {}),
-            "retry_times": _safe_int(action.get("retry_times"), 3),
-            "timeout": _safe_int(action.get("timeout"), 300),
-            "executor": _get_account_id(getattr(run, "triggered_by", None)),
-        }
-        await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": gen_run_id(),
-                                     "run_args": params, "tenant_id": plan.tenant_id})
-
-
 async def _notify_after_commit(plan, run):
-    if plan is None or run.state != "FAILED" or not plan.notify_enabled or plan.consecutive_failures < 3:
-        return
-    try:
-        outcome = notify_failure(plan, run)
-        if inspect.isawaitable(outcome):
-            await outcome
-    except Exception:
-        # Notification delivery cannot undo committed terminal accounting or
-        # replace the caller's stable error. Do not log executor/credential text.
-        logger.warning("Collection failure notification failed for run %s", run.id)
+    await _core_notify_after_commit(plan, run, notify=notify_failure)
 
 
 async def finish_run(run, state, *, error_code=None, error_message=None, result=None,
