@@ -87,6 +87,37 @@ async def test_execute_targets_timeout_and_unexpected_exception():
     assert "leaked" not in str(outcomes)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result_text", ["x" * (4 * 1024 * 1024 + 1), "é" * (2 * 1024 * 1024 + 1)])
+async def test_oversized_failed_result_skips_decode_and_redaction(monkeypatch, result_text):
+    from services.action_collection import execute as execute_module
+
+    calls = []
+
+    def decode(value):
+        calls.append("decode")
+        return {"msg": "oversized diagnostic"}
+
+    def scrub(value):
+        calls.append("scrub")
+        return value
+
+    monkeypatch.setattr(execute_module.orjson, "loads", decode)
+    monkeypatch.setattr(execute_module, "scrub_action_output", scrub)
+
+    async def executor(*args, **kwargs):
+        return ExecResult(-1, result_text, 7, "action-run")
+
+    outcomes = await execute_targets("t1", [target("r1")], concurrency=1, per_item_timeout=30,
+                                     executor_id="acct", executor=executor)
+
+    assert calls == []
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].error_code == outcomes[0].error_message == "COLLECTION_ACTION_FAILED"
+    assert outcomes[0].output is None
+    assert outcomes[0].action_run_id == "action-run"
+
+
 def test_text_time_treats_naive_as_utc():
     assert text_time(datetime(2026, 10, 20, 1, 2, 3)) == "2026-10-20T01:02:03Z"
 

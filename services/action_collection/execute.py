@@ -11,7 +11,7 @@ import orjson
 
 from services.action_collection.errors import CollectionError
 from services.action_collection.executor import ActionExecutor, KafkaRunlogExecutor
-from services.action_collection.outputs import parse_action_output, scrub_action_output
+from services.action_collection.outputs import MAX_OUTPUT_BYTES, parse_action_output, scrub_action_output
 from services.action_collection.targets import Target
 
 
@@ -61,11 +61,14 @@ async def execute_targets(tenant_id: str, targets: list[Target], *, concurrency:
                 action_run_id = result.action_run_id
                 if result.status != 0:
                     message = "COLLECTION_ACTION_FAILED"
-                    try:
-                        payload = scrub_action_output(orjson.loads(result.result_text)) if result.result_text else {}
-                        message = str(payload.get("msg") or message)[:512] if isinstance(payload, dict) else message
-                    except Exception:
-                        pass
+                    text = result.result_text
+                    if isinstance(text, str) and text:
+                        if len(text) <= MAX_OUTPUT_BYTES and len(text.encode("utf-8")) <= MAX_OUTPUT_BYTES:
+                            try:
+                                payload = scrub_action_output(orjson.loads(text))
+                                message = str(payload.get("msg") or message)[:512] if isinstance(payload, dict) else message
+                            except Exception:
+                                pass
                     raise CollectionError("COLLECTION_ACTION_FAILED", message=message)
                 output = parse_action_output(result.result_text)
                 if isinstance(output, dict) and output.get("code") not in (0, 200):
