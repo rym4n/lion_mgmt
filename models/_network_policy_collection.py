@@ -24,7 +24,16 @@ POLICY_RUN_TERMINAL_STATES = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "CANCE
 POLICY_RUN_WORKING_STATES = frozenset({"COLLECTING", "NORMALIZING", "APPLYING"})
 
 
-class NetworkAccessPolicyCollectionPlan(BaseModel):
+class _PolicyCollectionTenantModel(BaseModel):
+    """Require an explicit tenant for collection records, matching migration 135."""
+
+    tenant_id = fields.CharField(max_length=255, null=False)
+
+    class Meta:
+        abstract = True
+
+
+class NetworkAccessPolicyCollectionPlan(_PolicyCollectionTenantModel):
     enabled = fields.BooleanField(default=False)
     schedule_cron = fields.CharField(max_length=100, default="0 0 3 * * *")
     concurrency = fields.IntField(default=8)
@@ -42,7 +51,7 @@ class NetworkAccessPolicyCollectionPlan(BaseModel):
         table = "network_access_policy_collection_plan"
 
 
-class NetworkAccessPolicyCollectionItem(BaseModel):
+class NetworkAccessPolicyCollectionItem(_PolicyCollectionTenantModel):
     plan_id = fields.CharField(max_length=36)
     app_name = fields.CharField(max_length=255)
     app_version = fields.CharField(max_length=50, null=True)
@@ -57,7 +66,7 @@ class NetworkAccessPolicyCollectionItem(BaseModel):
         indexes = (("tenant_id", "plan_id"),)
 
 
-class NetworkAccessPolicyCollectionRun(BaseModel):
+class NetworkAccessPolicyCollectionRun(_PolicyCollectionTenantModel):
     plan_id = fields.CharField(max_length=36)
     trigger = fields.CharField(max_length=16)
     triggered_by = fields.CharField(max_length=255, null=True)
@@ -82,7 +91,7 @@ class NetworkAccessPolicyCollectionRun(BaseModel):
         indexes = (("tenant_id", "plan_id", "ctime"), ("tenant_id", "state"))
 
 
-class NetworkAccessPolicyAgentJob(BaseModel):
+class NetworkAccessPolicyAgentJob(_PolicyCollectionTenantModel):
     collection_run_id = fields.CharField(max_length=36)
     attempt = fields.IntField()
     state = fields.CharField(max_length=16, default="QUEUED")

@@ -118,3 +118,47 @@ def test_schema_validation_accepts_policy_and_rejects_unsafe_documents():
 def test_container_includes_normalized_policy_schema():
     dockerfile = (ROOT / "Dockerfile").read_text()
     assert "COPY services/network_access_control/collection/schemas/ ./services/network_access_control/collection/schemas/" in dockerfile
+
+
+def test_collection_models_require_explicit_nonnull_tenant():
+    import pytest
+    from tortoise.exceptions import ValidationError
+
+    for model, required in (
+        (NetworkAccessPolicyCollectionPlan, {}),
+        (NetworkAccessPolicyCollectionItem, {"plan_id": "plan", "app_name": "app", "action_func": "read"}),
+        (NetworkAccessPolicyCollectionRun, {"plan_id": "plan", "trigger": "manual"}),
+        (NetworkAccessPolicyAgentJob, {"collection_run_id": "run", "attempt": 1, "job_token_hash": "hash"}),
+    ):
+        field = model._meta.fields_map["tenant_id"]
+        assert not field.null
+        assert field.default is None
+        for values in ({}, {"tenant_id": None}):
+            with pytest.raises((ValueError, ValidationError)):
+                instance = model(**required, **values)
+                field.to_db_value(instance.tenant_id, instance)
+        instance = model(**required, tenant_id="tenant-a")
+        assert field.to_db_value(instance.tenant_id, instance) == "tenant-a"
+
+
+def test_migration_and_models_agree_on_every_column_nullability():
+    import importlib
+    import re
+
+    migration = importlib.import_module("migrations.models.135_20261020100000_network_policy_collection")
+    sql = asyncio.run(migration.upgrade(None))
+    for model in (NetworkAccessPolicyCollectionPlan, NetworkAccessPolicyCollectionItem,
+                  NetworkAccessPolicyCollectionRun, NetworkAccessPolicyAgentJob):
+        table_body = re.search(
+            r'CREATE TABLE IF NOT EXISTS "' + model._meta.db_table + r'" \((.*?)\n\);',
+            sql, re.S,
+        ).group(1)
+        columns = dict(re.findall(
+            r'"(\w+)" ((?:VARCHAR\(\d+\)|TIMESTAMPTZ|BOOL|INT|JSONB|TEXT)[^,\n]*)',
+            table_body,
+        ))
+        assert columns.keys() == model._meta.fields_map.keys()
+        for name, field in model._meta.fields_map.items():
+            assert field.null == ("NOT NULL" not in columns[name]), (model.__name__, name)
+        assert '"tenant_id" VARCHAR(255) NOT NULL' in table_body
+        assert "DEFAULT" not in columns["tenant_id"]
