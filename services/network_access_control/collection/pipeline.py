@@ -299,5 +299,19 @@ async def finalize(run, *, repository) -> None:
 
 
 async def compare_stage(plan, run, applied, *, repository) -> None:
-    # Task 6 supplies comparison; apply success determines collection success.
-    return None
+    bound = sorted({device["device_asset_id"] for device in applied if device.get("device_asset_id")})
+    if not bound or await _live_in_state(run, "APPLYING", repository) is None:
+        return
+    try:
+        result = await manager.run_policy_compare(
+            run.tenant_id, {"device_asset_ids": bound, "collection_run_id": str(run.id)},
+            runs.operator_for(run), record_changes=False)
+        values = {"compare_run_id": str(result["id"])}
+    except Exception:
+        # Compare is advisory; exception text may contain credentials.
+        logger.error("Policy compare failed for run %s", run.id)
+        values = {"compare_error": "POLICY_COMPARE_FAILED"}
+    # Cancellation/sweep may win while comparison is in flight. Do not write
+    # either a result or an error onto the terminal run.
+    if await _live_in_state(run, "APPLYING", repository) is not None:
+        await repository.save_fields(run, values)

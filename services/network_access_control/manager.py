@@ -1830,12 +1830,23 @@ async def create_policy_change_from_compare(
     )
 
 
-async def run_policy_compare(tenant: str, data: dict, operator: str | None) -> dict:
+async def run_policy_compare(
+    tenant: str, data: dict, operator: str | None, *, record_changes: bool = True
+) -> dict:
+    data = require_dict(data)
     accessory_project_id = data.get("accessory_project_id")
     collection_run_id = data.get("collection_run_id")
+    device_asset_ids = data.get("device_asset_ids")
+    if device_asset_ids is not None and (
+        not isinstance(device_asset_ids, list)
+        or not all(isinstance(value, str) and value for value in device_asset_ids)
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
     base_condition = Q(tenant_id=tenant, deleted=False)
     if accessory_project_id:
         base_condition &= Q(accessory_project_id=accessory_project_id)
+    if device_asset_ids is not None:
+        base_condition &= Q(device_asset_id__in=device_asset_ids)
     preset_policies = await NetworkAccessPresetPolicy.filter(base_condition).all()
     actual_condition = base_condition
     if collection_run_id:
@@ -1890,9 +1901,10 @@ async def run_policy_compare(tenant: str, data: dict, operator: str | None) -> d
         if name_match and name_match.id not in matched_preset_ids:
             diff = policy_diff(name_match, actual)
             matched_preset_ids.add(name_match.id)
-            await create_policy_change_from_compare(
-                tenant, actual, "modified", diff, operator
-            )
+            if record_changes:
+                await create_policy_change_from_compare(
+                    tenant, actual, "modified", diff, operator
+                )
             items.append(
                 await NetworkAccessPolicyCompareItem.create(
                     tenant_id=tenant,
@@ -1907,9 +1919,10 @@ async def run_policy_compare(tenant: str, data: dict, operator: str | None) -> d
                 )
             )
             continue
-        await create_policy_change_from_compare(
-            tenant, actual, "added", actual.json, operator
-        )
+        if record_changes:
+            await create_policy_change_from_compare(
+                tenant, actual, "added", actual.json, operator
+            )
         items.append(
             await NetworkAccessPolicyCompareItem.create(
                 tenant_id=tenant,
