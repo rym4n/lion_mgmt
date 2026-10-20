@@ -10,6 +10,7 @@ from sanic_ext import openapi
 from core.maintenance import current_maintenance_mode
 from core.response import response_ok
 from libs.security.authorization import requires_permission
+from models.network_access_control import POLICY_RUN_TERMINAL_STATES
 from services.action_collection.errors import CollectionError
 from services.action_collection.internal_auth import (
     actor_id, reject_tenant_fields, require_internal_caller, session_tenant_id,
@@ -143,8 +144,13 @@ async def start_policy_collection_internal(request: Request):
 async def dispatch_policy_collection_internal(request: Request):
     try:
         data = _internal_body(request)
-        plan, run = await runs.require_open_run(_required(data, "plan_id"), _required(data, "collection_run_id"))
-        result = await pipeline.start_pipeline(plan, run)
+        plan_id, run_id = _required(data, "plan_id"), _required(data, "collection_run_id")
+        plan, run = await runs.get_run_for_plan(plan_id, run_id)
+        if run.state in POLICY_RUN_TERMINAL_STATES:
+            result = {"collection_run_id": str(run.id), "run_state": run.state}
+        else:
+            plan, run = await runs.require_open_run(plan_id, run_id)
+            result = await pipeline.start_pipeline(plan, run)
         return sanic_json({"code": 0, "data": result}, status=202, dumps=orjson.dumps)
     except CollectionError as error:
         return _error(error)

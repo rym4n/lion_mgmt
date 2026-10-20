@@ -1,4 +1,5 @@
 """HTTP contracts, tenant boundaries and permissions for policy collection."""
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -181,17 +182,73 @@ async def test_detail_passes_server_maintenance_scope(monkeypatch, maintenance):
 
 @pytest.mark.asyncio
 async def test_internal_dispatch_returns_202(monkeypatch):
-    owner, row = SimpleNamespace(id="p1", tenant_id="t2"), SimpleNamespace(id="r1", state="PENDING")
-    lookup = AsyncMock(return_value=(owner, row))
+    owner, row = plan(tenant_id="t2"), run_row("r1", tenant_id="t2")
+    repo = FakePolicyRunRepository(plans=[owner])
+    repo.runs[row.id] = row
     start = AsyncMock(return_value={"collection_run_id": "r1", "run_state": "COLLECTING"})
-    monkeypatch.setattr(views.runs, "require_open_run", lookup)
+    monkeypatch.setattr(views.runs, "OrmPolicyRunRepository", lambda: repo)
     monkeypatch.setattr(views.pipeline, "start_pipeline", start)
     response = await _handler("dispatch_policy_collection_internal")(
         _request({"plan_id": "p1", "collection_run_id": "r1"}, DEFAULT_TENANT_ID))
     assert response.status == 202
     assert _data(response) == {"code": 0, "data": {"collection_run_id": "r1", "run_state": "COLLECTING"}}
-    lookup.assert_awaited_once_with("p1", "r1")
     start.assert_awaited_once_with(owner, row)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED"])
+async def test_terminal_duplicate_dispatch_returns_current_state_without_pipeline(monkeypatch, state):
+    repo = FakePolicyRunRepository(plans=[plan(tenant_id="ordinary-tenant")])
+    row = run_row("r1", tenant_id="ordinary-tenant", state=state,
+                  started_at=datetime.now(timezone.utc) - timedelta(days=1))
+    repo.runs[row.id] = row
+    monkeypatch.setattr(views.runs, "OrmPolicyRunRepository", lambda: repo)
+    start = AsyncMock()
+    monkeypatch.setattr(views.pipeline, "start_pipeline", start)
+    for _ in range(2):
+        response = await _handler("dispatch_policy_collection_internal")(
+            _request({"plan_id": "p1", "collection_run_id": "r1"}, DEFAULT_TENANT_ID))
+        assert response.status == 202
+        assert _data(response) == {"code": 0, "data": {"collection_run_id": "r1", "run_state": state}}
+    assert row.state == state and row.error_code is None
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["PENDING", "COLLECTING", "NORMALIZING", "APPLYING"])
+async def test_active_timed_out_dispatch_closes_without_pipeline(monkeypatch, state):
+    repo = FakePolicyRunRepository(plans=[plan(run_timeout_seconds=600)])
+    row = run_row("r1", state=state, started_at=datetime.now(timezone.utc) - timedelta(seconds=601))
+    repo.runs[row.id] = row
+    monkeypatch.setattr(views.runs, "OrmPolicyRunRepository", lambda: repo)
+    monkeypatch.setattr(views.runs, "notify_after_commit", AsyncMock())
+    start = AsyncMock()
+    monkeypatch.setattr(views.pipeline, "start_pipeline", start)
+    response = await _handler("dispatch_policy_collection_internal")(
+        _request({"plan_id": "p1", "collection_run_id": "r1"}, DEFAULT_TENANT_ID))
+    assert response.status == 409
+    assert _data(response)["data"]["error_code"] == "COLLECTION_RUN_CLOSED"
+    assert row.state == "FAILED" and row.error_code == "COLLECTION_RUN_TIMEOUT"
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["missing_plan", "missing_run", "cross_plan", "cross_tenant"])
+async def test_dispatch_rejects_unverified_run_without_pipeline(monkeypatch, invalid):
+    repo = FakePolicyRunRepository(plans=[] if invalid == "missing_plan" else [plan()])
+    if invalid != "missing_run":
+        repo.runs["r1"] = run_row("r1", state="SUCCEEDED",
+                                  plan_id="p2" if invalid == "cross_plan" else "p1",
+                                  tenant_id="t2" if invalid == "cross_tenant" else "t1")
+    monkeypatch.setattr(views.runs, "OrmPolicyRunRepository", lambda: repo)
+    start = AsyncMock()
+    monkeypatch.setattr(views.pipeline, "start_pipeline", start)
+    response = await _handler("dispatch_policy_collection_internal")(
+        _request({"plan_id": "p1", "collection_run_id": "r1"}, DEFAULT_TENANT_ID))
+    assert response.status == 404
+    assert _data(response)["data"]["error_code"] == (
+        "PLAN_NOT_FOUND" if invalid == "missing_plan" else "COLLECTION_RUN_NOT_FOUND")
+    start.assert_not_awaited()
 
 
 @pytest.mark.asyncio
