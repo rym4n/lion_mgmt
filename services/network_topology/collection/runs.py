@@ -15,7 +15,7 @@ from tortoise.transactions import in_transaction
 from core.maintenance import DEFAULT_TENANT_ID
 from libs.kafka import aproduce
 from libs.utils import gen_run_id
-from models import NetworkTopology, Playbook, PlaybookVersion
+from models import NetworkTopology
 from models.network_topology_v2 import (
     RUN_STATES,
     RUN_TERMINAL_STATES,
@@ -26,6 +26,7 @@ from models.network_topology_v2 import (
     TopologyCollectionRun,
 )
 from services.network_topology import analysis_runs
+from services.action_collection import timer as collection_timer
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.plans import BUILTIN_PLAYBOOK_NAME
 from settings import TASK_TOPIC
@@ -199,21 +200,7 @@ def _repo(repository):
 
 
 async def _builtin_playbook():
-    playbook = await Playbook.filter(
-        name=BUILTIN_PLAYBOOK_NAME,
-        tenant_id=DEFAULT_TENANT_ID,
-        deleted=False,
-        internal=True,
-    ).first()
-    if not playbook:
-        return None, None
-    version = await PlaybookVersion.filter(
-        playbook_id=playbook.id,
-        tenant_id=DEFAULT_TENANT_ID,
-        deleted=False,
-        status=1,
-    ).order_by("-utime").first()
-    return playbook, version
+    return await collection_timer.builtin_playbook(BUILTIN_PLAYBOOK_NAME)
 
 
 async def trigger_manual(tenant_id, topology_id, *, account_id, repository=None):

@@ -3,28 +3,29 @@ from __future__ import annotations
 
 from copy import deepcopy
 from contextlib import asynccontextmanager
-from hashlib import sha256
-
-import asyncpg
-from tortoise import connections
+import asyncpg  # noqa: F401 - tests patch the shared driver through this module
+from tortoise import connections  # noqa: F401 - tests patch the shared connection registry
 from tortoise.expressions import RawSQL
 
 from tortoise.transactions import in_transaction
 from core.maintenance import DEFAULT_TENANT_ID
 from libs.kafka import aproduce
-from models import Playbook, PlaybookVersion, Timed, ToolAction, ToolResources
+from models import Timed, ToolAction, ToolResources
 from models.network_topology_v2 import (
     TopologyCollectionItem,
     TopologyCollectionPlan,
     TopologyCollectionRun,
 )
 from services.inspection.logic import is_valid_schedule_cron
+from services.action_collection import timer as collection_timer
 from services.network_topology.canonicalization import canonicalize_json
 from services.network_topology.collection.errors import CollectionError
 from settings import TASK_TOPIC
 
 BUILTIN_PLAYBOOK_NAME = '网络拓扑自动采集'
-TIMER_END = '2099-12-31 23:59:59'
+TIMER_END = collection_timer.TIMER_END
+TIMER_PREFIX = 'network_topology_collection_'
+LOCK_NAMESPACE = 'network_topology_collection'
 MAX_RESOURCES = 500
 PLAN_FIELDS = ('id', 'topology_id', 'enabled', 'schedule_cron', 'concurrency',
                'per_item_timeout_seconds', 'run_timeout_seconds', 'notify_enabled',
@@ -130,11 +131,7 @@ def validate_plan_payload(payload: dict) -> dict:
 
 
 async def builtin_playbook():
-    playbook = await Playbook.filter(name=BUILTIN_PLAYBOOK_NAME, tenant_id=DEFAULT_TENANT_ID, deleted=False, internal=True).first()
-    if not playbook:
-        return None, None
-    version = await PlaybookVersion.filter(playbook_id=playbook.id, tenant_id=DEFAULT_TENANT_ID, deleted=False, status=1).order_by('-utime').first()
-    return playbook, version
+    return await collection_timer.builtin_playbook(BUILTIN_PLAYBOOK_NAME)
 
 
 async def get_plan(tenant_id: str, topology_id: str) -> dict:
@@ -267,39 +264,12 @@ async def save_plan(tenant_id: str, topology_id: str, payload: dict, *, account_
 
 @asynccontextmanager
 async def _locked_plan(plan):
-    async with in_transaction() as db:
-        current = await TopologyCollectionPlan.filter(
-            id=plan.id, tenant_id=plan.tenant_id, deleted=False,
-        ).using_db(db).select_for_update().first()
+    async with collection_timer.locked_plan(TopologyCollectionPlan)(plan) as current:
         yield current
 
 
-@asynccontextmanager
-async def _timer_serialization(plan):
-    # A dedicated session avoids exhausting the ORM pool with advisory-lock
-    # waiters while the lock owner needs pooled transactions to commit state.
-    client = connections.get('default')
-    # Tortoise's extras target create_pool(); a standalone connection must not
-    # receive pool lifecycle, sizing or callback options. Keep connection options
-    # such as SSL and timeouts, and leave the shared ORM configuration untouched.
-    connection_options = client.extra.copy()
-    for option in (
-        'min_size', 'max_size', 'max_queries', 'max_inactive_connection_lifetime',
-        'connect', 'setup', 'init', 'reset',
-    ):
-        connection_options.pop(option, None)
-    connection = await asyncpg.connect(
-        host=client.host, port=client.port, user=client.user,
-        password=client.password, database=client.database,
-        server_settings=client.server_settings, **connection_options,
-    )
-    key = int.from_bytes(sha256(f'network_topology_collection:{plan.tenant_id}:{plan.id}'.encode()).digest()[:8], 'big', signed=True)
-    try:
-        await connection.execute('SELECT pg_advisory_lock($1)', key)
-        yield
-    finally:
-        # Closing the dedicated session releases the lock even after cancellation.
-        await connection.close()
+def _timer_serialization(plan):
+    return collection_timer.advisory_lock(LOCK_NAMESPACE, plan.tenant_id, plan.id)
 
 
 async def sync_timer(plan) -> None:
@@ -308,64 +278,18 @@ async def sync_timer(plan) -> None:
 
 
 async def _reconcile_timer(plan) -> None:
-    # Re-read under the plan row lock: older post-commit callers must reconcile
-    # the latest revision, and two callers must not create separate timer rows.
-    prepared = None
-    async with _locked_plan(plan) as current:
-        if current is not None:
-            prepared = await _prepare_timer_locked(current)
-    if prepared is None:
-        return
-    timed, message, enabled, cron = prepared
-    # The identity and disabled state are committed before touching Kafka.  A
-    # broker failure therefore cannot roll back the row needed for retry.
-    await aproduce(TASK_TOPIC, message, raise_on_error=True)
-    async with _locked_plan(plan) as current:
-        if current is None:
-            return
-        # A newer save may have changed the schedule while Kafka was in flight;
-        # leave the timer disabled and let that save's reconciliation win.
-        if bool(current.enabled) != enabled or current.schedule_cron != cron:
-            return
-        timed.enable = int(enabled)
-        timed.tactics = cron
-        await timed.save()
-        current.timed_id = timed.id
-        await current.save(update_fields=['timed_id'])
+    # Resolve module globals per call to preserve topology's patchable API.
+    await collection_timer.reconcile_timer_locked(
+        plan, timer_prefix=TIMER_PREFIX, locked_plan=_locked_plan,
+        playbook_lookup=builtin_playbook, timed_model=Timed, produce=aproduce,
+    )
 
 
 async def _prepare_timer_locked(plan):
-    playbook = version = None
-    if plan.enabled:
-        playbook, version = await builtin_playbook()
-        if playbook is None or version is None:
-            raise CollectionError('COLLECTION_PLAYBOOK_UNAVAILABLE', 409)
-    timed = await Timed.filter(name=f'network_topology_collection_{plan.id}', tenant_id=DEFAULT_TENANT_ID, deleted=False, internal=True).first()
-    if timed is None and not plan.enabled:
-        return
-    created = timed is None
-    if created:
-        timed = await Timed.create(name=f'network_topology_collection_{plan.id}', tenant_id=DEFAULT_TENANT_ID,
-            type=0, playbook=playbook, playbook_version=version.version, playbook_input={}, status=1,
-            tactics=plan.schedule_cron, end_time=TIMER_END, enable=0, creator_id=plan.updater,
-            updator_id=plan.updater, internal=True)
-    inputs = ({'flow_id': version.id, 'flow_input': {'plan_id': plan.id, 'collection_run_id': ''},
-               'executor': plan.updater} if plan.enabled else timed.playbook_input)
-    msg = dict(run_type='flow', run_args=inputs, timer='cron' if plan.enabled else 'remove',
-               timer_rule=dict(end_date=TIMER_END, crontab=plan.schedule_cron) if plan.enabled else {},
-               timer_id=timed.id, tenant_id=DEFAULT_TENANT_ID)
-    timed.enable = 0
-    timed.tactics = plan.schedule_cron
-    timed.playbook_input = inputs
-    timed.end_time = TIMER_END
-    timed.updator_id = plan.updater
-    if plan.enabled:
-        timed.playbook_id = playbook.id
-        timed.playbook_version = version.version
-    await timed.save()
-    plan.timed_id = timed.id
-    await plan.save(update_fields=['timed_id'])
-    return timed, msg, bool(plan.enabled), plan.schedule_cron
+    return await collection_timer.prepare_timer_locked(
+        plan, timer_prefix=TIMER_PREFIX,
+        playbook_lookup=builtin_playbook, timed_model=Timed,
+    )
 
 
 async def delete_plan_for_topology(tenant_id, topology_id) -> None:
