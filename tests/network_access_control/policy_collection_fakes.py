@@ -97,17 +97,18 @@ class FakePolicyRunRepository:
             setattr(run, key, value)
         return True
 
-    async def finish_terminal(self, run, state, finished_at, values, *, expected_state=None):
+    async def finish_terminal(self, run, state, finished_at, values, *, expected_state=None, terminal_guard=None):
         runs._validate_values(values)
         if state not in POLICY_RUN_TERMINAL_STATES:
             raise ValueError("Expected a terminal collection run state")
         row = self.runs.get(run.id)
         if row is None or row.tenant_id != run.tenant_id or row.deleted:
-            return False if expected_state is not None else None
+            return False if expected_state is not None or terminal_guard is not None else None
         if (row.state in POLICY_RUN_TERMINAL_STATES
-                or (expected_state is not None and row.state != expected_state)):
+                or (expected_state is not None and row.state != expected_state)
+                or (terminal_guard is not None and not terminal_guard(row))):
             run.state, run.finished_at = row.state, row.finished_at
-            return False if expected_state is not None else None
+            return False if expected_state is not None or terminal_guard is not None else None
         for key, value in {**values, "state": state, "finished_at": finished_at}.items():
             setattr(row, key, value)
             setattr(run, key, value)

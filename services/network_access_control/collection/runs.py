@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
@@ -15,18 +15,21 @@ from libs.utils import gen_run_id
 from models.network_access_control import (
     POLICY_RUN_STATES,
     POLICY_RUN_TERMINAL_STATES,
+    POLICY_RUN_WORKING_STATES,
     NetworkAccessActualPolicy,
     NetworkAccessPolicyCollectionItem,
     NetworkAccessPolicyCollectionPlan,
     NetworkAccessPolicyCollectionRun,
 )
 from services.action_collection import timer as collection_timer
+from services.action_collection.background import heartbeat_stale
 from services.action_collection.errors import CollectionError
 from services.action_collection.notify import notify_after_commit
 from services.network_access_control.collection.constants import AUTO_OPERATOR, BUILTIN_PLAYBOOK_NAME
 from settings import TASK_TOPIC
 
 logger = logging.getLogger(__name__)
+RAW_OUTPUT_RETENTION = timedelta(days=7)
 
 SUMMARY_FIELDS = ("trigger", "triggered_by", "state", "device_total", "device_succeeded", "compare_run_id",
                   "error_code", "error_message", "started_at", "finished_at")
@@ -136,8 +139,8 @@ class OrmPolicyRunRepository:
                 setattr(run, key, value)
         return bool(changed)
 
-    async def finish_terminal(self, run, state, finished_at, values, *, expected_state=None):
-        """Commit terminal accounting; False means the optional source guard lost."""
+    async def finish_terminal(self, run, state, finished_at, values, *, expected_state=None, terminal_guard=None):
+        """Commit accounting; optional pure eligibility guard runs under the row lock."""
         _validate_values(values)
         if not _terminal(state):
             raise ValueError("Expected a terminal collection run state")
@@ -146,7 +149,8 @@ class OrmPolicyRunRepository:
                 id=run.id, tenant_id=run.tenant_id, deleted=False,
             ).using_db(connection).select_for_update().first()
             if (current is None or _terminal(current.state)
-                    or (expected_state is not None and current.state != expected_state)):
+                    or (expected_state is not None and current.state != expected_state)
+                    or (terminal_guard is not None and not terminal_guard(current))):
                 if current is not None:
                     # Refresh a stale caller after another worker/cancel/sweep
                     # won the lock. Check the source state under this same lock
@@ -154,7 +158,7 @@ class OrmPolicyRunRepository:
                     run.state, run.finished_at = current.state, current.finished_at
                 # Guarded callers need to distinguish a lost claim from a
                 # committed terminal write whose plan was concurrently deleted.
-                return False if expected_state is not None else None
+                return False if expected_state is not None or terminal_guard is not None else None
             plan = await NetworkAccessPolicyCollectionPlan.filter(
                 id=current.plan_id, tenant_id=current.tenant_id, deleted=False,
             ).using_db(connection).select_for_update().first()
@@ -199,7 +203,7 @@ def _result(run) -> dict:
 
 
 async def finish_run(run, state, *, error_code=None, error_message=None, values=None, repository=None,
-                     expected_state=None):
+                     expected_state=None, terminal_guard=None):
     """Finalize and notify; guarded calls return whether the terminal CAS committed."""
     if state not in POLICY_RUN_STATES or state not in POLICY_RUN_TERMINAL_STATES:
         raise CollectionError("COLLECTION_RUN_STATE_INVALID", 400)
@@ -209,6 +213,8 @@ async def finish_run(run, state, *, error_code=None, error_message=None, values=
     if error_message is not None:
         payload["error_message"] = error_message
     guard = {"expected_state": expected_state} if expected_state is not None else {}
+    if terminal_guard is not None:
+        guard["terminal_guard"] = terminal_guard
     plan = await _repo(repository).finish_terminal(run, state, _now(), payload, **guard)
     if plan is False:
         return False
@@ -216,7 +222,43 @@ async def finish_run(run, state, *, error_code=None, error_message=None, values=
         await notify_after_commit(plan, run)
     # Preserve the original unguarded return contract; guarded callers receive
     # an explicit CAS result even when no live plan remains to notify/account.
-    return True if expected_state is not None else None
+    return True if guard else None
+
+
+def _sweep_error(run, now, timeout):
+    started = _aware(run.started_at)
+    if started is not None and (now - started).total_seconds() > timeout:
+        return "COLLECTION_RUN_TIMEOUT"
+    if run.state in POLICY_RUN_WORKING_STATES and heartbeat_stale(run, now):
+        return "COLLECTION_WORKER_LOST"
+    return None
+
+
+async def sweep_runs(*, now=None, repository=None) -> int:
+    """Expire abandoned runs across tenants, then discard old terminal raw output."""
+    repo = _repo(repository)
+    now = _aware(now) if now is not None else _now()
+    count = 0
+    for run in await repo.open_runs():
+        try:
+            plan = await repo.get_plan(run.plan_id, tenant_id=run.tenant_id)
+            timeout = int(getattr(plan, "run_timeout_seconds", 3600) or 3600)
+            code = _sweep_error(run, now, timeout)
+            if code is not None:
+                # A heartbeat/stage/completion may change after open_runs was
+                # read. Check the live row again under the terminal write lock.
+                changed = await finish_run(
+                    run, "FAILED", error_code=code, repository=repo, expected_state=run.state,
+                    terminal_guard=lambda current: _sweep_error(current, now, timeout) == code)
+                count += int(changed)
+        except Exception:
+            # Do not log exception text: malformed values can contain secrets.
+            logger.warning("Policy collection sweep skipped run %s", getattr(run, "id", None))
+    try:
+        await repo.clear_expired_raw_outputs(now - RAW_OUTPUT_RETENTION)
+    except Exception:
+        logger.warning("Policy collection raw output cleanup failed")
+    return count
 
 
 async def _playbook_version():

@@ -4,6 +4,7 @@ from .cache import CacheListener
 from .command_center import CommandCenterListener
 from .dashboard import DashboardMaterializedViewListener
 from .event_ingestion import EventIngestionTemplateRepairListener
+from .policy_collection import PolicyCollectionListener
 from .topology_analysis import TopologyAnalysisListener
 
 LISTENER_TUPLE: tuple[type[BaseListener], ...] = (
@@ -13,4 +14,5 @@ LISTENER_TUPLE: tuple[type[BaseListener], ...] = (
     AssetCatalogListener,
     EventIngestionTemplateRepairListener,
     TopologyAnalysisListener,
+    PolicyCollectionListener,
 )
