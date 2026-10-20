@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-policy.normalized/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resource_id", "device_type", "policy_type", "policies"],
+  "properties": {
+    "resource_id": {"type": "string", "minLength": 1, "maxLength": 36},
+    "device_type": {"enum": ["firewall", "switch", "other"]},
+    "policy_type": {"enum": ["firewall", "acl", "other"]},
+    "policies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["policy_key", "action", "parse_status", "raw_text"],
+        "properties": {
+          "policy_key": {"type": "string", "minLength": 1, "maxLength": 255},
+          "raw_rule_id": {"type": ["string", "null"], "maxLength": 255},
+          "rule_name": {"type": ["string", "null"], "maxLength": 255},
+          "source_zone": {"type": ["string", "null"]},
+          "source_address": {"type": ["string", "null"]},
+          "source_port": {"type": ["string", "null"]},
+          "target_zone": {"type": ["string", "null"]},
+          "target_address": {"type": ["string", "null"]},
+          "destination_port": {"type": ["string", "null"]},
+          "protocol": {"type": ["string", "null"]},
+          "service": {"type": ["string", "null"]},
+          "action": {"enum": ["permit", "deny"]},
+          "action_inferred": {"type": "boolean"},
+          "enabled": {"type": "boolean"},
+          "policy_order": {"type": ["integer", "null"], "minimum": 0},
+          "parse_status": {"enum": ["parsed", "unparsed"]},
+          "raw_text": {"type": "string", "minLength": 1, "maxLength": 8192}
+        }
+      }
+    }
+  }
+}

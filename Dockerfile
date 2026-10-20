@@ -93,6 +93,7 @@ COPY services/asset_management/builtin_catalog/ ./services/asset_management/buil
 COPY services/inspection/inspection_report_template.docx ./services/inspection/inspection_report_template.docx
 COPY services/inspection/inspection_template_model.xlsx ./services/inspection/inspection_template_model.xlsx
 COPY services/network_topology/schemas/ ./services/network_topology/schemas/
+COPY services/network_access_control/collection/schemas/ ./services/network_access_control/collection/schemas/
 COPY services/network_topology/registries/ ./services/network_topology/registries/
 
 RUN python -c "from services.network_topology.contract_smoke import main; main()"

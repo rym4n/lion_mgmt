@@ -1221,3 +1221,6 @@ def base_json(item: BaseModel) -> dict:
         "utime": strip_timezone_to_seconds(item.utime),
         "tenant_id": item.tenant_id,
     }
+
+
+from models._network_policy_collection import *  # noqa: E402,F401,F403
