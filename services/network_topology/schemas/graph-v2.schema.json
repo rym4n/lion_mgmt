@@ -42,6 +42,13 @@
       "properties": {
         "management_ip": {"type": "string"}, "vendor": {"type": "string"}, "model": {"type": "string"}, "serial": {"type": "string"},
         "network_prefixes": {"type": "array", "items": {"type": "string"}},
+        "ip_version": {"enum": [4, 6]},
+        "prefix_length": {"type": "integer", "minimum": 0, "maximum": 128},
+        "address_scope": {"enum": ["private", "public", "link_local", "loopback", "multicast", "unspecified", "reserved"]},
+        "next_hop_ip": {"type": "string"},
+        "route_prefixes": {"type": "array", "items": {"type": "string"}},
+        "interface_names": {"type": "array", "items": {"type": "string"}},
+        "route_count": {"type": "integer", "minimum": 1},
         "virtual_addresses": {"type": "array", "items": {"type": "string"}},
         "protocols": {"type": "array", "items": {"type": "string"}},
         "ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
@@ -154,7 +161,7 @@
       "properties": {
         "id": {"type": "string", "minLength": 1},
         "multi_edge_identity": {"$ref": "#/$defs/multiEdgeIdentity"},
-        "relation_type": {"enum": ["physical_link", "l2_trunk", "l3_connectivity", "routing_adjacency", "security_boundary", "wan_connection", "tunnel", "gateway_for", "collapsed_path", "aggregated_connectivity", "logical_dependency", "service_boundary"]},
+        "relation_type": {"enum": ["physical_link", "l2_trunk", "l3_connectivity", "routing_adjacency", "configured_route", "security_boundary", "wan_connection", "tunnel", "gateway_for", "collapsed_path", "aggregated_connectivity", "logical_dependency", "service_boundary"]},
         "layer": {"enum": ["physical", "l2", "l3", "routing", "security", "overlay", "service"]},
         "direction": {"enum": ["bidirectional", "unidirectional"]},
         "endpoints": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/relationEndpoint"}},

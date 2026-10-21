@@ -273,6 +273,8 @@ async def test_view_matches_frozen_schema_and_uses_tenant_scoped_repository():
         "read_only": True,
         "target_id": "entity:router-0",
         "entity_kind": "device",
+        "role": "router",
+        "importance": "important",
     }
 
 
@@ -405,7 +407,7 @@ def test_v2_statistics_and_root_compatibility_keep_legacy_shape_read_only():
     }
     assert set(compatible) == {"nodes", "edges", "read_only"}
     assert compatible["read_only"] is True
-    assert all(set(node) == {"id", "projection_type", "label", "read_only", "target_id"} for node in compatible["nodes"])
+    assert all(set(node) == {"id", "projection_type", "label", "read_only", "target_id", "scope_type", "summary", "importance"} for node in compatible["nodes"])
 
 
 @pytest.mark.parametrize('serializer', ['items', 'versions'])

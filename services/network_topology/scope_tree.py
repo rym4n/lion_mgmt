@@ -8,6 +8,9 @@ from typing import Any, Iterable, Mapping
 from urllib.parse import quote
 
 from services.network_topology.identity import IdentityResolution
+from services.network_topology.context_placement import context_memberships, context_type
+from services.network_topology.address_presentation import network_attributes
+from services.network_topology.configured_routes import configured_routes, route_attributes
 from services.network_topology.importance import (
     ImportanceDecision,
     assess_importance,
@@ -81,6 +84,7 @@ def build_scope_tree(
     state.add_devices(identity_resolution)
     state.add_groups(identity_resolution)
     state.add_segments()
+    state.add_configured_next_hops()
     scopes = _finalize_scopes(index, state.entities)
     return ScopeTreeResult(
         profile["root_scope_seed"], scopes, tuple(state.entities),
@@ -105,6 +109,7 @@ class _ProjectionState:
         self.excluded: list[str] = []
         self.collapsed: list[str] = []
         self.provenance = _provenance_index(facts)
+        self.context_memberships = context_memberships(facts)
 
     def add_devices(self, resolution):
         grouped = {member for group in resolution.groups for member in group.physical_member_ids}
@@ -127,6 +132,34 @@ class _ProjectionState:
     def add_segments(self):
         for fact in sorted(self.facts.get("segments", ()), key=lambda item: item["id"]):
             self.entities.append(self._segment_entity(fact))
+
+    def add_configured_next_hops(self):
+        interfaces = {item["id"]: item for item in self.facts.get("interfaces", ())}
+        grouped = {}
+        for (identifier, owner, address, interface_id), routes in configured_routes(self.facts):
+            if owner not in {item["id"] for item in self.facts.get("devices", ())}:
+                continue
+            scope_id, memberships = (self._observed_context_scope(interface_id)
+                                     if self.context_memberships.get(interface_id)
+                                     else (self.profile["root_scope_seed"], []))
+            if identifier in grouped:
+                entity = grouped[identifier]
+                entity["scope_memberships"] = sorted(set(entity["scope_memberships"] + memberships))
+                parents = {key: value["parent_scope_id"] for key, value in self.scopes.items()}
+                entity["scope_id"] = lowest_common_ancestor([entity["scope_id"], scope_id], parents)
+                attrs = route_attributes(address, interfaces[interface_id], routes)
+                for key in ("route_prefixes", "interface_names"):
+                    entity["attributes"][key] = sorted(set(entity["attributes"][key] + attrs[key]))
+                entity["attributes"]["route_count"] += len(routes)
+                entity["provenance"].extend(entry for route in routes for entry in self._provenance(route))
+                continue
+            attrs = network_attributes(f"{address}/{'128' if ':' in address else '32'}")
+            attrs.update(route_attributes(address, interfaces[interface_id], routes))
+            provenance = [entry for route in routes for entry in self._provenance(route)]
+            grouped[identifier] = _entity(identifier, scope_id, memberships, "external", address,
+                "configured_next_hop", "external_network", normal_importance(routes[0]),
+                attrs, provenance)
+        self.entities.extend(grouped.values())
 
     def _filter_device(self, fact, canonical_id):
         attributes = fact.get("attributes", {})
@@ -176,7 +209,7 @@ class _ProjectionState:
         scope_id, memberships = self._segment_scope(fact, vrf)
         kind = "external" if attributes.get("device_id") is None else "network_segment"
         role = "external_network" if kind == "external" else "connected_network"
-        output = {"network_prefixes": [str(ip_network(cidr, strict=False))]}
+        output = network_attributes(cidr)
         virtual_addresses = _segment_virtual_addresses(fact["id"], self.facts)
         if virtual_addresses:
             output["virtual_addresses"] = virtual_addresses
@@ -189,6 +222,8 @@ class _ProjectionState:
 
     def _owner_scope(self, fact_id, canonical_id):
         raw = self.memberships.get(fact_id, self.memberships.get(canonical_id, ()))
+        if not raw and self.context_memberships.get(fact_id):
+            return self._observed_context_scope(fact_id)
         if not raw and self.require_assignment:
             return self._unassigned(fact_id, "MISSING_SCOPE_MEMBERSHIP", ())
         return self._resolve_memberships(fact_id, raw)
@@ -197,10 +232,19 @@ class _ProjectionState:
         raw = fact.get("attributes", {}).get("scope_ids", ())
         if raw:
             return self._resolve_memberships(fact["id"], raw)
+        if self.context_memberships.get(fact["id"]):
+            return self._observed_context_scope(fact["id"])
         candidate = _scope_id("network_context", _context_code(vrf))
         if candidate in self.scopes:
             return candidate, []
         return self.profile["root_scope_seed"], []
+
+    def _observed_context_scope(self, fact_id):
+        memberships, _ = _normalize_memberships(self.context_memberships[fact_id], self.scopes)
+        if not memberships:
+            return self.profile["root_scope_seed"], []
+        parents = {key: value["parent_scope_id"] for key, value in self.scopes.items()}
+        return lowest_common_ancestor(memberships, parents), memberships
 
     def _resolve_memberships(self, subject_id, raw_memberships):
         normalized, unknown = _normalize_memberships(raw_memberships, self.scopes)
@@ -281,11 +325,17 @@ def _validate_inputs(facts, profile):
 
 def _scope_records(facts, authoritative_scopes):
     records = list(authoritative_scopes)
+    used_contexts = {value for values in context_memberships(facts).values() for value in values}
     for fact in facts.get("network_contexts", ()):
-        family = fact.get("fact_family")
+        family = context_type(fact)
         if family not in {"vrf", "zone", "vlan"}:
             continue
         attributes = fact.get("attributes", {})
+        if fact.get("fact_family") == "network_context":
+            if fact["id"] not in used_contexts:
+                continue
+            if family != "zone" and str(attributes.get("name", "")).strip().lower() in {"default", "global"}:
+                continue
         code, name = _network_context_identity(fact, attributes)
         records.append({
             "code": code,
@@ -424,7 +474,7 @@ def _finalize_scopes(index, entities):
 def _scope_summary(scope_id, scopes, entities):
     return {
         "key_device_count": sum(
-            item["scope_id"] == scope_id and item["kind"] == "device"
+            (item["scope_id"] == scope_id or scope_id in item.get("scope_memberships", ())) and item["kind"] == "device"
             and item["importance"] in {"critical", "important"} for item in entities
         ),
         "network_segment_count": sum(

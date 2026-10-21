@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from typing import Any
 
 from services.network_topology.parsers.base import CandidateBatch
@@ -16,6 +16,7 @@ from .validation import (
     bind_observed_evidence,
     keep_asset_device,
 )
+from .route_evidence import supports_route
 
 
 CANDIDATE_SCHEMA = "aioe.network-topology.llm-fact-candidates/v1"
@@ -78,7 +79,7 @@ def convert_candidates(
                 validation.append({"code": "TERMINAL_EXCLUDED", "candidate_id": candidate["candidate_id"]})
                 continue
             fact, provenance = _convert_one(
-                family, candidate, mapping, resource_id, observations
+                family, candidate, mapping, resource_id, observations, document
             )
             facts[family].append(fact)
             facts["provenance_catalog"].extend(provenance)
@@ -250,14 +251,22 @@ def _canonical_id(family: str, local_id: str, resource_id: str) -> str:
     return f"{PREFIXES[family]}:{resource_id}:{digest}"
 
 
-def _convert_one(family, candidate, mapping, resource_id, observations):
+def _convert_one(family, candidate, mapping, resource_id, observations, document):
     try:
         provenance, resolved = bind_observed_evidence(
             candidate["evidence_refs"], observations, resource_id
         )
     except EvidenceValidationError as exc:
         raise CandidateConversionError(f"candidate observation evidence invalid: {exc.code}") from exc
-    _require_semantic_support(family, candidate, resolved)
+    if family == "routes" and (candidate.get("next_hop_selector") or {}).get("management_ip"):
+        try:
+            supported = supports_route(candidate, document, observations)
+        except ValueError as exc:
+            raise CandidateConversionError("route next-hop address is invalid") from exc
+        if not supported:
+            raise CandidateConversionError("route tuple is outside observation evidence")
+    else:
+        _require_semantic_support(family, candidate, resolved)
     provenance_ids = [item["id"] for item in provenance]
     fact = {
         "id": mapping[candidate["candidate_id"]],
@@ -348,11 +357,14 @@ def _adjacency_attributes(item, mapping, *_):
 
 def _route_attributes(item, mapping, *_):
     selector = item["next_hop_selector"]
-    return {"route_type": item["route_type"], "prefix": item["prefix"],
+    result = {"route_type": item["route_type"], "prefix": item["prefix"],
             "vrf_id": item["vrf"],
             "next_hop_id": _selector(selector, mapping) if selector else None,
             "interface_id": _optional_reference(item["interface_candidate_ref"], mapping),
             "state": item["state"]}
+    if selector and selector.get("management_ip"):
+        result["next_hop_address"] = str(ip_address(selector["management_ip"]))
+    return result
 
 
 def _routing_attributes(item, mapping, resource_id, *_):

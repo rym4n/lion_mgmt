@@ -161,7 +161,11 @@
         "label": {"type": "string", "minLength": 1},
         "read_only": {"type": "boolean"},
         "target_id": {"type": "string", "minLength": 1},
-        "entity_kind": {"enum": ["device", "network_segment", "external", "service_boundary"]}
+        "entity_kind": {"enum": ["device", "network_segment", "external", "service_boundary"]},
+        "role": {"type": "string"}, "importance": {"enum": ["critical", "important", "normal"]},
+        "scope_type": {"type": "string"},
+        "attributes": {"$ref": "https://schemas.aioe.local/aioe.network-topology.graph/v2#/$defs/entityAttributes"},
+        "summary": {"$ref": "https://schemas.aioe.local/aioe.network-topology.graph/v2#/$defs/scope/properties/summary"}
       }
     },
     "viewEdge": {
@@ -174,7 +178,25 @@
         "target": {"type": "string", "minLength": 1},
         "relation_type": {"type": "string", "minLength": 1},
         "layer": {"type": "string", "minLength": 1},
-        "member_relation_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true}
+        "member_relation_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+        "direction": {"enum": ["unidirectional", "bidirectional"]},
+        "state_summary": {
+          "type": "object", "additionalProperties": false,
+          "required": ["configured", "operational"],
+          "properties": {
+            "configured": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+            "operational": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+          }
+        },
+        "attributes": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "next_hop_ip": {"type": "string"},
+            "route_prefixes": {"type": "array", "items": {"type": "string"}},
+            "interface_names": {"type": "array", "items": {"type": "string"}},
+            "route_count": {"type": "integer", "minimum": 1}
+          }
+        }
       }
     }
   }

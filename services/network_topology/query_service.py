@@ -43,6 +43,7 @@ PROFILE_REQUEST = "aioe.network-topology.api/profile-request/v1"
 PROFILE_RESPONSE = "aioe.network-topology.api/profile-response/v1"
 GRAPH_SCHEMA = "aioe.network-topology.graph/v2"
 SEGMENT_KINDS = frozenset({"network_segment", "segment", "subnet"})
+LOGICAL_DEFAULT_LAYERS = ("physical", "l2", "l3", "routing", "overlay")
 PROVENANCE_FIELDS = {
     "observed": frozenset(
         {"type", "resource_id", "observation_id", "redacted_sha256", "locator"}
@@ -222,6 +223,7 @@ def build_query_cache_key(
 async def scoped_view(authority, payload, *, repository=None, cache=None):
     validate_contract(payload, VIEW_REQUEST)
     _require_authority(authority, payload["id"])
+    payload = {**payload, "layers": payload["layers"] or list(LOGICAL_DEFAULT_LAYERS)}
     repo = repository or OrmQueryRepository()
     document = await repo.load_document(authority, payload["version_id"])
     bucket = _token_bucket(payload["continuation_token"])
@@ -336,13 +338,34 @@ def _api_node(value):
     }
     if value.get("kind") in {"device", "network_segment", "external", "service_boundary"}:
         node["entity_kind"] = value["kind"]
+    for key in ("role", "importance", "scope_type"):
+        if value.get(key):
+            node[key] = value[key]
+    attributes = value.get("attributes") or {}
+    safe_attributes = {
+        key: deepcopy(attributes[key]) for key in (
+            "management_ip", "vendor", "model", "serial", "network_prefixes",
+            "virtual_addresses", "protocols", "ports", "boundary_type",
+            "ip_version", "prefix_length", "address_scope",
+            "next_hop_ip", "route_prefixes", "interface_names", "route_count",
+        ) if key in attributes
+    }
+    if safe_attributes:
+        node["attributes"] = safe_attributes
+    if value.get("scope_type") and value.get("summary") is not None:
+        node["summary"] = {
+            key: value["summary"][key] for key in (
+                "key_device_count", "network_segment_count", "child_scope_count",
+                "cross_scope_relation_count",
+            ) if key in value["summary"]
+        }
     return node
 
 
 def _api_edge(value):
     endpoints = [str(item["ref_id"]) for item in value["endpoints"]]
     members = [str(item) for item in value.get("member_relation_ids", ())]
-    return {
+    edge = {
         "id": str(value["id"]),
         "source": endpoints[0],
         "target": endpoints[1],
@@ -350,6 +373,21 @@ def _api_edge(value):
         "layer": str(value["layer"]),
         "member_relation_ids": list(dict.fromkeys(members)),
     }
+    if value.get("direction"):
+        edge["direction"] = value["direction"]
+    if value.get("summary"):
+        edge["state_summary"] = {
+            key: deepcopy(value["summary"][key]) for key in ("configured", "operational")
+            if key in value["summary"]
+        }
+    attributes = value.get("attributes") or {}
+    if attributes:
+        edge["attributes"] = {
+            key: deepcopy(attributes[key]) for key in
+            ("next_hop_ip", "route_prefixes", "interface_names", "route_count")
+            if key in attributes
+        }
+    return edge
 
 
 def _edge_endpoints(edge):

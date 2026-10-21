@@ -10,6 +10,8 @@ from typing import Any, Iterable, Mapping
 from urllib.parse import quote
 
 from services.network_topology.identity import IdentityResolution
+from services.network_topology.configured_routes import configured_routes, route_attributes
+from services.network_topology.context_placement import compatible_contexts, context_memberships
 from services.network_topology.scope_tree import (
     ScopeTreeResult,
     lowest_common_ancestor,
@@ -59,6 +61,7 @@ def build_relationships(
     """Build globally stored relations without creating projection-only objects."""
     state = _RelationshipState(facts, resolution, scope_tree, profile_revision)
     relations = state.build_regular_relations()
+    relations.extend(state.build_configured_routes())
     relations.extend(state.build_collapsed_paths())
     merged = _merge_duplicate_relations(relations)
     return RelationshipResult(
@@ -69,6 +72,8 @@ def build_relationships(
 
 class _RelationshipState:
     def __init__(self, facts, resolution, scope_tree, profile_revision):
+        self.context_memberships = context_memberships(facts)
+        self.contexts = {item['id']: item for item in facts.get('network_contexts', ())}
         self.facts = facts
         self.resolution = resolution
         self.scope_tree = scope_tree
@@ -111,6 +116,22 @@ class _RelationshipState:
             relation = self._collapse_component(collapsed_ids, component_edges)
             if relation is not None:
                 output.append(relation)
+        return output
+
+    def build_configured_routes(self):
+        output = []
+        for (identifier, owner, address, interface_id), routes in configured_routes(self.facts):
+            endpoints = self._endpoints(owner, identifier)
+            if endpoints is None:
+                continue
+            attrs = route_attributes(address, self.interfaces[interface_id], routes)
+            relation = self._document(routes[0], endpoints, "configured_route", "routing",
+                                      interface_id, str(routes[0]["attributes"].get("vrf_id") or ""), attrs)
+            down = all(str(item["attributes"].get("state")).lower() == "down" for item in routes)
+            relation.update(direction="unidirectional", operational_state="down" if down else "unknown",
+                member_fact_ids=[item["id"] for item in routes],
+                provenance=_unique_mappings(entry for route in routes for entry in self._fact_provenance(route)))
+            output.append(relation)
         return output
 
     def _relation(self, source, fact):
@@ -331,11 +352,18 @@ class _RelationshipState:
 
     def _interface_segment(self, interface_id):
         interface = self.interfaces.get(interface_id, {})
-        addresses = interface.get("attributes", {}).get("addresses", ())
+        attrs = interface.get("attributes", {})
+        addresses = attrs.get("addresses", ())
         matches = []
         for segment_id, endpoint_id in self.segments.items():
             segment = self.fact_index.get(segment_id, {})
-            cidr = segment.get("attributes", {}).get("canonical_cidr")
+            segment_attrs = segment.get("attributes", {})
+            if (segment_attrs.get("device_id") != attrs.get("device_id")
+                    or not compatible_contexts(attrs, segment_attrs, self.contexts,
+                        self.context_memberships.get(interface_id, ()),
+                        self.context_memberships.get(segment_id, ()))):
+                continue
+            cidr = segment_attrs.get("canonical_cidr")
             if cidr and any(_address_in_network(value, cidr) for value in addresses):
                 matches.append(endpoint_id)
         return next(iter(set(matches))) if len(set(matches)) == 1 else None

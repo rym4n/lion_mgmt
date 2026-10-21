@@ -91,16 +91,31 @@ class _ProjectionState:
             raise ValueError(f"unknown topology scope {scope_id}")
         self.scope_id = scope_id
         self.layers = frozenset(str(item) for item in layers) if layers else None
+        self.visible_relations = tuple(
+            item for item in relationships.relations
+            if self.layers is None or item.get("layer") in self.layers
+        )
+        if self.layers is not None:
+            # Interface subnets whose only edges are excluded layers are not
+            # logical neighbours. Standalone subnet facts remain available;
+            # the complete canonical graph is preserved.
+            incident = {endpoint["ref_id"] for relation in relationships.relations
+                        for endpoint in relation.get("endpoints", ())}
+            visible = {endpoint["ref_id"] for relation in self.visible_relations
+                       for endpoint in relation.get("endpoints", ())}
+            self.entities = {
+                key: item for key, item in self.entities.items()
+                if not (item.get("kind") == "network_segment"
+                        and key in incident and key not in visible)
+            }
         self.nodes: dict[str, dict[str, Any]] = {}
 
     def project_items_and_relations(self):
         self._add_direct_nodes()
         edge_specs = []
         for relation in sorted(
-            self.relationships.relations, key=lambda item: item["id"]
+            self.visible_relations, key=lambda item: item["id"]
         ):
-            if self.layers is not None and relation.get("layer") not in self.layers:
-                continue
             endpoints = self._mapped_relation_endpoints(relation)
             if endpoints is not None and endpoints[0] != endpoints[1]:
                 edge_specs.append((relation, endpoints))
@@ -109,7 +124,8 @@ class _ProjectionState:
 
     def _add_direct_nodes(self):
         for scope in self.scopes.values():
-            if scope["parent_scope_id"] == self.scope_id:
+            if (scope["parent_scope_id"] == self.scope_id
+                    and (self.layers is None or self._scope_has_content(scope["id"]))):
                 node = _scope_ref(scope)
                 self.nodes[node["id"]] = node
         for entity in self.entities.values():
@@ -121,6 +137,14 @@ class _ProjectionState:
                 node = _entity_ref(entity, self.scope_id, "membership")
                 self.nodes[node["id"]] = node
 
+    def _scope_has_content(self, scope_id):
+        return any(
+            _is_descendant(item["scope_id"], scope_id, self.parents)
+            or any(_is_descendant(member, scope_id, self.parents)
+                   for member in item.get("scope_memberships", ()))
+            for item in self.entities.values()
+        )
+
     def _mapped_relation_endpoints(self, relation):
         canonical_ids = tuple(
             str(item["ref_id"]) for item in relation.get("endpoints", ())
@@ -130,6 +154,10 @@ class _ProjectionState:
         ):
             return None
         entities = tuple(self.entities[item] for item in canonical_ids)
+        if relation.get("relation_type") == "configured_route":
+            boundaries = [item for item in entities if item.get("role") == "configured_next_hop"]
+            if boundaries and not any(self._touches_current_scope(item) for item in boundaries):
+                return None
         if not any(self._touches_current_scope(item) for item in entities):
             return None
         return tuple(self._map_endpoint(item) for item in entities)
@@ -175,6 +203,7 @@ def _entity_ref(entity, scope_id, reason):
         "owner_scope_id": entity["scope_id"],
         "name": entity.get("name", entity["id"]),
         "role": entity.get("role"),
+        "attributes": dict(entity.get("attributes", {})),
         "ref_reason": reason,
     }
 
@@ -211,19 +240,21 @@ def _visible_nodes(plan):
 
 
 def _aggregate_edges(edge_specs, visible_map):
-    grouped: dict[tuple[str, str, str, str], list[Mapping[str, Any]]] = defaultdict(
+    grouped: dict[tuple[str, str, str, str, str], list[Mapping[str, Any]]] = defaultdict(
         list
     )
     for relation, endpoints in edge_specs:
         visible = tuple(visible_map[item] for item in endpoints)
         if visible[0] == visible[1]:
             continue
-        left, right = sorted(visible)
+        direction = str(relation.get("direction") or "bidirectional")
+        left, right = visible if direction == "unidirectional" else sorted(visible)
         key = (
             left,
             right,
             str(relation.get("layer", "")),
             str(relation["relation_type"]),
+            direction,
         )
         grouped[key].append(relation)
     edges = [_aggregate_edge(key, grouped[key]) for key in sorted(grouped)]
@@ -231,7 +262,7 @@ def _aggregate_edges(edge_specs, visible_map):
 
 
 def _aggregate_edge(key, relations):
-    left, right, layer, relation_type = key
+    left, right, layer, relation_type, direction = key
     member_ids = sorted(
         {
             member
@@ -250,7 +281,7 @@ def _aggregate_edge(key, relations):
         },
         "relation_type": relation_type,
         "layer": layer,
-        "direction": "bidirectional",
+        "direction": direction,
         "endpoints": [
             {"ref_type": "projection", "ref_id": left},
             {"ref_type": "projection", "ref_id": right},
@@ -258,7 +289,24 @@ def _aggregate_edge(key, relations):
         "count": len(relations),
         "summary": _relation_summary(relations),
         "member_relation_ids": member_ids,
+        "attributes": _presentation_edge_attributes(relations),
     }
+
+
+def _presentation_edge_attributes(relations):
+    output = {}
+    for key in ("route_prefixes", "interface_names"):
+        values = sorted({value for item in relations
+                         for value in item.get("attributes", {}).get(key, ())})
+        if values:
+            output[key] = values
+    next_hops = sorted({item["attributes"]["next_hop_ip"] for item in relations
+                       if item.get("attributes", {}).get("next_hop_ip")})
+    if len(next_hops) == 1:
+        output["next_hop_ip"] = next_hops[0]
+    if any(item["relation_type"] == "configured_route" for item in relations):
+        output["route_count"] = sum(item.get("attributes", {}).get("route_count", 1) for item in relations)
+    return output
 
 
 def _aggregate_edge_id(left, right, layer, relation_type, member_ids):
