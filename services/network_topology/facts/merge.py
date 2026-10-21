@@ -205,8 +205,8 @@ async def activate_analysis_run_payloads(
     )
     _bind_run_payloads(run, prepared, facts_row, report_row)
     await run.save(using_db=connection, update_fields=[
-        "fact_graph_payload", "fact_graph_payload_object_row",
-        "validation_report", "validation_report_object_row", "facts_hash", "utime",
+        "fact_graph_payload", "fact_graph_payload_object_row_id",
+        "validation_report", "validation_report_object_row_id", "facts_hash", "utime",
     ])
 
 

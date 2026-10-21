@@ -682,7 +682,7 @@ class OrmPublishingRepository:
         await run.save(
             using_db=connection,
             update_fields=[
-                "fact_graph_payload", "fact_graph_payload_object_row", "utime"
+                "fact_graph_payload", "fact_graph_payload_object_row_id", "utime"
             ],
         )
 
