@@ -10,6 +10,7 @@ from typing import Any
 
 from services.network_topology.parsers.base import CandidateBatch
 from services.network_topology.contracts import ContractError, validate_contract
+from services.network_topology.route_state import normalize_route_state
 
 from .validation import (
     EvidenceValidationError,
@@ -361,7 +362,7 @@ def _route_attributes(item, mapping, *_):
             "vrf_id": item["vrf"],
             "next_hop_id": _selector(selector, mapping) if selector else None,
             "interface_id": _optional_reference(item["interface_candidate_ref"], mapping),
-            "state": item["state"]}
+            "state": normalize_route_state(item["state"])}
     if selector and selector.get("management_ip"):
         result["next_hop_address"] = str(ip_address(selector["management_ip"]))
     return result

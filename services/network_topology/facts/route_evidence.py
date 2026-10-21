@@ -3,6 +3,7 @@ from ipaddress import ip_address, ip_network
 import re
 
 from services.network_topology.evidence_locator import resolve_evidence
+from services.network_topology.route_state import route_is_down
 
 
 def supports_route(item, document, observations):
@@ -102,7 +103,7 @@ def _row_supports(row, table, item, prefix, address, name):
                 continue
         except (ValueError, TypeError):
             continue
-        if str(item.get('state')).lower() == 'down' and not _reported_down(row, index):
+        if route_is_down(item.get('state')) and not _reported_down(row, index):
             continue
         if name is not None:
             if ifname == name:
@@ -113,13 +114,12 @@ def _row_supports(row, table, item, prefix, address, name):
 
 
 def _reported_down(row, index):
-    states = {'down', 'invalid', 'inactive', 'disabled'}
-    if any(str(row.get(key)).lower() in states for key in ('state', 'status')):
+    if any(route_is_down(row.get(key)) for key in ('state', 'status')):
         return True
     next_hops = row.get('nexthopStatus')
     return (isinstance(next_hops, list) and index < len(next_hops)
             and isinstance(next_hops[index], dict)
-            and str(next_hops[index].get('nexthopStatus')).lower() in states)
+            and route_is_down(next_hops[index].get('nexthopStatus')))
 
 
 def _text_supports(line, prefix, address, name, vrf, state=None):
@@ -134,7 +134,7 @@ def _text_supports(line, prefix, address, name, vrf, state=None):
             continue
     if prefix not in networks or address not in addresses:
         return False
-    if str(state).lower() == 'down' and not re.search(r'\b(?:down|invalid|inactive|disabled)\b', line, re.I):
+    if route_is_down(state) and not re.search(r'\b(?:down|invalid|inactive|disabled)\b', line, re.I):
         return False
     if name and not re.search(r'(?<![\w.-])' + re.escape(name) + r'(?![\w.-])', line):
         return False

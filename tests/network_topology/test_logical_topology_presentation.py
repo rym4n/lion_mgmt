@@ -282,16 +282,45 @@ def test_default_route_table_zero_has_canonical_aliases(vrf):
     assert supports_route(document['routes'][0], document, observations)
 
 
-def test_route_down_requires_reported_invalid_or_inactive_state_in_same_record():
+@pytest.mark.parametrize('state', ['down', 'inactive', 'invalid', 'disabled', 'INACTIVE'])
+def test_route_down_requires_reported_invalid_or_inactive_state_in_same_record(state):
     from services.network_topology.facts.route_evidence import supports_route
     snapshot, document = _structured_route_input()
     observations = snapshot['sources'][0]['resources'][0]['result']['observations']
     route = document['routes'][0]
-    route['state'] = 'down'
+    route['state'] = state
     assert not supports_route(route, document, observations)
     row = observations[0]['data']['output']['data']['routes']['scopes'][0]['data']['items'][0]
     row['status'] = 'INVALID'
     assert supports_route(route, document, observations)
+
+
+@pytest.mark.parametrize('state', ['inactive', 'invalid', 'disabled'])
+def test_route_state_alias_requires_matching_next_hop_status_and_converts_to_down(state):
+    from services.network_topology import agent_jobs
+    from types import SimpleNamespace
+    snapshot, document = _structured_route_input()
+    route = document['routes'][0]
+    route['state'] = state
+    row = snapshot['sources'][0]['resources'][0]['result']['observations'][0]['data']['output']['data']['routes']['scopes'][0]['data']['items'][0]
+    row['nexthopStatus'] = [{'nexthopStatus': 'active'}, {'nexthopStatus': 'inactive'}]
+    items = [{'resource_id': 'r1', 'chunk_id': 'r1:raw:v1', 'document': document}]
+    _, errors = agent_jobs.convert_documents(snapshot, SimpleNamespace(id='run'), items)
+    assert errors
+    row['nexthopStatus'][0]['nexthopStatus'] = 'inactive'
+    results, errors = agent_jobs.convert_documents(snapshot, SimpleNamespace(id='run'), items)
+    assert not errors
+    assert results[0].facts['routes'][0]['attributes']['state'] == 'down'
+
+
+@pytest.mark.parametrize('state', ['inactive', 'invalid', 'disabled'])
+def test_text_route_state_alias_requires_same_line_proof(state):
+    from services.network_topology.facts.route_evidence import _text_supports
+    from ipaddress import ip_network, ip_address
+    arguments = ip_network('0.0.0.0/0'), ip_address('192.0.2.1'), 'eth3', 'default', state
+    line = '0.0.0.0/0 via 192.0.2.1 dev eth3'
+    assert not _text_supports(line, *arguments)
+    assert _text_supports(line + ' inactive', *arguments)
 
 
 def test_text_route_vrf_and_tuple_are_bound_to_same_line():
@@ -317,10 +346,11 @@ def test_text_default_route_rejects_explicit_other_namespace(vrf):
     assert not _text_supports(line + ' vrf blue', *arguments)
 
 
-def test_equal_link_local_next_hops_on_different_interfaces_are_distinct_boundaries():
+@pytest.mark.parametrize('state', ['down', 'inactive', 'invalid', 'disabled'])
+def test_equal_link_local_next_hops_on_different_interfaces_are_distinct_boundaries(state):
     facts = _zone_facts()
     facts['routes'] = [{'id': 'route:' + iface, 'attributes': {'route_type': 'default', 'prefix': '::/0',
-        'vrf_id': 'business', 'next_hop_address': 'fe80::1', 'interface_id': iface, 'state': 'down'},
+        'vrf_id': 'business', 'next_hop_address': 'fe80::1', 'interface_id': iface, 'state': state},
         'provenance_ids': []} for iface in ('interface:a', 'interface:b')]
     tree = build_scope_tree(facts, _resolution('device:fw'), _profile())
     assert len([entity for entity in tree.entities if entity['role'] == 'configured_next_hop']) == 2

@@ -12,6 +12,7 @@ from urllib.parse import quote
 from services.network_topology.identity import IdentityResolution
 from services.network_topology.configured_routes import configured_routes, route_attributes
 from services.network_topology.context_placement import compatible_contexts, context_memberships
+from services.network_topology.route_state import route_is_down
 from services.network_topology.scope_tree import (
     ScopeTreeResult,
     lowest_common_ancestor,
@@ -127,7 +128,7 @@ class _RelationshipState:
             attrs = route_attributes(address, self.interfaces[interface_id], routes)
             relation = self._document(routes[0], endpoints, "configured_route", "routing",
                                       interface_id, str(routes[0]["attributes"].get("vrf_id") or ""), attrs)
-            down = all(str(item["attributes"].get("state")).lower() == "down" for item in routes)
+            down = all(route_is_down(item["attributes"].get("state")) for item in routes)
             relation.update(direction="unidirectional", operational_state="down" if down else "unknown",
                 member_fact_ids=[item["id"] for item in routes],
                 provenance=_unique_mappings(entry for route in routes for entry in self._fact_provenance(route)))
