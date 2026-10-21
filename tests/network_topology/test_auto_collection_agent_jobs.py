@@ -45,6 +45,31 @@ def test_submit_accepts_valid_document():
     assert results[0].facts['devices'][0]['id'] == 'device:r1'
 
 
+def test_collected_resource_identity_does_not_depend_on_agent_inventory_guess():
+    from services.network_topology.graph_pipeline import build_graph
+    from services.network_topology.identity import IdentityRegistry
+    from services.network_topology.versions import validate_publication
+
+    candidate = doc()
+    candidate['devices'][0].update(
+        inventory_state='unknown', identity_aliases=[], device_type='unknown'
+    )
+    results, errors = agent_jobs.convert_documents(
+        collection(), SimpleNamespace(id='run-1'),
+        [{'resource_id': 'r1', 'chunk_id': 'r1:raw:v1', 'document': candidate}],
+    )
+
+    assert errors == []
+    resolution = IdentityRegistry('tenant-1', 'collection').resolve_facts(results[0].facts)
+    assert resolution.fact_identity_map['device:r1'] == 'device:collection:r1'
+    assert not resolution.unresolved
+    assert candidate['devices'][0]['inventory_state'] == 'unknown'
+    profile = deepcopy(contracts.load_schema('aioe.network-topology.profile/v1')['examples'][0])
+    graph = build_graph(results[0].facts, resolution, profile, profile_revision=1, collection=collection())
+    assert len(graph['entities']) == 1
+    validate_publication(results[0].facts, graph, profile, 1, require_non_empty=True)
+
+
 @pytest.mark.parametrize('mutation', ['foreign', 'pointer', 'chunk', 'resource'])
 def test_submit_rejects_invalid_evidence_and_binding(mutation):
     item = {'resource_id': 'r1', 'chunk_id': 'r1:raw:v1', 'document': doc()}

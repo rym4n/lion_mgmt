@@ -94,6 +94,12 @@ def convert_documents(collection: dict, run: Any, documents: list[dict]) -> tupl
                 chunk_id=chunk_id, input_hash=chunk.input_hash,
                 observations=tuple(resources[resource_id].get("result", {}).get("observations", [])),
             )
+            # The canonical device is the server-bound collection resource,
+            # just as in structured system.identity parsing. Its inventory
+            # identity must not depend on an agent guess or a serial number.
+            for device in result.facts["devices"]:
+                if device["id"] == f"device:{resource_id}":
+                    device["attributes"]["inventory_state"] = "managed"
             results.append(result)
         except CandidateConversionError as exc:
             errors.append({"resource_id": resource_id, "message": str(exc)})
