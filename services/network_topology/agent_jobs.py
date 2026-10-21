@@ -57,6 +57,13 @@ def build_agent_input(collection: dict, agent_observation_ids: list[str]) -> lis
             "resource_id": resource_id,
             "chunk_id": chunk.chunk_id,
             "input_hash": chunk.input_hash,
+            # Match the registered LLM parser's context allowlist. Display
+            # names, addresses and provenance are bound by the server, never
+            # supplied to the agent as observation evidence.
+            "asset_context": {
+                key: deepcopy((resources[resource_id].get("asset_context") or {}).get(key))
+                for key in ("vendor", "platform", "os_family", "device_type")
+            },
             "observations": deepcopy(observations),
         })
     return result

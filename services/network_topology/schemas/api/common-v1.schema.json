@@ -160,7 +160,8 @@
         "projection_type": {"enum": ["entity", "entity_ref", "scope_ref", "external_ref", "bucket"]},
         "label": {"type": "string", "minLength": 1},
         "read_only": {"type": "boolean"},
-        "target_id": {"type": "string", "minLength": 1}
+        "target_id": {"type": "string", "minLength": 1},
+        "entity_kind": {"enum": ["device", "network_segment", "external", "service_boundary"]}
       }
     },
     "viewEdge": {

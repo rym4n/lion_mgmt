@@ -327,13 +327,16 @@ def _api_node(value):
     target = value.get("ref_id") or value.get("id")
     if kind == "view_bucket":
         target = value.get("continuation_token") or value["id"]
-    return {
+    node = {
         "id": str(value["id"]),
         "projection_type": projection_type,
         "label": str(value.get("name") or value.get("category") or value["id"]),
         "read_only": True,
         "target_id": str(target),
     }
+    if value.get("kind") in {"device", "network_segment", "external", "service_boundary"}:
+        node["entity_kind"] = value["kind"]
+    return node
 
 
 def _api_edge(value):
@@ -425,6 +428,8 @@ def graph_statistics(graph):
     document = graph if isinstance(graph, Mapping) else {}
     entities = document.get("entities", ())
     return {
+        "node_count": len(entities),
+        "edge_count": len(document.get("relations", ())),
         "scope_count": len(document.get("scopes", ())),
         "key_device_count": sum(
             item.get("importance") in {"critical", "important"} for item in entities

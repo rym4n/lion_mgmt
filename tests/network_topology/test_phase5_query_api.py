@@ -272,7 +272,25 @@ async def test_view_matches_frozen_schema_and_uses_tenant_scoped_repository():
         "label": "Router 0",
         "read_only": True,
         "target_id": "entity:router-0",
+        "entity_kind": "device",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entity_kind', ['device', 'network_segment', 'external', 'service_boundary'])
+async def test_view_preserves_entity_kind_without_exposing_canonical_attributes(entity_kind):
+    graph = _graph()
+    graph['entities'][0]['kind'] = entity_kind
+    graph['entities'][0]['attributes'] = {'password': 'must-not-leak'}
+
+    data = await scoped_view(_authority(), _request(),
+                             repository=MemoryRepository(_document(graph=graph)),
+                             cache=MemoryCache())
+
+    node = next(item for item in data['nodes'] if item['id'] == 'entity:router-0')
+    assert node['entity_kind'] == entity_kind
+    assert 'must-not-leak' not in json.dumps(data)
+    validate_contract({'code': 0, 'data': data}, VIEW_RESPONSE)
 
 
 @pytest.mark.asyncio
@@ -378,6 +396,8 @@ def test_v2_statistics_and_root_compatibility_keep_legacy_shape_read_only():
     compatible = compatible_root_graph(graph)
 
     assert stats == {
+        "node_count": 2,
+        "edge_count": 1,
         "scope_count": 2,
         "key_device_count": 2,
         "segment_count": 0,
@@ -386,6 +406,26 @@ def test_v2_statistics_and_root_compatibility_keep_legacy_shape_read_only():
     assert set(compatible) == {"nodes", "edges", "read_only"}
     assert compatible["read_only"] is True
     assert all(set(node) == {"id", "projection_type", "label", "read_only", "target_id"} for node in compatible["nodes"])
+
+
+@pytest.mark.parametrize('serializer', ['items', 'versions'])
+def test_v2_list_and_version_counts_use_entities_and_relations(serializer):
+    from services.network_topology.view_serializers import (
+        serialize_topology_items, serialize_topology_versions,
+    )
+
+    items = [{
+        'id': 'topology-1', 'document_schema_version': 'graph/v2',
+        'topology_json': _graph(), 'node_count': 0, 'edge_count': 0,
+    }]
+    if serializer == 'items':
+        serialize_topology_items(items, {})
+    else:
+        serialize_topology_versions(items)
+
+    assert items[0]['node_count'] == 2
+    assert items[0]['edge_count'] == 1
+    assert 'topology_json' not in items[0]
 
 
 @pytest.mark.asyncio

@@ -39,6 +39,24 @@ def test_input_groups_multiple_raw_observations_per_resource():
     assert result[0]['chunk_id'] == 'r1:raw:v1'
 
 
+def test_agent_input_keeps_only_parser_context_without_resource_display_metadata():
+    value = collection()
+    context = value['sources'][0]['resources'][0]['asset_context']
+    context.update(name='Resource label', management_ips=['192.0.2.19'],
+                   vendor='synthetic-vendor', platform='lab', os_family='lab-os',
+                   device_type='firewall')
+
+    resource = agent_jobs.build_agent_input(value, ['obs-1'])[0]
+
+    assert resource['asset_context'] == {
+        'vendor': 'synthetic-vendor', 'platform': 'lab',
+        'os_family': 'lab-os', 'device_type': 'firewall',
+    }
+    assert 'Resource label' not in str(resource)
+    resource['asset_context']['vendor'] = 'changed'
+    assert context['vendor'] == 'synthetic-vendor'
+
+
 def test_submit_accepts_valid_document():
     results, errors = agent_jobs.convert_documents(collection(), SimpleNamespace(id='run-1'), [{'resource_id': 'r1', 'chunk_id': 'r1:raw:v1', 'document': doc()}])
     assert errors == []

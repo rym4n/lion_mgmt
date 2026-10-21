@@ -518,7 +518,15 @@ def _segment_virtual_addresses(segment_id, facts):
 
 def _entity_name(fact, fallback):
     attributes = fact.get("attributes", {})
-    return str(attributes.get("name") or attributes.get("hostname") or fallback)
+    hostname = None
+    for alias in attributes.get("identity_aliases", ()):
+        if alias.get("type") != "hostname":
+            continue
+        value = alias.get("value")
+        if isinstance(value, str) and value.strip() and value.strip().lower() != "unknown":
+            hostname = value.strip()
+            break
+    return str(attributes.get("name") or attributes.get("hostname") or hostname or fallback)
 
 
 def _provenance_index(facts):
