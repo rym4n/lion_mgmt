@@ -1,10 +1,10 @@
 import asyncio
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from services.network_topology.collection import dispatch, targets as targets_module, manifest_issue
+from services.network_topology.collection import dispatch, targets as targets_module
 from services.network_topology.collection.dispatch import ExecResult
 from services.network_topology.collection.errors import CollectionError
 from services.network_topology.collection.targets import Target
@@ -13,6 +13,78 @@ from tests.network_topology.auto_collection_fakes import FakeTargetRepository, p
 
 def target(resource_id, item_id="i"):
     return Target(item_id, "huawei_switch", "v", "main.py", "collect", "采集", {}, resource_id, resource_id, "10.0.0.1", None)
+
+
+def test_collection_window_start_never_precedes_manifest_issue_time():
+    run_started = datetime(2026, 10, 20, 23, 29, 57, 728958, tzinfo=UTC)
+
+    started = dispatch._collection_window_start(
+        run_started, "2026-10-20T23:29:58Z"
+    )
+
+    assert started == datetime(2026, 10, 20, 23, 29, 58, tzinfo=UTC)
+
+
+def test_collection_window_start_preserves_run_time_when_manifest_is_earlier():
+    run_started = datetime(2026, 10, 20, 23, 29, 58, 728958, tzinfo=UTC)
+
+    started = dispatch._collection_window_start(
+        run_started, "2026-10-20T23:29:58Z"
+    )
+
+    assert started == run_started
+
+
+@pytest.mark.asyncio
+async def test_collect_and_store_uses_manifest_issue_time_for_window_start(monkeypatch):
+    from dataclasses import asdict
+    from types import SimpleNamespace
+
+    run = run_row(
+        "run",
+        started_at=datetime(2026, 10, 20, 23, 29, 57, 728958, tzinfo=UTC),
+        frozen_targets=[asdict(target("r1"))],
+        manifest_id="manifest-1",
+        device_total=1,
+        item_results=[],
+    )
+    manifest_row = SimpleNamespace(
+        manifest_id="manifest-1",
+        manifest_hash="sha256:" + "a" * 64,
+        collection_sequence=1,
+        base_graph_revision=0,
+        base_publication_revision=0,
+        profile_revision=1,
+        issued_at=datetime(2026, 10, 20, 23, 29, 58, tzinfo=UTC),
+        expires_at=datetime(2026, 10, 20, 23, 59, 58, tzinfo=UTC),
+        expected_resources_json='[{"resource_id":"r1","required_kinds":[]}]',
+    )
+
+    class Query:
+        async def first(self):
+            return manifest_row
+
+    class Repository:
+        async def save_run(self, row):
+            self.saved = row
+
+    captured = {}
+
+    async def fake_dispatch(*args, **kwargs):
+        run.state = "COLLECTING"
+        return [SimpleNamespace(status="success")]
+
+    def fake_build_snapshot(**kwargs):
+        captured.update(kwargs)
+        return {"snapshot": "draft"}
+
+    monkeypatch.setattr(dispatch, "run_dispatch", fake_dispatch)
+    monkeypatch.setattr(dispatch.TopologyCollectionManifest, "filter", lambda **_: Query())
+    monkeypatch.setattr(dispatch, "build_snapshot", fake_build_snapshot)
+
+    await dispatch.collect_and_store(plan("p"), run, repository=Repository())
+
+    assert captured["started_at"] == "2026-10-20T23:29:58Z"
 
 
 def item(**kw):

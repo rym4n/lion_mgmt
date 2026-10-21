@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 import logging
 import traceback
 
@@ -23,6 +23,23 @@ logger = logging.getLogger(__name__)
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+def _collection_window_start(run_started_at: datetime, manifest_issued_at: str) -> datetime:
+    """Keep the collection window inside the manifest's issued interval.
+
+    Runs are created with sub-second timestamps, while manifests deliberately
+    use second precision for canonical hashing.  If manifest issuance crosses
+    the run's start second, the manifest timestamp is the earliest valid
+    collection boundary; otherwise retain the actual run start.
+    """
+    started = run_started_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    issued = datetime.fromisoformat(manifest_issued_at)
+    if issued.tzinfo is None:
+        issued = issued.replace(tzinfo=UTC)
+    return max(started.astimezone(UTC), issued.astimezone(UTC))
 
 
 async def run_dispatch(plan, run, targets, *, executor=None, now=None, repository=None, persist=True) -> list[ItemOutcome]:
@@ -63,7 +80,9 @@ async def collect_and_store(plan, run, *, executor=None, repository=None) -> dic
                 asset = asset_row.json if asset_row else None
             contexts[target.resource_id] = asset_context_for(target.resource_name, target.host, target.app_name, asset, target.resource_id)
         draft = build_snapshot(collection_run_id=str(run.id), manifest=manifest, profile_revision=manifest["profile_revision"],
-            outcomes=outcomes, asset_contexts=contexts, started_at=_text_time(run.started_at), ended_at=_text_time(_now()))
+            outcomes=outcomes, asset_contexts=contexts,
+            started_at=_text_time(_collection_window_start(run.started_at, manifest["issued_at"])),
+            ended_at=_text_time(_now()))
         if run.state not in RUN_TERMINAL_STATES:
             run.snapshot_draft = orjson.dumps(draft).decode()
             run.state = "COLLECTED"
