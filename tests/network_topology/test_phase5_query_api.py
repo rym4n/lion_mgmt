@@ -166,6 +166,82 @@ class MemoryTransaction:
         return False
 
 
+def _persisted_query(monkeypatch, *, graph=None):
+    from services.network_topology import query_service
+
+    topology = SimpleNamespace(
+        id="topology-1",
+        topology_json=graph if graph is not None else _graph(2),
+        document_schema_version="graph/v2",
+        current_graph_version_row_id="version-7",
+        current_graph_revision=7,
+        current_layout_set_row_id=None,
+    )
+    version = SimpleNamespace(
+        id="version-6",
+        topology_json=graph if graph is not None else _graph(1),
+        document_schema_version="graph/v2",
+        version=6,
+        published_layout_set_row_id=None,
+    )
+    calls = []
+
+    def model(name, row):
+        def filter_rows(**filters):
+            calls.append((name, filters))
+
+            async def first():
+                return row
+
+            return SimpleNamespace(first=first)
+
+        return SimpleNamespace(filter=filter_rows)
+
+    monkeypatch.setattr(query_service, "NetworkTopology", model("topology", topology))
+    monkeypatch.setattr(query_service, "NetworkTopologyVersion", model("version", version))
+    return calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version_id,revision,count", [(None, 7, 2), ("version-6", 6, 1)])
+async def test_orm_view_reads_current_and_historical_published_graph(
+    monkeypatch, version_id, revision, count
+):
+    calls = _persisted_query(monkeypatch)
+    payload = {**_request(), "version_id": version_id}
+
+    data = await scoped_view(_authority(), payload, cache=MemoryCache())
+
+    assert data["graph_revision"] == revision
+    assert len(data["nodes"]) == count
+    assert data["nodes"][0]["label"] == "Router 0"
+    assert calls == [
+        ("topology", {"id": "topology-1", "tenant_id": "tenant-1", "deleted": False}),
+        *(
+            [("version", {
+                "id": "version-6", "topology_id": "topology-1",
+                "tenant_id": "tenant-1", "deleted": False,
+            })]
+            if version_id is not None else []
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version_id", [None, "version-6"])
+async def test_orm_view_keeps_legacy_documents_out_of_v2_query(monkeypatch, version_id):
+    from services.network_topology.query_service import QueryError
+
+    _persisted_query(monkeypatch, graph={"schema_version": "legacy/v1", "nodes": []})
+
+    with pytest.raises(QueryError) as error:
+        await scoped_view(
+            _authority(), {**_request(), "version_id": version_id}, cache=MemoryCache()
+        )
+
+    assert error.value.status == 409
+
+
 @pytest.mark.asyncio
 async def test_view_matches_frozen_schema_and_uses_tenant_scoped_repository():
     repository = MemoryRepository()

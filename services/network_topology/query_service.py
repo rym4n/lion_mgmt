@@ -41,7 +41,7 @@ VIEW_REQUEST = "aioe.network-topology.api/view-request/v1"
 VIEW_RESPONSE = "aioe.network-topology.api/view-response/v1"
 PROFILE_REQUEST = "aioe.network-topology.api/profile-request/v1"
 PROFILE_RESPONSE = "aioe.network-topology.api/profile-response/v1"
-V2_SCHEMA = "graph/v2"
+GRAPH_SCHEMA = "aioe.network-topology.graph/v2"
 SEGMENT_KINDS = frozenset({"network_segment", "segment", "subnet"})
 PROVENANCE_FIELDS = {
     "observed": frozenset(
@@ -132,7 +132,7 @@ class OrmQueryRepository:
             raise QueryError("拓扑数据不存在", 404)
         version = await self._version(authority, topology, version_id)
         graph = version.topology_json if version is not None else topology.topology_json
-        if not isinstance(graph, Mapping) or graph.get("schema_version") != V2_SCHEMA:
+        if not isinstance(graph, Mapping) or graph.get("schema_version") != GRAPH_SCHEMA:
             raise QueryError("拓扑版本不是 graph/v2", 409)
         graph_version_id = self._graph_version_id(topology, version)
         graph_revision = self._graph_revision(topology, version)
