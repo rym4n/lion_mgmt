@@ -50,6 +50,14 @@ class FakeRunRepository:
     async def save_plan(self, row):
         self.plans[row.id] = row
 
+    async def claim_pipeline_start(self, row):
+        current = self.runs[row.id]
+        if current.state != "PENDING" or getattr(current, "heartbeat_at", None) is not None:
+            return False
+        current.heartbeat_at = runs._now()
+        row.heartbeat_at = current.heartbeat_at
+        return True
+
     async def get_analysis(self, run_id, *, tenant_id=None, topology_id=None):
         row = getattr(self, "analyses", {}).get(run_id)
         return row if row is not None and row.tenant_id == tenant_id and row.topology_id == topology_id else None

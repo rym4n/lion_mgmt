@@ -63,68 +63,6 @@ def test_duplicate_items():
         plans.validate_plan_payload(payload(items=[item, item]))
 
 
-class Timer(SimpleNamespace):
-    row = None
-    @classmethod
-    def filter(cls, **kw):
-        assert kw['tenant_id'] == plans.DEFAULT_TENANT_ID and kw['deleted'] is False
-        return SimpleNamespace(first=AsyncMock(return_value=cls.row))
-    @classmethod
-    async def create(cls, **kw):
-        cls.row = cls(id='timer', **kw)
-        return cls.row
-    async def save(self, **kw):
-        pass
-
-
-@pytest.mark.asyncio
-async def test_timer_reconciliation(monkeypatch):
-    Timer.row = None
-    producer = AsyncMock()
-    monkeypatch.setattr(plans,'Timed',Timer)
-    monkeypatch.setattr(plans,'aproduce',producer)
-    monkeypatch.setattr(plans,'builtin_playbook',AsyncMock(return_value=(SimpleNamespace(id='pb'),SimpleNamespace(id='pv',version='1'))))
-    plan = SimpleNamespace(id='p',tenant_id='t',enabled=True,schedule_cron='0 0 2 * * *',updater='acct',timed_id=None,save=AsyncMock())
-    await plans.sync_timer(plan)
-    assert Timer.row.name == 'network_topology_collection_p'
-    assert Timer.row.internal is True
-    assert Timer.row.playbook_input == dict(flow_id='pv',flow_input=dict(plan_id='p',collection_run_id=''),executor='acct')
-    assert producer.call_args.args[1]['timer'] == 'cron'
-    plan.schedule_cron='0 0 3 * * *'
-    await plans.sync_timer(plan)
-    assert Timer.row.tactics == plan.schedule_cron
-    plan.enabled=False
-    await plans.sync_timer(plan)
-    assert Timer.row.enable == 0
-    assert producer.call_args.args[1]['timer'] == 'remove'
-
-
-@pytest.mark.asyncio
-async def test_missing_playbook(monkeypatch):
-    monkeypatch.setattr(plans,'builtin_playbook',AsyncMock(return_value=(None,None)))
-    with pytest.raises(CollectionError) as exc:
-        await plans.sync_timer(SimpleNamespace(enabled=True))
-    assert exc.value.code == 'COLLECTION_PLAYBOOK_UNAVAILABLE'
-
-@pytest.mark.asyncio
-async def test_timer_publish_failure_retains_retry_identity(monkeypatch):
-    Timer.row = None
-    producer = AsyncMock(side_effect=[RuntimeError('offline'), None])
-    monkeypatch.setattr(plans, 'Timed', Timer)
-    monkeypatch.setattr(plans, 'aproduce', producer)
-    monkeypatch.setattr(plans, 'builtin_playbook', AsyncMock(return_value=(SimpleNamespace(id='pb'), SimpleNamespace(id='pv', version='1'))))
-    plan = SimpleNamespace(id='p', tenant_id='t', enabled=True, schedule_cron='0 0 2 * * *', updater='acct', timed_id=None, save=AsyncMock())
-    with pytest.raises(RuntimeError):
-        await plans.sync_timer(plan)
-    original = Timer.row
-    assert original.enable == 0
-    assert plan.timed_id == "timer"
-    await plans.sync_timer(plan)
-    assert Timer.row is original
-    assert original.enable == 1
-    assert producer.call_args_list[0].args[1]['timer_id'] == producer.call_args_list[1].args[1]['timer_id']
-
-
 def test_fixed_action_inputs_round_trip_validation():
     data = payload()
     data['items'][0]['action_input'] = {'password': 'fixed-input', 'nested': {'x': [1, 2]}}
@@ -182,7 +120,6 @@ def persistence(monkeypatch):
         yield object()
     monkeypatch.setattr(plans, 'in_transaction', transaction)
     monkeypatch.setattr(plans, 'sync_timer', AsyncMock())
-    monkeypatch.setattr(plans, 'builtin_playbook', AsyncMock(return_value=(object(), object())))
     stores['NetworkTopology'].append(SimpleNamespace(id='top',tenant_id='t',deleted=False))
     stores['ToolAction'].append(SimpleNamespace(tool_name='switch',tenant_id='t',deleted=False,action={'func':'collect'}))
     stores['ToolResources'].append(SimpleNamespace(id='r1',tool_name='switch',tenant_id='t',deleted=False,internal=False))
@@ -234,69 +171,3 @@ async def test_get_hides_legacy_asset_and_item_flags(persistence):
     row.enabled = False
     result = await plans.get_plan('t', 'top')
     assert result['items'] == saved['items']
-
-
-@pytest.fixture(autouse=True)
-def timer_lock(monkeypatch):
-    from contextlib import asynccontextmanager
-    @asynccontextmanager
-    async def locked(plan):
-        yield plan
-    monkeypatch.setattr(plans, '_locked_plan', locked)
-    @asynccontextmanager
-    async def serial(plan):
-        yield
-    monkeypatch.setattr(plans, '_timer_serialization', serial)
-
-@pytest.mark.asyncio
-async def test_concurrent_stale_reconciliation_uses_latest_plan(monkeypatch):
-    import asyncio
-    from contextlib import asynccontextmanager
-    Timer.row = None
-    latest = SimpleNamespace(id='p', tenant_id='t', enabled=True, schedule_cron='0 0 4 * * *', updater='acct', timed_id=None, save=AsyncMock())
-    stale = SimpleNamespace(**{**vars(latest), 'schedule_cron': '0 0 2 * * *'})
-    lock = asyncio.Lock()
-    @asynccontextmanager
-    async def locked(plan):
-        async with lock:
-            yield latest
-    monkeypatch.setattr(plans, '_locked_plan', locked)
-    monkeypatch.setattr(plans, 'Timed', Timer)
-    producer = AsyncMock()
-    monkeypatch.setattr(plans, 'aproduce', producer)
-    monkeypatch.setattr(plans, 'builtin_playbook', AsyncMock(return_value=(SimpleNamespace(id='pb'), SimpleNamespace(id='pv',version='1'))))
-    await asyncio.gather(plans.sync_timer(stale), plans.sync_timer(latest))
-    assert Timer.row.tactics == latest.schedule_cron
-    assert {call.args[1]['timer_id'] for call in producer.call_args_list} == {'timer'}
-    assert {call.args[1]['timer_rule']['crontab'] for call in producer.call_args_list} == {latest.schedule_cron}
-
-@pytest.mark.asyncio
-async def test_real_kafka_strict_failure_and_stable_timer_retry(monkeypatch):
-    from libs import kafka
-    Timer.row = None
-    failure = [True]
-    class Producer:
-        def __init__(self, **kw):
-            pass
-        async def __aenter__(self):
-            return self
-        async def __aexit__(self, *args):
-            pass
-        async def send_and_wait(self, *args, **kw):
-            if failure[0]:
-                raise RuntimeError('broker offline')
-    monkeypatch.setattr(kafka, 'AIOKafkaProducer', Producer)
-    monkeypatch.setattr(kafka, '_normalize_flow_task_message', AsyncMock(side_effect=lambda msg: msg))
-    monkeypatch.setattr(plans, 'aproduce', kafka.aproduce)
-    monkeypatch.setattr(plans, 'Timed', Timer)
-    monkeypatch.setattr(plans, 'builtin_playbook', AsyncMock(return_value=(SimpleNamespace(id='pb'), SimpleNamespace(id='pv', version='1'))))
-    plan = SimpleNamespace(id='p',tenant_id='t',enabled=True,schedule_cron='0 0 2 * * *',updater='acct',timed_id=None,save=AsyncMock())
-    # Preserve legacy callers' behavior; strict timer callers must observe failure.
-    await kafka.aproduce('other-topic', {})
-    with pytest.raises(RuntimeError, match='broker offline'):
-        await plans.sync_timer(plan)
-    row = Timer.row
-    assert row.enable == 0
-    failure[0] = False
-    await plans.sync_timer(plan)
-    assert Timer.row is row and row.enable == 1

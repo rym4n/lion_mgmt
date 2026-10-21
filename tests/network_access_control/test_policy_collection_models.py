@@ -147,6 +147,8 @@ def test_migration_and_models_agree_on_every_column_nullability():
 
     migration = importlib.import_module("migrations.models.135_20261020100000_network_policy_collection")
     sql = asyncio.run(migration.upgrade(None))
+    followup = importlib.import_module("migrations.models.136_20261022090000_direct_collection_schedules")
+    additional = asyncio.run(followup.upgrade(None))
     for model in (NetworkAccessPolicyCollectionPlan, NetworkAccessPolicyCollectionItem,
                   NetworkAccessPolicyCollectionRun, NetworkAccessPolicyAgentJob):
         table_body = re.search(
@@ -156,6 +158,10 @@ def test_migration_and_models_agree_on_every_column_nullability():
         columns = dict(re.findall(
             r'"(\w+)" ((?:VARCHAR\(\d+\)|TIMESTAMPTZ|BOOL|INT|JSONB|TEXT)[^,\n]*)',
             table_body,
+        ))
+        columns.update(re.findall(
+            r'ALTER TABLE "' + model._meta.db_table + r'" ADD COLUMN IF NOT EXISTS "(\w+)" ([^;]+);',
+            additional,
         ))
         assert columns.keys() == model._meta.fields_map.keys()
         for name, field in model._meta.fields_map.items():

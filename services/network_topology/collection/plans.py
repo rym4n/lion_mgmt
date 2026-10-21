@@ -8,7 +8,6 @@ from tortoise import connections  # noqa: F401 - tests patch the shared connecti
 from tortoise.expressions import RawSQL
 
 from tortoise.transactions import in_transaction
-from core.maintenance import DEFAULT_TENANT_ID
 from libs.kafka import aproduce
 from models import Timed, ToolAction, ToolResources
 from models.network_topology_v2 import (
@@ -20,10 +19,7 @@ from services.inspection.logic import is_valid_schedule_cron
 from services.action_collection import timer as collection_timer
 from services.network_topology.canonicalization import canonicalize_json
 from services.network_topology.collection.errors import CollectionError
-from settings import TASK_TOPIC
 
-BUILTIN_PLAYBOOK_NAME = '网络拓扑自动采集'
-TIMER_END = collection_timer.TIMER_END
 TIMER_PREFIX = 'network_topology_collection_'
 LOCK_NAMESPACE = 'network_topology_collection'
 MAX_RESOURCES = 500
@@ -128,10 +124,6 @@ def validate_plan_payload(payload: dict) -> dict:
         raise _invalid('定时采集至少需要一个采集项')
     data['items'] = items
     return data
-
-
-async def builtin_playbook():
-    return await collection_timer.builtin_playbook(BUILTIN_PLAYBOOK_NAME)
 
 
 async def get_plan(tenant_id: str, topology_id: str) -> dict:
@@ -242,10 +234,6 @@ async def save_plan(tenant_id: str, topology_id: str, payload: dict, *, account_
             for resource in item['resources']:
                 if not await ToolResources.filter(id=resource['resource_id'], tenant_id=tenant_id, deleted=False, tool_name=item['app_name'], internal=False).using_db(db).exists():
                     raise _invalid('应用资源不存在或不可用')
-        if data['enabled']:
-            pb, pv = await builtin_playbook()
-            if pb is None or pv is None:
-                raise CollectionError('COLLECTION_PLAYBOOK_UNAVAILABLE', 409)
         values = {k: v for k, v in data.items() if k not in ('items', 'expected_revision')}
         if plan is None:
             plan = await TopologyCollectionPlan.create(using_db=db, tenant_id=tenant_id, topology_id=topology_id, revision=1, updater=account_id, **values)
@@ -281,14 +269,7 @@ async def _reconcile_timer(plan) -> None:
     # Resolve module globals per call to preserve topology's patchable API.
     await collection_timer.reconcile_timer_locked(
         plan, timer_prefix=TIMER_PREFIX, locked_plan=_locked_plan,
-        playbook_lookup=builtin_playbook, timed_model=Timed, produce=aproduce,
-    )
-
-
-async def _prepare_timer_locked(plan):
-    return await collection_timer.prepare_timer_locked(
-        plan, timer_prefix=TIMER_PREFIX,
-        playbook_lookup=builtin_playbook, timed_model=Timed,
+        timed_model=Timed, produce=aproduce,
     )
 
 
@@ -302,10 +283,7 @@ async def delete_plan_for_topology(tenant_id, topology_id) -> None:
                 return
             current.enabled = False
             await current.save(update_fields=['enabled'])
-            prepared = await _prepare_timer_locked(current)
-        # Removal must also be outside the transaction containing retry state.
-        if prepared:
-            await aproduce(TASK_TOPIC, prepared[1], raise_on_error=True)
+        await _reconcile_timer(plan)
         async with _locked_plan(plan) as current:
             if current is None:
                 return

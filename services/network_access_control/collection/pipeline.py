@@ -69,21 +69,23 @@ def _device(target: Target) -> dict:
 
 async def freeze_and_claim(plan, run, *, target_repository=None, repository=None) -> bool:
     repo = repository or runs.OrmPolicyRunRepository()
-    if await _live_in_state(run, "PENDING", repo) is None:
-        return False
     try:
+        if await _live_in_state(run, "PENDING", repo) is None:
+            return False
         targets = await freeze_targets(plan, await repo.get_items(plan), repository=target_repository)
         if not targets:
             raise CollectionError("PLAN_EMPTY", 400)
-    except CollectionError as error:
-        if not await runs.finish_run(run, "FAILED", error_code=error.code,
+        return await repo.transition(run, "PENDING", "COLLECTING", {
+            "frozen_targets": [asdict(target) for target in targets], "device_total": len(targets),
+            "heartbeat_at": datetime.now(timezone.utc)})
+    except Exception as error:
+        code = error.code if isinstance(error, CollectionError) else "COLLECTION_DISPATCH_FAILED"
+        status = error.status if isinstance(error, CollectionError) else 500
+        if not await runs.finish_run(run, "FAILED", error_code=code,
                                      expected_state="PENDING", repository=repo):
             return False
         # Target errors may name resources; only the stable code crosses the API.
-        raise CollectionError(error.code, error.status) from None
-    return await repo.transition(run, "PENDING", "COLLECTING", {
-        "frozen_targets": [asdict(target) for target in targets], "device_total": len(targets),
-        "heartbeat_at": datetime.now(timezone.utc)})
+        raise CollectionError(code, status) from None
 
 
 async def collect_stage(plan, run, *, executor=None, repository=None) -> list[dict]:
@@ -150,9 +152,17 @@ async def run_pipeline(plan, run, *, executor=None, normalizer=None, repository=
 async def start_pipeline(plan, run, *, repository=None) -> dict:
     repo = repository or runs.OrmPolicyRunRepository()
     if await freeze_and_claim(plan, run, repository=repo):
-        if await _live_in_state(run, "COLLECTING", repo) is not None:
-            start_tracked(run_pipeline(plan, run, repository=repo), run=run,
-                          run_model=NetworkAccessPolicyCollectionRun)
+        worker = None
+        try:
+            if await _live_in_state(run, "COLLECTING", repo) is not None:
+                worker = run_pipeline(plan, run, repository=repo)
+                start_tracked(worker, run=run, run_model=NetworkAccessPolicyCollectionRun)
+        except Exception:
+            if worker is not None:
+                worker.close()
+            if await runs.finish_run(run, "FAILED", error_code="COLLECTION_DISPATCH_FAILED",
+                                     expected_state="COLLECTING", repository=repo):
+                raise CollectionError("COLLECTION_DISPATCH_FAILED", 500) from None
     else:
         current = await repo.get_run(run.id, tenant_id=run.tenant_id)
         if current is not None:

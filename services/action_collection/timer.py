@@ -1,8 +1,9 @@
-"""Internal Timed reconciliation shared by action collection domains."""
+"""Direct schedule reconciliation and retryable retirement of legacy flow timers."""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from hashlib import sha256
+from datetime import datetime, timezone
 
 import asyncpg
 from tortoise import connections
@@ -10,8 +11,7 @@ from tortoise.transactions import in_transaction
 
 from core.maintenance import DEFAULT_TENANT_ID
 from libs.kafka import aproduce
-from models import Playbook, PlaybookVersion, Timed
-from services.action_collection.errors import CollectionError
+from models import Timed
 from settings import TASK_TOPIC
 
 TIMER_END = "2099-12-31 23:59:59"
@@ -19,19 +19,6 @@ _POOL_ONLY_OPTIONS = (
     "min_size", "max_size", "max_queries", "max_inactive_connection_lifetime",
     "connect", "setup", "init", "reset",
 )
-
-
-async def builtin_playbook(name: str):
-    playbook = await Playbook.filter(
-        name=name, tenant_id=DEFAULT_TENANT_ID, deleted=False, internal=True,
-    ).first()
-    if playbook is None:
-        return None, None
-    version = await PlaybookVersion.filter(
-        playbook_id=playbook.id, tenant_id=DEFAULT_TENANT_ID,
-        deleted=False, status=1,
-    ).order_by("-utime").first()
-    return playbook, version
 
 
 def lock_key(namespace: str, tenant_id, plan_id) -> int:
@@ -72,97 +59,72 @@ def locked_plan(plan_model):
     return locked
 
 
-async def prepare_timer_locked(plan, *, timer_prefix, playbook_lookup, timed_model=None):
+def update_schedule_cursor(plan, now):
+    from services.action_collection.scheduler import next_fire_time
+
+    if not plan.enabled:
+        plan.next_run_at = None
+        plan.scheduled_cron = None
+    elif (getattr(plan, "next_run_at", None) is None
+          or getattr(plan, "scheduled_cron", None) != plan.schedule_cron):
+        plan.next_run_at = next_fire_time(plan.schedule_cron, now)
+        plan.scheduled_cron = plan.schedule_cron
+
+
+async def prepare_timer_locked(plan, *, timer_prefix, timed_model=None, now=None):
+    """Persist the direct cursor and disable any old job before removing it."""
     timed_model = timed_model or Timed
-    playbook = version = None
-    if plan.enabled:
-        playbook, version = await playbook_lookup()
-        if playbook is None or version is None:
-            raise CollectionError("COLLECTION_PLAYBOOK_UNAVAILABLE", 409)
-    name = f"{timer_prefix}{plan.id}"
+    update_schedule_cursor(plan, now or datetime.now(timezone.utc))
     timed = await timed_model.filter(
-        name=name, tenant_id=DEFAULT_TENANT_ID, deleted=False, internal=True,
+        name=f"{timer_prefix}{plan.id}", tenant_id=DEFAULT_TENANT_ID,
+        deleted=False, internal=True,
     ).first()
-    if timed is None and not plan.enabled:
-        return None
+    if timed is not None:
+        timed.enable = 0
+        await timed.save(update_fields=["enable"])
+        # Keep the ID until Kafka acknowledges removal; subsequent sweeps retry.
+        plan.timed_id = timed.id
+    else:
+        plan.timed_id = None
+    await plan.save(update_fields=["next_run_at", "scheduled_cron", "timed_id"])
     if timed is None:
-        timed = await timed_model.create(
-            name=name, tenant_id=DEFAULT_TENANT_ID, type=0,
-            playbook=playbook, playbook_version=version.version,
-            playbook_input={}, status=1, tactics=plan.schedule_cron,
-            end_time=TIMER_END, enable=0, creator_id=plan.updater,
-            updator_id=plan.updater, internal=True,
-        )
-    inputs = (
-        {
-            "flow_id": version.id,
-            "flow_input": {"plan_id": plan.id, "collection_run_id": ""},
-            "executor": plan.updater,
-        }
-        if plan.enabled else timed.playbook_input
+        return None
+    return timed, dict(
+        run_type="flow", run_args=timed.playbook_input or {}, timer="remove",
+        timer_rule={}, timer_id=timed.id, tenant_id=DEFAULT_TENANT_ID,
     )
-    message = dict(
-        run_type="flow", run_args=inputs,
-        timer="cron" if plan.enabled else "remove",
-        timer_rule=dict(end_date=TIMER_END, crontab=plan.schedule_cron) if plan.enabled else {},
-        timer_id=timed.id, tenant_id=DEFAULT_TENANT_ID,
-    )
-    timed.enable = 0
-    timed.tactics = plan.schedule_cron
-    timed.playbook_input = inputs
-    timed.end_time = TIMER_END
-    timed.updator_id = plan.updater
-    if plan.enabled:
-        timed.playbook_id = playbook.id
-        timed.playbook_version = version.version
-    await timed.save()
-    plan.timed_id = timed.id
-    await plan.save(update_fields=["timed_id"])
-    return timed, message, bool(plan.enabled), plan.schedule_cron
 
 
 async def reconcile_timer_locked(
-    plan, *, timer_prefix, locked_plan, playbook_lookup, timed_model=None, produce=None,
+    plan, *, timer_prefix, locked_plan, timed_model=None, produce=None, now=None,
 ):
     produce = produce or aproduce
-    prepared = None
     async with locked_plan(plan) as current:
-        if current is not None:
-            prepared = await prepare_timer_locked(
-                current, timer_prefix=timer_prefix,
-                playbook_lookup=playbook_lookup, timed_model=timed_model,
-            )
+        prepared = None if current is None else await prepare_timer_locked(
+            current, timer_prefix=timer_prefix, timed_model=timed_model, now=now,
+        )
     if prepared is None:
         return
-    timed, message, enabled, cron = prepared
-    # Persist retry state before publishing; a newer schedule must win on re-read.
+    timed, message = prepared
+    # Never hold ORM row locks while waiting for the broker.
     await produce(TASK_TOPIC, message, raise_on_error=True)
     async with locked_plan(plan) as current:
         if current is None:
             return
-        if bool(current.enabled) != enabled or current.schedule_cron != cron:
-            return
-        timed.enable = int(enabled)
-        timed.tactics = cron
-        await timed.save()
-        current.timed_id = timed.id
+        timed.deleted = True
+        await timed.save(update_fields=["deleted"])
+        current.timed_id = None
         await current.save(update_fields=["timed_id"])
 
 
-async def reconcile_timer(
-    plan, *, plan_model, timer_prefix, playbook_name, lock_namespace,
-) -> None:
+async def reconcile_timer(plan, *, plan_model, timer_prefix, lock_namespace) -> None:
     async with advisory_lock(lock_namespace, plan.tenant_id, plan.id):
         await reconcile_timer_locked(
-            plan, timer_prefix=timer_prefix,
-            locked_plan=locked_plan(plan_model),
-            playbook_lookup=lambda: builtin_playbook(playbook_name),
+            plan, timer_prefix=timer_prefix, locked_plan=locked_plan(plan_model),
         )
 
 
-async def disable_and_remove_timer(
-    plan, *, plan_model, timer_prefix, playbook_name, lock_namespace,
-) -> bool:
+async def disable_and_remove_timer(plan, *, plan_model, timer_prefix, lock_namespace) -> bool:
     locked = locked_plan(plan_model)
     async with advisory_lock(lock_namespace, plan.tenant_id, plan.id):
         async with locked(plan) as current:
@@ -170,10 +132,5 @@ async def disable_and_remove_timer(
                 return False
             current.enabled = False
             await current.save(update_fields=["enabled"])
-            prepared = await prepare_timer_locked(
-                current, timer_prefix=timer_prefix,
-                playbook_lookup=lambda: builtin_playbook(playbook_name),
-            )
-        if prepared is not None:
-            await aproduce(TASK_TOPIC, prepared[1], raise_on_error=True)
+        await reconcile_timer_locked(plan, timer_prefix=timer_prefix, locked_plan=locked)
     return True

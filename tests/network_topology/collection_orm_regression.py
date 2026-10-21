@@ -55,6 +55,16 @@ async def main():
         plan = await Plan.create(id="p1", tenant_id="t1", topology_id="top1", enabled=True)
         await Item.create(id="i1", tenant_id="t1", plan_id="p1", app_name="tool", action_func="get")
         repo = runs.OrmRunRepository()
+        # A durable heartbeat claims pre-manifest work exactly once, including
+        # independent ORM instances and late launches of terminal rows.
+        pending = await create_run("launch-claim", "PENDING")
+        competing = await Run.get(id=pending.id)
+        claims = await asyncio.gather(repo.claim_pipeline_start(pending), repo.claim_pipeline_start(competing))
+        assert sorted(claims) == [False, True]
+        assert (await Run.get(id=pending.id)).state == "PENDING"
+        assert (await Run.get(id=pending.id)).heartbeat_at is not None
+        await runs.finish_run(pending, "CANCELLED", repository=repo)
+        assert not await repo.claim_pipeline_start(competing)
         # Every background progression receives an independent stale ORM copy.
         for state in ("COLLECTING", "COLLECTED", "SUBMITTED"):
             for terminal in ("CANCELLED", "FAILED"):
@@ -138,7 +148,7 @@ async def main():
         # completed pointer; after removal it falls back to the completed run.
         plan = await Plan.get(id="p1")
         last_completed = plan.last_run_id
-        scheduled = await runs.start_scheduled("p1")
+        scheduled = await runs.start_scheduled("p1", launch=False)
         summary = await plans.collection_summaries("t1", ["top1"])
         assert summary["top1"]["last_run"]["id"] == scheduled["collection_run_id"]
         assert (await Plan.get(id="p1")).last_run_id == last_completed

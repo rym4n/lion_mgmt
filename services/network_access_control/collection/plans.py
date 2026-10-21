@@ -17,7 +17,7 @@ from services.action_collection import timer as collection_timer
 from services.action_collection.errors import CollectionError
 from services.inspection.logic import is_valid_schedule_cron
 from services.network_access_control.collection.constants import (
-    BUILTIN_PLAYBOOK_NAME, LOCK_NAMESPACE, MAX_RESOURCES, POLICY_DEVICE_MODEL_KEYS, TIMER_PREFIX,
+    LOCK_NAMESPACE, MAX_RESOURCES, POLICY_DEVICE_MODEL_KEYS, TIMER_PREFIX,
 )
 from services.network_topology.canonicalization import canonicalize_json
 
@@ -224,29 +224,23 @@ async def _last_run(tenant_id, plan):
 async def get_plan(tenant_id: str, *, repository=None) -> dict:
     repo = repository or OrmPlanRepository()
     plan, items = await repo.load(tenant_id)
-    playbook, version = await collection_timer.builtin_playbook(BUILTIN_PLAYBOOK_NAME)
     return {
         "plan": _plan_dict(plan) if plan is not None else default_plan_dict(),
         "items": [_item_dict(item) for item in items],
         "last_run": await _last_run(tenant_id, plan),
-        "playbook_available": playbook is not None and version is not None,
     }
 
 
 async def sync_timer(plan) -> None:
     await collection_timer.reconcile_timer(
         plan, plan_model=NetworkAccessPolicyCollectionPlan, timer_prefix=TIMER_PREFIX,
-        playbook_name=BUILTIN_PLAYBOOK_NAME, lock_namespace=LOCK_NAMESPACE)
+        lock_namespace=LOCK_NAMESPACE)
 
 
 async def save_plan(tenant_id: str, payload: dict, *, account_id: str, repository=None) -> dict:
     data = validate_plan_payload(payload)
     repo = repository or OrmPlanRepository()
     await repo.check_references(tenant_id, data["items"])
-    if data["enabled"]:
-        playbook, version = await collection_timer.builtin_playbook(BUILTIN_PLAYBOOK_NAME)
-        if playbook is None or version is None:
-            raise CollectionError("COLLECTION_PLAYBOOK_UNAVAILABLE", 409)
     plan = await repo.upsert(tenant_id, data, account_id=account_id)
     await sync_timer(plan)
     return await get_plan(tenant_id, repository=repo)

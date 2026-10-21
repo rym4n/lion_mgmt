@@ -26,6 +26,8 @@ class TopologyCollectionPlan(TopologyTenantModel):
     notify_enabled = fields.BooleanField(default=False)
     notify_config = fields.JSONField(null=True)
     timed_id = fields.CharField(max_length=36, null=True)
+    scheduled_cron = fields.CharField(max_length=100, null=True)
+    next_run_at = fields.DatetimeField(null=True)
     last_run_id = fields.CharField(max_length=36, null=True)
     consecutive_failures = fields.IntField(default=0)
     revision = fields.IntField(default=1)

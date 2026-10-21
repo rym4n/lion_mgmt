@@ -2,6 +2,7 @@ from .asset_catalog import AssetCatalogListener
 from .base import BaseListener
 from .cache import CacheListener
 from .command_center import CommandCenterListener
+from .collection_scheduler import CollectionSchedulerListener
 from .dashboard import DashboardMaterializedViewListener
 from .event_ingestion import EventIngestionTemplateRepairListener
 from .policy_collection import PolicyCollectionListener
@@ -14,5 +15,6 @@ LISTENER_TUPLE: tuple[type[BaseListener], ...] = (
     AssetCatalogListener,
     EventIngestionTemplateRepairListener,
     TopologyAnalysisListener,
+    CollectionSchedulerListener,
     PolicyCollectionListener,
 )

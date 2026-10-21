@@ -140,6 +140,81 @@ async def test_cancel_during_freeze_does_not_claim_or_start(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_creation_failure_closes_coroutine_and_terminalizes_claim(monkeypatch):
+    repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
+    row = run_row()
+    repo.runs[row.id] = row
+    monkeypatch.setattr(pipeline, "freeze_targets", AsyncMock(return_value=[target()]))
+    workers = []
+
+    def fail_to_track(coro, **kwargs):
+        workers.append(coro)
+        raise RuntimeError("password=private-output")
+
+    monkeypatch.setattr(pipeline, "start_tracked", fail_to_track)
+    try:
+        with pytest.raises(CollectionError) as exc:
+            await pipeline.start_pipeline(plan(), row, repository=repo)
+        assert (exc.value.code, exc.value.status) == ("COLLECTION_DISPATCH_FAILED", 500)
+        assert row.state == "FAILED" and row.error_code == "COLLECTION_DISPATCH_FAILED"
+        assert row.error_message is None and repo.plans["p1"].consecutive_failures == 1
+        assert len(workers) == 1 and workers[0].cr_frame is None
+    finally:
+        for worker in workers:
+            worker.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_read", [1, 2])
+async def test_setup_state_read_failure_terminalizes_before_worker_starts(monkeypatch, failed_read):
+    class InterruptedRepository(FakePolicyRunRepository):
+        reads = 0
+
+        async def get_run(self, run_id, *, tenant_id=None):
+            self.reads += 1
+            if self.reads == failed_read:
+                raise RuntimeError("password=private-output")
+            return await super().get_run(run_id, tenant_id=tenant_id)
+
+    repo = InterruptedRepository(plans=[plan()], items=[item()])
+    row = run_row()
+    repo.runs[row.id] = row
+    monkeypatch.setattr(pipeline, "freeze_targets", AsyncMock(return_value=[target()]))
+    with pytest.raises(CollectionError) as exc:
+        await pipeline.start_pipeline(plan(), row, repository=repo)
+    assert (exc.value.code, exc.value.status) == ("COLLECTION_DISPATCH_FAILED", 500)
+    assert row.state == "FAILED" and row.error_code == "COLLECTION_DISPATCH_FAILED"
+    assert row.error_message is None and repo.plans["p1"].consecutive_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_unexpected_freeze_failure_does_not_terminalize_concurrent_winner(monkeypatch):
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+
+    class GatedRepository(FakePolicyRunRepository):
+        async def finish_terminal(self, *args, **kwargs):
+            entered.set()
+            await resume.wait()
+            return await super().finish_terminal(*args, **kwargs)
+
+    repo = GatedRepository(plans=[plan()], items=[item()])
+    row = run_row()
+    repo.runs[row.id] = row
+    monkeypatch.setattr(pipeline, "freeze_targets", AsyncMock(side_effect=RuntimeError("password=secret")))
+    loser = asyncio.create_task(pipeline.start_pipeline(plan(), deepcopy(row), repository=repo))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        monkeypatch.setattr(pipeline, "freeze_targets", AsyncMock(return_value=[target()]))
+        assert await pipeline.freeze_and_claim(plan(), deepcopy(row), repository=repo) is True
+    finally:
+        resume.set()
+    assert await asyncio.wait_for(loser, 1) == {"collection_run_id": "run-1", "run_state": "COLLECTING"}
+    assert row.error_code is None and row.finished_at is None
+    assert repo.plans["p1"].consecutive_failures == 0
+
+
+@pytest.mark.asyncio
 async def test_collect_scrubs_raw_outputs_and_maps_action_run_ids(monkeypatch):
     output = {"code": 200, "data": {"outputs": [{"source": "display security-policy rule all",
                                                  "content": "rule name a\n password=hunter2"}]}}

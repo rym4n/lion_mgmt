@@ -18,7 +18,7 @@ def test_run_model_has_nullable_heartbeat():
 async def test_sweep_marks_stale_heartbeat_worker_lost(heartbeat):
     repo = FakeRunRepository(plans=[plan("p1"), plan("p2", topology_id="topo-2")])
     now = datetime.now(timezone.utc)
-    stale = repo.runs[(await runs.start_scheduled("p1", repository=repo))["collection_run_id"]]
+    stale = repo.runs[(await runs.start_scheduled("p1", repository=repo, launch=False))["collection_run_id"]]
     stale.state = "COLLECTING"
     stale.started_at = now - timedelta(minutes=10)
     stale.heartbeat_at = now - timedelta(minutes=5)
@@ -26,7 +26,7 @@ async def test_sweep_marks_stale_heartbeat_worker_lost(heartbeat):
         stale.heartbeat_at = None
     elif heartbeat == "naive":
         stale.heartbeat_at = stale.heartbeat_at.replace(tzinfo=None)
-    alive = repo.runs[(await runs.start_scheduled("p2", repository=repo))["collection_run_id"]]
+    alive = repo.runs[(await runs.start_scheduled("p2", repository=repo, launch=False))["collection_run_id"]]
     alive.state = "COLLECTING"
     alive.started_at = now - timedelta(minutes=10)
     alive.heartbeat_at = now - timedelta(seconds=10)
@@ -42,7 +42,7 @@ async def test_sweep_marks_stale_heartbeat_worker_lost(heartbeat):
 @pytest.mark.asyncio
 async def test_sweep_prefers_run_timeout_over_worker_lost():
     repo = FakeRunRepository(plans=[plan("p1", run_timeout_seconds=600)])
-    run = repo.runs[(await runs.start_scheduled("p1", repository=repo))["collection_run_id"]]
+    run = repo.runs[(await runs.start_scheduled("p1", repository=repo, launch=False))["collection_run_id"]]
     run.state = "COLLECTING"
     run.started_at = datetime.now(timezone.utc) - timedelta(hours=2)
     run.heartbeat_at = None
@@ -53,7 +53,7 @@ async def test_sweep_prefers_run_timeout_over_worker_lost():
 @pytest.mark.asyncio
 async def test_sweep_ignores_pending_runs_without_heartbeat():
     repo = FakeRunRepository(plans=[plan("p1")])
-    run = repo.runs[(await runs.start_scheduled("p1", repository=repo))["collection_run_id"]]
+    run = repo.runs[(await runs.start_scheduled("p1", repository=repo, launch=False))["collection_run_id"]]
     run.started_at = datetime.now(timezone.utc) - timedelta(minutes=5)
     assert await runs.sweep_runs(repository=repo) == 0
     assert run.state == "PENDING"

@@ -6,35 +6,50 @@ from unittest.mock import AsyncMock
 import pytest
 
 from services.action_collection.errors import CollectionError
-from services.network_access_control.collection import runs
+from services.action_collection import timer as collection_timer
+from services.action_collection.targets import Target
+from services.network_access_control.collection import pipeline, runs
 from tests.network_access_control.policy_collection_fakes import FakePolicyRunRepository, item, plan, run_row
 
 
 @pytest.fixture(autouse=True)
-def _playbook(monkeypatch):
-    monkeypatch.setattr(runs.collection_timer, "builtin_playbook",
-                        AsyncMock(return_value=(SimpleNamespace(id="pb"), SimpleNamespace(id="pv"))))
-    monkeypatch.setattr(runs, "aproduce", AsyncMock())
+def direct_runtime(monkeypatch):
+    monkeypatch.setattr(collection_timer, "builtin_playbook", AsyncMock(return_value=(None, None)), raising=False)
+    monkeypatch.setattr(runs, "aproduce", AsyncMock(), raising=False)
     monkeypatch.setattr(runs, "notify_after_commit", AsyncMock())
+    monkeypatch.setattr(pipeline, "freeze_targets", AsyncMock(return_value=[
+        Target("i1", "huawei_usg", "v1", "main.py", "collect_policy_observations", "采集策略", {},
+               "r1", "fw-r1", "10.0.0.1", "a1")]))
+    launched = []
+
+    def track(coro, **kwargs):
+        launched.append(kwargs["run"].id)
+        coro.close()
+
+    monkeypatch.setattr(pipeline, "start_tracked", track)
+    return launched
 
 
 @pytest.mark.asyncio
-async def test_trigger_manual_creates_run_and_submits_flow():
+async def test_trigger_manual_launches_without_published_playbook_or_flow(direct_runtime):
     repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
     result = await runs.trigger_manual("t1", account_id="acc", repository=repo)
-    message = runs.aproduce.await_args.args[1]
-    assert message["run_type"] == "flow"
-    assert message["run_args"]["flow_input"] == {"plan_id": "p1", "collection_run_id": result["collection_run_id"]}
-    assert message["tenant_id"] == runs.DEFAULT_TENANT_ID
-    assert repo.runs[result["collection_run_id"]].flow_run_id
+    row = repo.runs[result["collection_run_id"]]
+    assert result["state"] == "COLLECTING"
+    assert (row.tenant_id, row.triggered_by, row.device_total) == ("t1", "acc", 1)
+    assert row.flow_run_id is None
+    assert direct_runtime == [row.id]
+    runs.aproduce.assert_not_awaited()
+    collection_timer.builtin_playbook.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_trigger_manual_reuses_active_run():
+async def test_trigger_manual_reuses_active_run_without_relaunch(direct_runtime):
     repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
     first = await runs.trigger_manual("t1", account_id="acc", repository=repo)
     second = await runs.trigger_manual("t1", account_id="acc", repository=repo)
     assert second == {**first, "reused": True}
+    assert direct_runtime == [first["collection_run_id"]]
 
 
 @pytest.mark.asyncio
@@ -46,20 +61,25 @@ async def test_trigger_manual_requires_items():
 
 
 @pytest.mark.asyncio
-async def test_trigger_manual_kafka_failure_terminalizes():
-    runs.aproduce.side_effect = RuntimeError("broker down")
+async def test_trigger_manual_setup_failure_terminalizes_with_safe_code(monkeypatch, direct_runtime):
+    monkeypatch.setattr(pipeline, "freeze_targets", AsyncMock(side_effect=RuntimeError("password=secret")))
     repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
-    with pytest.raises(RuntimeError):
+    with pytest.raises(CollectionError) as exc:
         await runs.trigger_manual("t1", account_id="acc", repository=repo)
     (row,) = repo.runs.values()
-    assert (row.state, row.error_code) == ("FAILED", "COLLECTION_FLOW_SUBMIT_FAILED")
+    assert (row.state, row.error_code) == ("FAILED", "COLLECTION_DISPATCH_FAILED")
+    assert (exc.value.code, exc.value.status) == ("COLLECTION_DISPATCH_FAILED", 500)
+    assert row.error_message is None and "secret" not in str(exc.value)
+    assert repo.plans["p1"].last_run_id == row.id and repo.plans["p1"].consecutive_failures == 1
+    assert direct_runtime == []
 
 
 @pytest.mark.asyncio
-async def test_start_scheduled_rejects_overlap_and_disabled():
+async def test_start_scheduled_launches_and_rejects_overlap_and_disabled(direct_runtime):
     repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
     created = await runs.start_scheduled("p1", repository=repo)
     assert repo.runs[created["collection_run_id"]].trigger == "schedule"
+    assert created["state"] == "COLLECTING" and direct_runtime == [created["collection_run_id"]]
     with pytest.raises(CollectionError) as exc:
         await runs.start_scheduled("p1", repository=repo)
     assert exc.value.code == "COLLECTION_RUN_ACTIVE"
@@ -67,6 +87,51 @@ async def test_start_scheduled_rejects_overlap_and_disabled():
     with pytest.raises(CollectionError) as exc:
         await runs.start_scheduled("p1", repository=repo2)
     assert exc.value.code == "COLLECTION_PLAN_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_transaction_can_create_then_launch_same_run_once(direct_runtime):
+    repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
+    created = await runs.start_scheduled("p1", repository=repo, launch=False)
+    assert created["state"] == "PENDING" and direct_runtime == []
+    started = await runs.launch_run("p1", created["collection_run_id"], repository=repo)
+    repeated = await runs.launch_run("p1", created["collection_run_id"], repository=repo)
+    assert started == repeated == {"collection_run_id": created["collection_run_id"], "state": "COLLECTING"}
+    assert len(repo.runs) == 1 and direct_runtime == [created["collection_run_id"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["CANCELLED", "FAILED", "SUCCEEDED", "PARTIAL", "NORMALIZING", "APPLYING"])
+async def test_launch_existing_nonpending_run_is_idempotent(direct_runtime, state):
+    repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
+    repo.runs["run-1"] = run_row(state=state)
+    assert await runs.launch_run("p1", "run-1", repository=repo) == {
+        "collection_run_id": "run-1", "state": state}
+    assert direct_runtime == []
+
+
+@pytest.mark.asyncio
+async def test_launch_existing_run_preserves_plan_and_tenant_binding(direct_runtime):
+    repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
+    repo.runs["foreign"] = run_row("foreign", tenant_id="t2")
+    repo.runs["other-plan"] = run_row("other-plan", plan_id="p2")
+    for run_id in ("foreign", "other-plan"):
+        with pytest.raises(CollectionError) as exc:
+            await runs.launch_run("p1", run_id, repository=repo)
+        assert exc.value.code == "COLLECTION_RUN_NOT_FOUND"
+        assert repo.runs[run_id].state == "PENDING"
+    assert direct_runtime == []
+
+
+@pytest.mark.asyncio
+async def test_launch_expired_pending_run_terminalizes_without_starting(direct_runtime):
+    repo = FakePolicyRunRepository(plans=[plan(run_timeout_seconds=600)], items=[item()])
+    repo.runs["run-1"] = run_row(started_at=datetime.now(timezone.utc) - timedelta(seconds=601))
+    with pytest.raises(CollectionError) as exc:
+        await runs.launch_run("p1", "run-1", repository=repo)
+    assert exc.value.code == "COLLECTION_RUN_CLOSED"
+    assert repo.runs["run-1"].state == "FAILED"
+    assert repo.runs["run-1"].error_code == "COLLECTION_RUN_TIMEOUT" and direct_runtime == []
 
 
 @pytest.mark.asyncio
@@ -146,7 +211,7 @@ def test_status_projection_terminal_flag():
 
 
 @pytest.mark.asyncio
-async def test_trigger_conflict_reuses_race_winner_without_resubmitting():
+async def test_trigger_conflict_reuses_race_winner_without_relaunch(direct_runtime):
     repo = FakePolicyRunRepository(plans=[plan()], items=[item()])
     async def competing_create(**values):
         repo.runs['winner'] = run_row('winner')
@@ -155,19 +220,15 @@ async def test_trigger_conflict_reuses_race_winner_without_resubmitting():
     result = await runs.trigger_manual('t1', account_id='acc', repository=repo)
     assert result == {'collection_run_id': 'winner', 'state': 'PENDING', 'reused': True}
     runs.aproduce.assert_not_awaited()
+    assert direct_runtime == []
 
 
 @pytest.mark.asyncio
-async def test_manual_can_run_disabled_plan_but_requires_builtin_playbook():
+async def test_manual_can_run_disabled_plan_without_published_playbook():
     repo = FakePolicyRunRepository(plans=[plan(enabled=False)], items=[item()])
-    runs.collection_timer.builtin_playbook.return_value = (None, None)
-    with pytest.raises(CollectionError) as exc:
-        await runs.trigger_manual('t1', account_id='acc', repository=repo)
-    assert exc.value.code == 'COLLECTION_PLAYBOOK_UNAVAILABLE'
-    assert not repo.runs
-    runs.collection_timer.builtin_playbook.return_value = (SimpleNamespace(id='pb'), SimpleNamespace(id='pv'))
     result = await runs.trigger_manual('t1', account_id='acc', repository=repo)
-    assert result['state'] == 'PENDING'
+    assert result['state'] == 'COLLECTING'
+    collection_timer.builtin_playbook.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -91,23 +91,24 @@ class FakePlanRepository:
 
 @pytest.mark.asyncio
 async def test_save_checks_asset_binding(monkeypatch):
-    monkeypatch.setattr(plans.collection_timer, "builtin_playbook", AsyncMock(return_value=("pb", "pv")))
     with pytest.raises(CollectionError) as exc:
         await plans.save_plan("t1", payload(), account_id="acc", repository=FakePlanRepository(bad_asset=True))
     assert exc.value.message == "绑定的设备资产不存在或不是网络设备"
 
 
 @pytest.mark.asyncio
-async def test_save_requires_playbook_when_enabled(monkeypatch):
-    monkeypatch.setattr(plans.collection_timer, "builtin_playbook", AsyncMock(return_value=(None, None)))
-    with pytest.raises(CollectionError) as exc:
-        await plans.save_plan("t1", payload(), account_id="acc", repository=FakePlanRepository())
-    assert exc.value.code == "COLLECTION_PLAYBOOK_UNAVAILABLE"
+async def test_save_enables_without_published_playbook(monkeypatch):
+    playbook = AsyncMock(return_value=(None, None))
+    monkeypatch.setattr(plans.collection_timer, "builtin_playbook", playbook, raising=False)
+    monkeypatch.setattr(plans.collection_timer, "reconcile_timer", AsyncMock())
+    result = await plans.save_plan("t1", payload(), account_id="acc", repository=FakePlanRepository())
+    assert result["plan"]["enabled"] is True
+    assert "playbook_available" not in result
+    playbook.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_save_reconciles_timer_and_returns_projection(monkeypatch):
-    monkeypatch.setattr(plans.collection_timer, "builtin_playbook", AsyncMock(return_value=("pb", "pv")))
     reconcile = AsyncMock()
     monkeypatch.setattr(plans.collection_timer, "reconcile_timer", reconcile)
     monkeypatch.setattr(plans, "_last_run", AsyncMock(return_value=None))
@@ -115,7 +116,8 @@ async def test_save_reconciles_timer_and_returns_projection(monkeypatch):
     result = await plans.save_plan("t1", payload(), account_id="acc", repository=repo)
     kwargs = reconcile.await_args.kwargs
     assert kwargs["timer_prefix"] == "network_policy_collection_"
-    assert kwargs["playbook_name"] == "网络策略自动采集"
+    assert "playbook_name" not in kwargs
+    assert kwargs["plan_model"] is plans.NetworkAccessPolicyCollectionPlan
     assert kwargs["lock_namespace"] == "network_policy_collection"
     assert result["plan"]["revision"] == 1 and "timed_id" not in result["plan"]
     assert result["items"][0]["resources"] == [{"resource_id": "r1", "device_asset_id": "a1"}]
@@ -126,12 +128,13 @@ async def test_save_reconciles_timer_and_returns_projection(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_plan_defaults_when_missing(monkeypatch):
-    monkeypatch.setattr(plans.collection_timer, "builtin_playbook", AsyncMock(return_value=(None, None)))
+    monkeypatch.setattr(plans.collection_timer, "builtin_playbook", AsyncMock(return_value=(None, None)), raising=False)
     result = await plans.get_plan("t1", repository=FakePlanRepository())
     assert result["plan"]["revision"] == 0 and result["plan"]["id"] is None
     assert result["plan"]["schedule_cron"] == "0 0 3 * * *"
     assert result["items"] == [] and result["last_run"] is None
-    assert result["playbook_available"] is False
+    assert "playbook_available" not in result
+    plans.collection_timer.builtin_playbook.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -173,12 +176,11 @@ def test_duplicate_item_uses_canonical_json_and_input_is_not_mutated():
 
 @pytest.mark.asyncio
 async def test_disabled_empty_plan_can_save_without_playbook(monkeypatch):
-    monkeypatch.setattr(plans.collection_timer, 'builtin_playbook', AsyncMock(return_value=(None, None)))
     monkeypatch.setattr(plans.collection_timer, 'reconcile_timer', AsyncMock())
     result = await plans.save_plan('t1', payload(enabled=False, items=[]), account_id='acc', repository=FakePlanRepository())
     assert result['plan']['enabled'] is False
     assert result['items'] == []
-    assert result['playbook_available'] is False
+    assert 'playbook_available' not in result
 
 
 class Query:

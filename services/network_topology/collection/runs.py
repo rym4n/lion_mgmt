@@ -3,17 +3,13 @@ from __future__ import annotations
 
 import logging
 import uuid
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import orjson
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
-from core.maintenance import DEFAULT_TENANT_ID
-from libs.kafka import aproduce
-from libs.utils import gen_run_id
 from models import NetworkTopology
 from models.network_topology_v2 import (
     RUN_STATES,
@@ -25,13 +21,10 @@ from models.network_topology_v2 import (
     TopologyCollectionRun,
 )
 from services.network_topology import analysis_runs
-from services.action_collection import timer as collection_timer
 from services.action_collection.background import heartbeat_stale
 from services.action_collection.notify import notify_after_commit as _core_notify_after_commit
 from services.action_collection.notify import notify_failure  # tests patch runs.notify_failure
 from services.network_topology.collection.errors import CollectionError
-from services.network_topology.collection.plans import BUILTIN_PLAYBOOK_NAME
-from settings import TASK_TOPIC
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +42,7 @@ class RunRepository(Protocol):
     async def get_run(self, run_id: str, *, tenant_id: str | None = None): ...
     async def save_run(self, run): ...
     async def save_plan(self, plan): ...
+    async def claim_pipeline_start(self, run): ...
 
 
 def _now() -> datetime:
@@ -141,6 +135,20 @@ class OrmRunRepository:
     async def save_plan(self, plan):
         await plan.save()
 
+    async def claim_pipeline_start(self, run):
+        # Keep PENDING until the manifest transaction freezes its targets.
+        # A non-null heartbeat durably claims that pre-manifest work once,
+        # including launches racing in different management processes.
+        heartbeat_at = _now()
+        changed = await TopologyCollectionRun.filter(
+            id=run.id, tenant_id=run.tenant_id, topology_id=run.topology_id,
+            plan_id=run.plan_id, deleted=False, state="PENDING",
+            heartbeat_at__isnull=True,
+        ).update(heartbeat_at=heartbeat_at)
+        if changed:
+            run.heartbeat_at = heartbeat_at
+        return bool(changed)
+
     async def finish_terminal(self, run, state, finished_at, *, error_code=None,
                               error_message=None, result=None, graph_revision=None,
                               cancellation_actor=None):
@@ -201,10 +209,6 @@ def _repo(repository):
     return repository or OrmRunRepository()
 
 
-async def _builtin_playbook():
-    return await collection_timer.builtin_playbook(BUILTIN_PLAYBOOK_NAME)
-
-
 async def trigger_manual(tenant_id, topology_id, *, account_id, repository=None):
     repo = _repo(repository)
     plan = await repo.get_plan_for_topology(tenant_id, topology_id)
@@ -216,9 +220,6 @@ async def trigger_manual(tenant_id, topology_id, *, account_id, repository=None)
         items = getattr(plan, "items", [])
     if plan is None or not items:
         raise CollectionError("PLAN_EMPTY", 400)
-    playbook, version = await _builtin_playbook()
-    if playbook is None or version is None:
-        raise CollectionError("COLLECTION_PLAYBOOK_UNAVAILABLE", 409)
     current = await repo.active_run(tenant_id, topology_id)
     if current is not None:
         data = _result(current)
@@ -238,27 +239,11 @@ async def trigger_manual(tenant_id, topology_id, *, account_id, repository=None)
             data["reused"] = True
             return data
         raise CollectionError("COLLECTION_RUN_ACTIVE", 409)
-    flow_run_id = gen_run_id()
-    try:
-        await aproduce(TASK_TOPIC, {
-            "run_type": "flow", "run_id": flow_run_id,
-            "run_args": {"flow_id": version.id,
-                          "flow_input": {"plan_id": plan.id, "collection_run_id": run.id},
-                          "executor": account_id},
-            "tenant_id": DEFAULT_TENANT_ID,
-        }, raise_on_error=True)
-    except Exception:
-        await finish_run(run, "FAILED", error_code="COLLECTION_FLOW_SUBMIT_FAILED", repository=repo)
-        raise
-    run.flow_run_id = flow_run_id
-    if isinstance(repo, OrmRunRepository):
-        await repo.save_run(run, fields=["flow_run_id"])
-    else:
-        await repo.save_run(run)
+    await launch_run(plan.id, run.id, repository=repo)
     return _result(run)
 
 
-async def start_scheduled(plan_id: str, repository=None):
+async def start_scheduled(plan_id: str, repository=None, *, launch=True):
     repo = _repo(repository)
     plan = await repo.get_plan(plan_id)
     if plan is None:
@@ -276,6 +261,31 @@ async def start_scheduled(plan_id: str, repository=None):
         )
     except ActiveRunConflict:
         raise CollectionError("COLLECTION_RUN_ACTIVE", 409) from None
+    if launch:
+        await launch_run(plan.id, run.id, repository=repo)
+    return _result(run)
+
+
+async def launch_run(plan_id: str, collection_run_id: str, *, repository=None):
+    """Launch a pending run once, after its creation transaction has committed."""
+    from services.network_topology.collection import pipeline
+
+    repo = _repo(repository)
+    run = await repo.get_run(collection_run_id)
+    if run is None or str(run.plan_id) != str(plan_id):
+        raise CollectionError("COLLECTION_RUN_CLOSED", 409)
+    if _state(run.state) != "PENDING":
+        return _result(run)
+    _, run = await require_open_run(plan_id, collection_run_id, repository=repo)
+    if not await repo.claim_pipeline_start(run):
+        return _result(run)
+    coro = pipeline.run_pipeline(plan_id, collection_run_id, repository=repo)
+    try:
+        pipeline.start_tracked(coro, run=run, run_model=TopologyCollectionRun)
+    except Exception:
+        coro.close()
+        await finish_run(run, "FAILED", error_code="COLLECTION_PIPELINE_START_FAILED", repository=repo)
+        raise
     return _result(run)
 
 
@@ -541,8 +551,13 @@ async def sweep_runs(repository=None):
                 await finish_run(run, "FAILED", error_code="COLLECTION_RUN_TIMEOUT", repository=repo)
                 count += 1
                 continue
-        # Only COLLECTING is owned by an in-process background worker.
-        if _state(run.state) == "COLLECTING" and heartbeat_stale(run, _now()):
+        # The direct pipeline owns pre-manifest work too. Unclaimed legacy
+        # PENDING runs retain their existing timeout-only recovery behavior.
+        tracked = _state(run.state) == "COLLECTING" or (
+            _state(run.state) in {"PENDING", "MANIFEST_FROZEN", "COLLECTED"}
+            and getattr(run, "heartbeat_at", None) is not None
+        )
+        if tracked and heartbeat_stale(run, _now()):
             await finish_run(run, "FAILED", error_code="COLLECTION_WORKER_LOST", repository=repo)
             count += 1
             continue

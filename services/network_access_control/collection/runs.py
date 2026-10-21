@@ -9,9 +9,6 @@ from datetime import datetime, timedelta, timezone
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
-from core.maintenance import DEFAULT_TENANT_ID
-from libs.kafka import aproduce
-from libs.utils import gen_run_id
 from models.network_access_control import (
     POLICY_RUN_STATES,
     POLICY_RUN_TERMINAL_STATES,
@@ -21,12 +18,10 @@ from models.network_access_control import (
     NetworkAccessPolicyCollectionPlan,
     NetworkAccessPolicyCollectionRun,
 )
-from services.action_collection import timer as collection_timer
 from services.action_collection.background import heartbeat_stale
 from services.action_collection.errors import CollectionError
 from services.action_collection.notify import notify_after_commit
-from services.network_access_control.collection.constants import AUTO_OPERATOR, BUILTIN_PLAYBOOK_NAME
-from settings import TASK_TOPIC
+from services.network_access_control.collection.constants import AUTO_OPERATOR
 
 logger = logging.getLogger(__name__)
 RAW_OUTPUT_RETENTION = timedelta(days=7)
@@ -261,19 +256,11 @@ async def sweep_runs(*, now=None, repository=None) -> int:
     return count
 
 
-async def _playbook_version():
-    playbook, version = await collection_timer.builtin_playbook(BUILTIN_PLAYBOOK_NAME)
-    if playbook is None or version is None:
-        raise CollectionError("COLLECTION_PLAYBOOK_UNAVAILABLE", 409)
-    return version
-
-
 async def trigger_manual(tenant_id, *, account_id, repository=None):
     repo = _repo(repository)
     plan = await repo.get_plan_for_tenant(tenant_id)
     if plan is None or not await repo.get_items(plan):
         raise CollectionError("PLAN_EMPTY", 400)
-    version = await _playbook_version()
     current = await repo.active_run(tenant_id)
     if current is not None:
         return {**_result(current), "reused": True}
@@ -285,23 +272,10 @@ async def trigger_manual(tenant_id, *, account_id, repository=None):
         if current is not None:
             return {**_result(current), "reused": True}
         raise CollectionError("COLLECTION_RUN_ACTIVE", 409) from None
-    flow_run_id = gen_run_id()
-    try:
-        await aproduce(TASK_TOPIC, {
-            "run_type": "flow", "run_id": flow_run_id,
-            "run_args": {"flow_id": version.id,
-                         "flow_input": {"plan_id": plan.id, "collection_run_id": run.id},
-                         "executor": account_id},
-            "tenant_id": DEFAULT_TENANT_ID,
-        }, raise_on_error=True)
-    except Exception:
-        await finish_run(run, "FAILED", error_code="COLLECTION_FLOW_SUBMIT_FAILED", repository=repo)
-        raise
-    await repo.save_fields(run, {"flow_run_id": flow_run_id})
-    return _result(run)
+    return await launch_run(plan.id, run.id, repository=repo)
 
 
-async def start_scheduled(plan_id, *, repository=None):
+async def start_scheduled(plan_id, *, repository=None, launch=True):
     repo = _repo(repository)
     plan = await repo.get_plan(plan_id)
     if plan is None:
@@ -316,7 +290,7 @@ async def start_scheduled(plan_id, *, repository=None):
                                     started_at=_now(), deleted=False)
     except ActiveRunConflict:
         raise CollectionError("COLLECTION_RUN_ACTIVE", 409) from None
-    return _result(run)
+    return await launch_run(plan.id, run.id, repository=repo) if launch else _result(run)
 
 
 async def get_run_for_plan(plan_id, collection_run_id, *, repository=None):
@@ -328,6 +302,24 @@ async def get_run_for_plan(plan_id, collection_run_id, *, repository=None):
     if run is None or str(run.plan_id) != str(plan.id):
         raise CollectionError("COLLECTION_RUN_NOT_FOUND", 404)
     return plan, run
+
+
+async def launch_run(plan_id, collection_run_id, *, repository=None):
+    """Start an existing pending run after its creation transaction commits."""
+    repo = _repo(repository)
+    plan, run = await get_run_for_plan(plan_id, collection_run_id, repository=repo)
+    if run.state != "PENDING":
+        return _result(run)
+    started = _aware(run.started_at)
+    if started is not None and (_now() - started).total_seconds() > int(plan.run_timeout_seconds):
+        if await finish_run(run, "FAILED", error_code="COLLECTION_RUN_TIMEOUT",
+                            expected_state="PENDING", repository=repo):
+            raise CollectionError("COLLECTION_RUN_CLOSED", 409)
+        return _result(run)
+    from services.network_access_control.collection import pipeline
+
+    await pipeline.start_pipeline(plan, run, repository=repo)
+    return _result(run)
 
 
 async def require_open_run(plan_id, collection_run_id, *, repository=None):
