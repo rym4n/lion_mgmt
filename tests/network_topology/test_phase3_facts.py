@@ -86,6 +86,39 @@ def test_candidate_schema_and_same_immutable_observation_fail_closed():
                            observations=(_observation(),))
 
 
+@pytest.mark.parametrize(('address', 'prefix', 'network'), [
+    ('192.0.2.17', 24, '192.0.2.0/24'),
+    ('2001:db8::17', 64, '2001:db8::/64'),
+])
+def test_segment_evidence_can_prove_network_with_interface_address_and_prefix(address, prefix, network):
+    candidates = _candidates()
+    evidence = [{'observation_id': 'obs-1',
+                 'locator': {'type': 'json_pointer', 'pointer': '/interface'}}]
+    candidates['devices'][0].update(identity_aliases=[], evidence_refs=evidence)
+    candidates['segments'] = [{
+        'candidate_id': 'chunk:network', 'canonical_cidr': network,
+        'device_candidate_ref': 'chunk:device-1', 'context_candidate_ref': None,
+        'vlan': None, 'vni': None, 'gateway_selectors': [{'candidate_ref': 'chunk:device-1'}],
+        'evidence_refs': evidence,
+    }]
+    observation = _observation({'interface': {'addresses': [
+        {'ipaddress': {'start': address, 'bits': prefix}}
+    ]}})
+    result = convert_candidates(
+        candidates, snapshot_id='s', analysis_run_id='a', resource_id='r1',
+        chunk_id='chunk', input_hash='sha256:' + '3' * 64, observations=(observation,),
+    )
+    assert result.facts['segments'][0]['attributes']['canonical_cidr'] == network
+
+    # A different network or missing prefix is still unsupported.
+    for value in [{'start': address, 'bits': prefix + 1}, {'start': address}]:
+        observation['data']['interface']['addresses'][0]['ipaddress'] = value
+        with pytest.raises(CandidateConversionError, match='does not support'):
+            convert_candidates(
+                candidates, snapshot_id='s', analysis_run_id='a', resource_id='r1',
+                chunk_id='chunk', input_hash='sha256:' + '3' * 64, observations=(observation,),
+            )
+
 @pytest.mark.parametrize(("relation_type", "evidence", "code"), [
     ("physical", {"same_subnet": True}, "PHYSICAL_NEIGHBOR_EVIDENCE_REQUIRED"),
     ("l2", {"local_trunk": True}, "BIDIRECTIONAL_L2_EVIDENCE_REQUIRED"),

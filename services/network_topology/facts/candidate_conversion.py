@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
+from ipaddress import ip_network
 from typing import Any
 
 from services.network_topology.parsers.base import CandidateBatch
@@ -437,10 +438,39 @@ def _fact_plane(item, observations):
 
 
 def _require_semantic_support(family, item, resolved):
+    if family == "segments":
+        try:
+            network = ip_network(item["canonical_cidr"], strict=False)
+        except ValueError as exc:
+            raise CandidateConversionError("segment network is invalid") from exc
+        if any(_supports_network(value, network) for value in resolved):
+            return
     text = " ".join(_as_text(value) for value in resolved).lower()
     tokens = _support_tokens(family, item)
     if tokens and not any(token.lower() in text for token in tokens):
         raise CandidateConversionError("evidence content does not support candidate fact")
+
+
+def _supports_network(value, expected):
+    """Compare a segment with addresses in the already-bound evidence only."""
+    if isinstance(value, str) and "/" in value:
+        try:
+            return ip_network(value, strict=False) == expected
+        except ValueError:
+            return False
+    if isinstance(value, dict):
+        # Structured address records carry the host and prefix separately.
+        address, prefix = value.get("start"), value.get("bits")
+        if isinstance(address, str) and type(prefix) is int:
+            try:
+                if ip_network(f"{address}/{prefix}", strict=False) == expected:
+                    return True
+            except ValueError:
+                pass
+        return any(_supports_network(child, expected) for child in value.values())
+    if isinstance(value, list):
+        return any(_supports_network(child, expected) for child in value)
+    return False
 
 
 def _support_tokens(family, item):
