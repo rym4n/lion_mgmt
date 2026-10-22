@@ -55,6 +55,7 @@
         },
         "roles": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
         "inventory_state": {"enum": ["managed", "discovered", "unknown"]},
+        "location": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/location"},
         "evidence_refs": {"type": "array", "minItems": 1, "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/evidenceRef"}}
       }
     },
@@ -93,6 +94,12 @@
         "context_candidate_ref": {"type": ["string", "null"]}, "canonical_name": {"type": "string", "minLength": 1}, "raw_name": {"type": "string", "minLength": 1},
         "if_index": {"type": ["integer", "null"]}, "mac": {"type": ["string", "null"]}, "parent_ref": {"type": ["string", "null"]}, "lag_ref": {"type": ["string", "null"]},
         "addresses": {"type": "array", "items": {"type": "string"}}, "configured_state": {"type": "string"}, "operational_state": {"type": "string"},
+        "interface_type": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "speed_bps": {"type": ["integer", "null"], "minimum": 0},
+        "mtu": {"type": ["integer", "null"], "minimum": 0},
+        "vlan_ids": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 4094}, "uniqueItems": true},
         "evidence_refs": {"type": "array", "minItems": 1, "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/evidenceRef"}}
       }
     },
@@ -115,6 +122,10 @@
         "local_candidate_ref": {"type": "string", "minLength": 1}, "remote_selector": {"$ref": "#/$defs/selector"},
         "attachments": {"type": "array", "items": {"type": "string"}}, "layer": {"enum": ["physical", "l2", "l3"]},
         "context_ref": {"type": ["string", "null"]}, "state": {"type": "string"},
+        "local_port": {"type": "string", "minLength": 1},
+        "remote_port": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "minLength": 1},
+        "speed_bps": {"type": ["integer", "null"], "minimum": 0},
         "evidence_refs": {"type": "array", "minItems": 1, "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/evidenceRef"}}
       }
     },

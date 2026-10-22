@@ -2,6 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.aioe.local/aioe.network-topology.common/v1",
   "$defs": {
+    "location": {
+      "type": "object", "additionalProperties": false, "minProperties": 1,
+      "properties": {
+        "site": {"type": "string", "minLength": 1},
+        "building": {"type": "string", "minLength": 1},
+        "room": {"type": "string", "minLength": 1},
+        "rack": {"type": "string", "minLength": 1},
+        "rack_unit": {"type": "string", "minLength": 1}
+      }
+    },
     "nonEmptyId": {"type": "string", "minLength": 1, "maxLength": 255},
     "timestamp": {"type": "string", "format": "date-time"},
     "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},

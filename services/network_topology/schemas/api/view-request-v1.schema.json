@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/view-request/v1",
   "type": "object", "additionalProperties": false, "required": ["id", "scope_id", "version_id", "layers", "continuation_token"],
-  "properties": {"id": {"type": "string", "minLength": 1}, "scope_id": {"type": "string", "minLength": 1}, "version_id": {"type": ["string", "null"]}, "layers": {"type": "array", "items": {"enum": ["physical", "l2", "l3", "routing", "security", "overlay", "service"]}, "uniqueItems": true}, "continuation_token": {"type": ["string", "null"]}},
+  "properties": {"id": {"type": "string", "minLength": 1}, "view_type": {"enum": ["physical", "logical"]}, "scope_id": {"type": "string", "minLength": 1}, "version_id": {"type": ["string", "null"]}, "layers": {"type": "array", "items": {"enum": ["physical", "l2", "l3", "routing", "security", "overlay", "service"]}, "uniqueItems": true}, "continuation_token": {"type": ["string", "null"]}},
   "examples": [{"id": "topology-1", "scope_id": "scope:organization:root", "version_id": null, "layers": ["l2", "l3", "security"], "continuation_token": null}]
 }

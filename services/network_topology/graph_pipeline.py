@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from services.network_topology.relationships import build_relationships
 from services.network_topology.scope_tree import build_scope_tree
+from services.network_topology.physical_topology import build_physical_topology
 
 
 def authoritative_inputs(collection: Mapping[str, Any]) -> tuple[list[dict], dict[str, list[str]]]:
@@ -28,6 +29,9 @@ def build_graph(facts, resolution, profile, *, profile_revision: int, collection
     graph = tree.as_graph()
     graph["relations"] = [dict(item) for item in relations.relations]
     _apply_collection_display(graph, facts, resolution, collection, profile_revision)
+    physical = build_physical_topology(facts, resolution, tree.root_scope_id, profile_revision)
+    _apply_collection_display(physical, facts, resolution, collection, profile_revision)
+    graph["physical_topology"] = physical
     return graph
 
 

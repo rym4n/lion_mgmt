@@ -18,6 +18,8 @@ from .validation import (
     keep_asset_device,
 )
 from .route_evidence import supports_route
+from .physical_evidence import supports_physical_adjacency
+from .presentation_evidence import supports_metadata, INTERFACE_METADATA, ADJACENCY_METADATA
 
 
 CANDIDATE_SCHEMA = "aioe.network-topology.llm-fact-candidates/v1"
@@ -259,6 +261,11 @@ def _convert_one(family, candidate, mapping, resource_id, observations, document
         )
     except EvidenceValidationError as exc:
         raise CandidateConversionError(f"candidate observation evidence invalid: {exc.code}") from exc
+    if not supports_metadata(family, candidate, resolved):
+        raise CandidateConversionError("presentation metadata is outside observation evidence")
+    if family == "adjacencies" and candidate["layer"] == "physical":
+        if not supports_physical_adjacency(candidate, document, observations):
+            raise CandidateConversionError("physical neighbor tuple is outside observation evidence")
     if family == "routes" and (candidate.get("next_hop_selector") or {}).get("management_ip"):
         try:
             supported = supports_route(candidate, document, observations)
@@ -266,7 +273,7 @@ def _convert_one(family, candidate, mapping, resource_id, observations, document
             raise CandidateConversionError("route next-hop address is invalid") from exc
         if not supported:
             raise CandidateConversionError("route tuple is outside observation evidence")
-    else:
+    elif not (family == "adjacencies" and candidate["layer"] == "physical"):
         _require_semantic_support(family, candidate, resolved)
     provenance_ids = [item["id"] for item in provenance]
     fact = {
@@ -307,8 +314,8 @@ def _attributes(family, item, mapping, resource_id, observations):
 
 def _device_attributes(item, *_):
     return {key: deepcopy(item[key]) for key in (
-        "device_type", "identity_aliases", "roles", "inventory_state"
-    )}
+        "device_type", "identity_aliases", "roles", "inventory_state", "location"
+    ) if key in item}
 
 
 def _group_attributes(item, mapping, *_):
@@ -318,13 +325,17 @@ def _group_attributes(item, mapping, *_):
 
 
 def _context_attributes(item, mapping, *_):
+    namespace = item.get("namespace_attributes", {})
     return {"owner_id": _reference(item["owning_candidate_ref"], mapping),
             "local_id": item["local_id"], "name": item["name"],
-            "context_type": item["kind"]}
+            "context_type": item["kind"],
+            **{"vlan_id" if key == "vlan" else key: value for key, value in namespace.items()
+               if key in {"vlan", "vni"}}}
 
 
 def _interface_attributes(item, mapping, *_):
     return {
+        **{key: deepcopy(item[key]) for key in INTERFACE_METADATA if key in item},
         "device_id": _reference(item["device_candidate_ref"], mapping),
         "context_id": _optional_reference(item["context_candidate_ref"], mapping),
         "canonical_name": item["canonical_name"], "raw_name": item["raw_name"],
@@ -348,7 +359,10 @@ def _segment_attributes(item, mapping, resource_id, *_):
 
 
 def _adjacency_attributes(item, mapping, *_):
+    identity = {key: value for key, value in item["remote_selector"].items() if key != "candidate_ref"}
     return {"neighbor_type": item["kind"],
+            **{key: deepcopy(item[key]) for key in (*ADJACENCY_METADATA, "local_port", "remote_port") if key in item},
+            **({"remote_identity": identity} if identity else {}),
             "local_id": _reference(item["local_candidate_ref"], mapping),
             "remote_id": _selector(item["remote_selector"], mapping),
             "attachments": sorted(set(item["attachments"])), "layer": item["layer"],

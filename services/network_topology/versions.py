@@ -64,6 +64,12 @@ def validate_publication(
     _validate_scope_tree(graph, profile, scopes)
     _validate_entity_references(entities, scopes)
     _validate_relation_endpoints(relations, entities, scopes)
+    if graph.get("physical_topology") is not None:
+        physical = graph["physical_topology"]
+        physical_entities = _indexed(physical["entities"], "ENTITY_ID_INVALID")
+        physical_relations = _indexed(physical["relations"], "RELATION_ID_INVALID")
+        _validate_entity_references(physical_entities, scopes)
+        _validate_relation_endpoints(physical_relations, physical_entities, scopes)
     _validate_graph_provenance(graph, profile_revision)
     _validate_fact_provenance(facts)
     _validate_graph_fact_references(facts, graph)
@@ -199,10 +205,16 @@ def _validate_graph_fact_references(facts, graph):
 
 def _graph_items(graph):
     for collection in ("scopes", "entities", "relations"):
-        yield from graph[collection]
+        for item in graph.get(collection, ()):
+            yield item
+            yield from item.get("attributes", {}).get("interfaces", ())
+    if graph.get("physical_topology") is not None:
+        yield from _graph_items(graph["physical_topology"])
 
 
 def _validate_member_references(item, allowed):
+    if any(member not in allowed for member in item.get("member_fact_ids", ())):
+        raise PublishingError("GRAPH_PROVENANCE_REFERENCE_MISSING")
     for provenance in item["provenance"]:
         members = provenance.get("member_ids", [])
         if any(member not in allowed for member in members):

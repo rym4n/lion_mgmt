@@ -10,9 +10,29 @@
     "root_scope_id": {"type": "string", "minLength": 1},
     "scopes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scope"}},
     "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
-    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}}
+    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+    "physical_topology": {
+      "type": "object", "additionalProperties": false, "required": ["entities", "relations"],
+      "properties": {
+        "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
+        "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}}
+      }
+    }
   },
   "$defs": {
+    "interfacePresentation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "name", "addresses", "configured_state", "operational_state", "provenance"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "name": {"type": "string", "minLength": 1},
+        "addresses": {"type": "array", "items": {"type": "string"}},
+        "configured_state": {"type": "string"}, "operational_state": {"type": "string"},
+        "interface_type": {"type": "string"}, "media_type": {"type": "string"}, "description": {"type": "string"},
+        "speed_bps": {"type": ["integer", "null"], "minimum": 0}, "mtu": {"type": ["integer", "null"], "minimum": 0},
+        "vlan_ids": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 4094}},
+        "provenance": {"type": "array", "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1"}}
+      }
+    },
     "scope": {
       "type": "object",
       "additionalProperties": false,
@@ -22,6 +42,7 @@
         "parent_scope_id": {"type": ["string", "null"]},
         "scope_type": {"enum": ["organization", "region", "site", "network_domain", "security_zone", "network_context", "sub_topology", "custom"]},
         "name": {"type": "string", "minLength": 1},
+        "attributes": {"$ref": "#/$defs/entityAttributes"},
         "summary": {
           "type": "object",
           "additionalProperties": false,
@@ -41,6 +62,16 @@
       "additionalProperties": false,
       "properties": {
         "management_ip": {"type": "string"}, "vendor": {"type": "string"}, "model": {"type": "string"}, "serial": {"type": "string"},
+        "location": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/location"},
+        "interfaces": {"type": "array", "items": {"$ref": "#/$defs/interfacePresentation"}},
+        "observed_identity": {
+          "type": "object", "additionalProperties": false,
+          "properties": {"hostname": {"type": "string"}, "chassis_id": {"type": "string"}, "management_ip": {"type": "string"}}
+        },
+        "network_context_type": {"enum": ["zone", "vrf", "vlan"]},
+        "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+        "vni": {"type": "integer", "minimum": 1},
+        "context_id": {"type": "string"}, "vrf_id": {"type": "string"},
         "network_prefixes": {"type": "array", "items": {"type": "string"}},
         "ip_version": {"enum": [4, 6]},
         "prefix_length": {"type": "integer", "minimum": 0, "maximum": 128},

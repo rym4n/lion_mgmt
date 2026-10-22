@@ -191,6 +191,13 @@
         "attributes": {
           "type": "object", "additionalProperties": false,
           "properties": {
+            "local_port": {"type": "string"}, "remote_port": {"type": "string"},
+            "media_type": {"type": "string"}, "speed_bps": {"type": ["integer", "null"], "minimum": 0},
+            "protocol": {"type": "string"}, "local_asn": {"type": ["integer", "null"]},
+            "remote_asn": {"type": ["integer", "null"]}, "area": {"type": ["string", "null"]},
+            "tunnel_type": {"type": "string"}, "protected_prefixes": {"type": "array", "items": {"type": "string"}},
+            "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+            "vlan_ids": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 4094}},
             "next_hop_ip": {"type": "string"},
             "route_prefixes": {"type": "array", "items": {"type": "string"}},
             "interface_names": {"type": "array", "items": {"type": "string"}},

@@ -7,6 +7,23 @@
       "type": "object", "additionalProperties": false,
       "required": ["current_scope", "breadcrumbs", "nodes", "edges", "scope_layout_revision", "layout_set_revision", "graph_revision", "total_direct_items", "overflow_strategy", "view_buckets", "continuation_token"],
       "properties": {
+        "view_type": {"enum": ["physical", "logical"]},
+        "warnings": {
+          "type": "array", "items": {
+            "type": "object", "additionalProperties": false, "required": ["code", "message"],
+            "properties": {"code": {"type": "string"}, "message": {"type": "string"}}
+          }
+        },
+        "evidence_summary": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "device_count": {"type": "integer", "minimum": 0},
+            "physical_link_count": {"type": "integer", "minimum": 0},
+            "observed_boundary_count": {"type": "integer", "minimum": 0},
+            "devices_without_physical_neighbors": {"type": "integer", "minimum": 0},
+            "devices_without_location": {"type": "integer", "minimum": 0}
+          }
+        },
         "current_scope": {"type": "object", "additionalProperties": false, "required": ["id", "name", "scope_type"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "scope_type": {"type": "string"}}},
         "breadcrumbs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}}}},
         "nodes": {"type": "array", "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/viewNode"}},

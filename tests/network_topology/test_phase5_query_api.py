@@ -251,6 +251,9 @@ async def test_view_matches_frozen_schema_and_uses_tenant_scoped_repository():
     response = {"code": 0, "data": data}
     validate_contract(response, VIEW_RESPONSE)
     assert set(data) == {
+        "view_type",
+        "warnings",
+        "evidence_summary",
         "current_scope",
         "breadcrumbs",
         "nodes",

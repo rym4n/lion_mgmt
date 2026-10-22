@@ -43,7 +43,7 @@ PROFILE_REQUEST = "aioe.network-topology.api/profile-request/v1"
 PROFILE_RESPONSE = "aioe.network-topology.api/profile-response/v1"
 GRAPH_SCHEMA = "aioe.network-topology.graph/v2"
 SEGMENT_KINDS = frozenset({"network_segment", "segment", "subnet"})
-LOGICAL_DEFAULT_LAYERS = ("physical", "l2", "l3", "routing", "overlay")
+LOGICAL_DEFAULT_LAYERS = ("l2", "l3", "routing", "overlay")
 PROVENANCE_FIELDS = {
     "observed": frozenset(
         {"type", "resource_id", "observation_id", "redacted_sha256", "locator"}
@@ -206,9 +206,11 @@ class OrmQueryRepository:
 def build_query_cache_key(
     *, tenant_id, topology_id, graph_version_id, scope_id, layers, bucket,
     layout_set_revision,
+    view_type="logical",
 ):
     values = (
         "network-topology-view-v1",
+        view_type,
         tenant_id,
         topology_id,
         graph_version_id,
@@ -223,9 +225,14 @@ def build_query_cache_key(
 async def scoped_view(authority, payload, *, repository=None, cache=None):
     validate_contract(payload, VIEW_REQUEST)
     _require_authority(authority, payload["id"])
-    payload = {**payload, "layers": payload["layers"] or list(LOGICAL_DEFAULT_LAYERS)}
+    view_type = payload.get("view_type", "logical")
+    payload = {**payload, "view_type": view_type,
+               "layers": ["physical"] if view_type == "physical" else
+                         [layer for layer in (payload["layers"] or LOGICAL_DEFAULT_LAYERS) if layer != "physical"]}
     repo = repository or OrmQueryRepository()
     document = await repo.load_document(authority, payload["version_id"])
+    if view_type == "physical":
+        payload["scope_id"] = document.graph["root_scope_id"]
     bucket = _token_bucket(payload["continuation_token"])
     key = build_query_cache_key(
         tenant_id=authority.tenant_id,
@@ -235,6 +242,7 @@ async def scoped_view(authority, payload, *, repository=None, cache=None):
         layers=tuple(payload["layers"]),
         bucket=_cache_bucket(bucket, payload["continuation_token"]),
         layout_set_revision=document.layout_set_revision,
+        view_type=view_type,
     )
     store = cache or QUERY_CACHE
     cached = await store.get(key)
@@ -247,9 +255,11 @@ async def scoped_view(authority, payload, *, repository=None, cache=None):
 
 
 def _project_document(document, payload, bucket):
-    tree, relations = _graph_inputs(document.graph)
+    tree, relations = _graph_inputs(document.graph, payload["view_type"])
     projection = project_scope(
-        tree, relations, payload["scope_id"], layers=payload["layers"]
+        tree, relations, payload["scope_id"], layers=payload["layers"],
+        include_configured_segments=payload["view_type"] == "logical",
+        preserve_parallel=payload["view_type"] == "physical",
     )
     nodes = projection.nodes
     edges = projection.edges
@@ -259,6 +269,8 @@ def _project_document(document, payload, bucket):
             tree, relations, payload, bucket, projection.direct_item_total
         )
     data = {
+        "view_type": payload["view_type"],
+        **_evidence_summary(document.graph, payload["view_type"]),
         "current_scope": _api_scope(projection.current_scope),
         "breadcrumbs": [
             _api_breadcrumb(item) for item in projection.breadcrumbs[:-1]
@@ -285,6 +297,8 @@ def _bucket_page(tree, relations, payload, bucket, total):
         payload["scope_id"],
         layers=payload["layers"],
         limit=max(total, DIRECT_ITEM_LIMIT) + 1,
+        include_configured_segments=payload["view_type"] == "logical",
+        preserve_parallel=payload["view_type"] == "physical",
     )
     page = page_bucket(
         payload["scope_id"],
@@ -299,17 +313,53 @@ def _bucket_page(tree, relations, payload, bucket, total):
     return page.items, edges, page.continuation_token
 
 
-def _graph_inputs(graph):
+def _graph_inputs(graph, view_type=None):
+    source = graph
+    scopes = graph.get("scopes", ())
+    if view_type == "physical":
+        source = graph.get("physical_topology") or {
+            "entities": [item for item in graph.get("entities", ()) if item.get("kind") == "device"],
+            "relations": [item for item in graph.get("relations", ()) if item.get("relation_type") == "physical_link"],
+        }
+        source = deepcopy(source)
+        for entity in source.get("entities", ()):
+            entity.update(scope_id=graph["root_scope_id"], scope_memberships=[])
+        scopes = [item for item in scopes if item["id"] == graph["root_scope_id"]]
     tree = ScopeTreeResult(
         str(graph["root_scope_id"]),
-        tuple(deepcopy(graph.get("scopes", ()))),
-        tuple(deepcopy(graph.get("entities", ()))),
+        tuple(deepcopy(scopes)),
+        tuple(deepcopy(source.get("entities", ()))),
         (),
         (),
         (),
     )
-    relations = RelationshipResult(tuple(deepcopy(graph.get("relations", ()))), ())
+    relations = source.get("relations", ())
+    if view_type == "logical":
+        relations = [item for item in relations if item.get("layer") != "physical"
+                     and item.get("relation_type") not in {"gateway_for", "security_boundary"}]
+    relations = RelationshipResult(tuple(deepcopy(relations)), ())
     return tree, relations
+
+
+def _evidence_summary(graph, view_type):
+    tree, relations = _graph_inputs(graph, "physical")
+    devices = {item["id"] for item in tree.entities if item.get("kind") == "device"}
+    links = [item for item in relations.relations if item.get("relation_type") == "physical_link"]
+    linked = {endpoint["ref_id"] for relation in links for endpoint in relation.get("endpoints", ())}
+    missing = len(devices - linked)
+    location_missing = sum(not item.get("attributes", {}).get("location") for item in tree.entities if item["id"] in devices)
+    summary = {"device_count": len(devices), "physical_link_count": len(links),
+               "observed_boundary_count": sum(item.get("role") == "observed_physical_peer" for item in tree.entities),
+               "devices_without_physical_neighbors": missing, "devices_without_location": location_missing}
+    warnings = []
+    if view_type == "physical":
+        if devices and not links:
+            warnings.append({"code": "PHYSICAL_ADJACENCY_MISSING", "message": "尚未采集到物理邻接，当前展示已采集设备。"})
+        elif missing:
+            warnings.append({"code": "PHYSICAL_ADJACENCY_PARTIAL", "message": "部分设备尚未采集到物理邻接。"})
+        if location_missing:
+            warnings.append({"code": "PHYSICAL_LOCATION_MISSING", "message": "部分设备尚未采集到建筑、机房或机柜位置。"})
+    return {"evidence_summary": summary, "warnings": warnings}
 
 
 def _api_scope(value):
@@ -348,9 +398,19 @@ def _api_node(value):
             "virtual_addresses", "protocols", "ports", "boundary_type",
             "ip_version", "prefix_length", "address_scope",
             "next_hop_ip", "route_prefixes", "interface_names", "route_count",
+            "location", "interfaces", "observed_identity",
+            "vlan_id", "vni", "context_id", "vrf_id", "network_context_type",
         ) if key in attributes
     }
     if safe_attributes:
+        if "interfaces" in safe_attributes:
+            safe_attributes["interfaces"] = [_safe_interface(item) for item in safe_attributes["interfaces"]]
+        if "location" in safe_attributes:
+            safe_attributes["location"] = {key: safe_attributes["location"][key] for key in
+                ("site", "building", "room", "rack", "rack_unit") if key in safe_attributes["location"]}
+        if "observed_identity" in safe_attributes:
+            safe_attributes["observed_identity"] = {key: safe_attributes["observed_identity"][key] for key in
+                ("hostname", "chassis_id", "management_ip") if key in safe_attributes["observed_identity"]}
         node["attributes"] = safe_attributes
     if value.get("scope_type") and value.get("summary") is not None:
         node["summary"] = {
@@ -360,6 +420,13 @@ def _api_node(value):
             ) if key in value["summary"]
         }
     return node
+
+
+def _safe_interface(value):
+    output = {key: deepcopy(value[key]) for key in ("id", "name", "addresses", "configured_state", "operational_state",
+        "interface_type", "media_type", "speed_bps", "description", "mtu", "vlan_ids") if key in value}
+    output["provenance"] = [_safe_provenance(item) for item in value.get("provenance", ())]
+    return output
 
 
 def _api_edge(value):
@@ -384,7 +451,8 @@ def _api_edge(value):
     if attributes:
         edge["attributes"] = {
             key: deepcopy(attributes[key]) for key in
-            ("next_hop_ip", "route_prefixes", "interface_names", "route_count")
+            ("next_hop_ip", "route_prefixes", "interface_names", "route_count", "local_port", "remote_port",
+             "media_type", "speed_bps", "protocol", "local_asn", "remote_asn", "area", "tunnel_type", "protected_prefixes", "vlan_id", "vlan_ids")
             if key in attributes
         }
     return edge
@@ -454,6 +522,12 @@ def _graph_item(graph, target_id):
         for item in graph.get(collection, ()):
             if item.get("id") == target_id:
                 return item
+            for interface in item.get("attributes", {}).get("interfaces", ()):
+                if interface.get("id") == target_id:
+                    return interface
+    physical = graph.get("physical_topology")
+    if physical:
+        return _graph_item(physical, target_id)
     return None
 
 

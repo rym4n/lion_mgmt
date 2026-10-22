@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from ipaddress import ip_network
+import re
 from typing import Any, Iterable, Mapping
 from urllib.parse import quote
 
@@ -11,6 +12,7 @@ from services.network_topology.identity import IdentityResolution
 from services.network_topology.context_placement import context_memberships, context_type
 from services.network_topology.address_presentation import network_attributes
 from services.network_topology.configured_routes import configured_routes, route_attributes
+from services.network_topology.device_presentation import interface_presentations
 from services.network_topology.importance import (
     ImportanceDecision,
     assess_importance,
@@ -185,6 +187,9 @@ class _ProjectionState:
         decision = assess_importance(fact, self.facts, self.profile)
         scope_id, memberships = self._owner_scope(fact["id"], canonical_id)
         attributes = _device_attributes(fact)
+        interfaces = interface_presentations(self.facts, fact["id"])
+        if interfaces:
+            attributes["interfaces"] = interfaces
         roles = fact.get("attributes", {}).get("roles", ())
         return _entity(
             canonical_id, scope_id, memberships, "device",
@@ -210,6 +215,8 @@ class _ProjectionState:
         kind = "external" if attributes.get("device_id") is None else "network_segment"
         role = "external_network" if kind == "external" else "connected_network"
         output = network_attributes(cidr)
+        output.update({key: attributes[key] for key in ("vlan_id", "vni", "context_id", "vrf_id")
+                       if attributes.get(key) is not None})
         virtual_addresses = _segment_virtual_addresses(fact["id"], self.facts)
         if virtual_addresses:
             output["virtual_addresses"] = virtual_addresses
@@ -332,17 +339,29 @@ def _scope_records(facts, authoritative_scopes):
             continue
         attributes = fact.get("attributes", {})
         if fact.get("fact_family") == "network_context":
-            if fact["id"] not in used_contexts:
+            if fact["id"] not in used_contexts and family not in {"vlan", "vrf"}:
                 continue
             if family != "zone" and str(attributes.get("name", "")).strip().lower() in {"default", "global"}:
                 continue
         code, name = _network_context_identity(fact, attributes)
+        metadata = {"network_context_type": family, "context_id": fact["id"]}
+        if family == "vrf":
+            metadata["vrf_id"] = str(attributes.get("local_id") or name)
+        if family == "vlan":
+            vlan_id = attributes.get("vlan_id") or attributes.get("local_id")
+            if str(vlan_id).isdigit() and 1 <= int(vlan_id) <= 4094:
+                metadata["vlan_id"] = int(vlan_id)
+                if not re.search(r"(?<!\d)" + str(vlan_id) + r"(?!\d)", name):
+                    name = f"{name} · VLAN {vlan_id}"
+        if attributes.get("vni") is not None:
+            metadata["vni"] = attributes["vni"]
         records.append({
             "code": code,
             "scope_type": "security_zone" if family == "zone" else "vrf",
             "name": name,
             "provenance_ids": fact.get("provenance_ids", ()),
             "member_id": fact["id"],
+            "attributes": metadata,
         })
     return records
 
@@ -446,7 +465,7 @@ def _scope_document(record, parent_id, provenance, revision):
     values = [provenance[item] for item in record.get("provenance_ids", ())
               if item in provenance]
     member_id = str(record.get("member_id") or record["code"])
-    return {
+    document = {
         "id": _scope_id(scope_type, record["code"]),
         "parent_scope_id": parent_id,
         "scope_type": scope_type,
@@ -454,6 +473,9 @@ def _scope_document(record, parent_id, provenance, revision):
         "summary": _empty_summary(),
         "provenance": values or [_derived("profile.scope/v1", revision, [member_id])],
     }
+    if record.get("attributes"):
+        document["attributes"] = dict(record["attributes"])
+    return document
 
 
 def _parent_scope_id(record, records, root_id):
@@ -552,6 +574,7 @@ def _device_attributes(fact):
         "vendor": source.get("vendor"),
         "model": source.get("model"),
         "serial": serial,
+        "location": source.get("location"),
     }
     return {key: value for key, value in output.items() if value not in (None, "")}
 

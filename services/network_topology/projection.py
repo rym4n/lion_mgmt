@@ -35,13 +35,15 @@ def project_scope(
     *,
     limit: int = DIRECT_ITEM_LIMIT,
     layers: Iterable[str] | None = None,
+    include_configured_segments: bool = False,
+    preserve_parallel: bool = False,
 ) -> ProjectionResult:
     """Build a drill-down view without adding objects to the canonical graph."""
-    state = _ProjectionState(scope_tree, relationships, scope_id, layers)
+    state = _ProjectionState(scope_tree, relationships, scope_id, layers, include_configured_segments)
     items, edge_specs = state.project_items_and_relations()
     overflow_plan = plan_overflow(scope_id, items, limit=limit)
     nodes, buckets, member_map = _visible_nodes(overflow_plan)
-    edges = _aggregate_edges(edge_specs, member_map)
+    edges = _aggregate_edges(edge_specs, member_map, preserve_parallel)
     scopes = _presentation_scopes(scope_tree, relationships)
     current = dict(scopes[scope_id])
     overflow = _overflow_document(overflow_plan, len(nodes))
@@ -79,7 +81,7 @@ def search_canonical(
 
 
 class _ProjectionState:
-    def __init__(self, scope_tree, relationships, scope_id, layers):
+    def __init__(self, scope_tree, relationships, scope_id, layers, include_configured_segments=False):
         self.scope_tree = scope_tree
         self.relationships = relationships
         self.scopes = {item["id"]: item for item in scope_tree.scopes}
@@ -91,11 +93,12 @@ class _ProjectionState:
             raise ValueError(f"unknown topology scope {scope_id}")
         self.scope_id = scope_id
         self.layers = frozenset(str(item) for item in layers) if layers else None
+        self.include_configured_segments = include_configured_segments
         self.visible_relations = tuple(
             item for item in relationships.relations
             if self.layers is None or item.get("layer") in self.layers
         )
-        if self.layers is not None:
+        if self.layers is not None and not include_configured_segments:
             # Interface subnets whose only edges are excluded layers are not
             # logical neighbours. Standalone subnet facts remain available;
             # the complete canonical graph is preserved.
@@ -125,7 +128,8 @@ class _ProjectionState:
     def _add_direct_nodes(self):
         for scope in self.scopes.values():
             if (scope["parent_scope_id"] == self.scope_id
-                    and (self.layers is None or self._scope_has_content(scope["id"]))):
+                    and (self.layers is None or self._scope_has_content(scope["id"])
+                         or self.include_configured_segments and scope.get("attributes", {}).get("network_context_type") in {"vlan", "vrf"})):
                 node = _scope_ref(scope)
                 self.nodes[node["id"]] = node
         for entity in self.entities.values():
@@ -181,7 +185,7 @@ class _ProjectionState:
 
 
 def _scope_ref(scope):
-    return {
+    output = {
         "id": f"scope-ref:{scope['id']}",
         "projection_kind": "scope_ref",
         "kind": "scope",
@@ -191,6 +195,9 @@ def _scope_ref(scope):
         "scope_type": scope["scope_type"],
         "summary": dict(scope.get("summary", {})),
     }
+    if scope.get("attributes"):
+        output["attributes"] = dict(scope["attributes"])
+    return output
 
 
 def _entity_ref(entity, scope_id, reason):
@@ -239,8 +246,8 @@ def _visible_nodes(plan):
     return buckets, buckets, mapping
 
 
-def _aggregate_edges(edge_specs, visible_map):
-    grouped: dict[tuple[str, str, str, str, str], list[Mapping[str, Any]]] = defaultdict(
+def _aggregate_edges(edge_specs, visible_map, preserve_parallel=False):
+    grouped: dict[tuple[str, str, str, str, str, str], list[Mapping[str, Any]]] = defaultdict(
         list
     )
     for relation, endpoints in edge_specs:
@@ -248,21 +255,36 @@ def _aggregate_edges(edge_specs, visible_map):
         if visible[0] == visible[1]:
             continue
         direction = str(relation.get("direction") or "bidirectional")
-        left, right = visible if direction == "unidirectional" else sorted(visible)
+        physical = preserve_parallel and relation.get("layer") == "physical"
+        left, right = visible if direction == "unidirectional" or physical else sorted(visible)
+        detail_key = (str(relation["id"]) if physical else
+                      str(relation.get("attributes", {}).get("protocol") or "")
+                      if relation.get("relation_type") == "routing_adjacency" else "")
         key = (
             left,
             right,
             str(relation.get("layer", "")),
             str(relation["relation_type"]),
             direction,
+            detail_key,
         )
+        if visible[0] != left and relation.get("attributes"):
+            relation = dict(relation)
+            attributes = dict(relation["attributes"])
+            for local, remote in (("local_asn", "remote_asn"), ("local_port", "remote_port")):
+                left_value, right_value = attributes.pop(local, None), attributes.pop(remote, None)
+                if right_value is not None:
+                    attributes[local] = right_value
+                if left_value is not None:
+                    attributes[remote] = left_value
+            relation["attributes"] = attributes
         grouped[key].append(relation)
     edges = [_aggregate_edge(key, grouped[key]) for key in sorted(grouped)]
     return tuple(sorted(edges, key=lambda item: item["id"]))
 
 
 def _aggregate_edge(key, relations):
-    left, right, layer, relation_type, direction = key
+    left, right, layer, relation_type, direction, _detail = key
     member_ids = sorted(
         {
             member
@@ -295,7 +317,12 @@ def _aggregate_edge(key, relations):
 
 def _presentation_edge_attributes(relations):
     output = {}
-    for key in ("route_prefixes", "interface_names"):
+    for key in ("local_port", "remote_port", "media_type", "speed_bps", "protocol",
+                "local_asn", "remote_asn", "area", "tunnel_type", "protected_prefixes", "vlan_id"):
+        values = [item.get("attributes", {})[key] for item in relations if key in item.get("attributes", {})]
+        if values and all(value == values[0] for value in values):
+            output[key] = values[0]
+    for key in ("route_prefixes", "interface_names", "vlan_ids"):
         values = sorted({value for item in relations
                          for value in item.get("attributes", {}).get(key, ())})
         if values:

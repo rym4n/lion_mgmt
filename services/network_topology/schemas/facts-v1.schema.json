@@ -119,6 +119,7 @@
         "identity_aliases": {"type": "array", "items": {"$ref": "#/$defs/identityAlias"}},
         "roles": {"$ref": "#/$defs/idSet"},
         "inventory_state": {"enum": ["managed", "discovered", "unknown"]},
+        "location": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/location"},
         "vendor": {"type": "string", "minLength": 1},
         "model": {"type": "string", "minLength": 1},
         "os_version": {"type": "string", "minLength": 1},
@@ -142,6 +143,8 @@
         "local_id": {"type": "string", "minLength": 1},
         "name": {"type": "string", "minLength": 1},
         "context_type": {"type": "string", "minLength": 1},
+        "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+        "vni": {"type": "integer", "minimum": 1},
         "parent_context_id": {"$ref": "#/$defs/nullableId"}
       }
     },
@@ -192,6 +195,8 @@
         "raw_name": {"type": "string", "minLength": 1},
         "if_index": {"type": ["integer", "null"], "minimum": 0},
         "interface_type": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
         "mac": {"$ref": "#/$defs/nullableId"},
         "parent_interface_id": {"$ref": "#/$defs/nullableId"},
         "lag_id": {"$ref": "#/$defs/nullableId"},
@@ -226,6 +231,19 @@
       "required": ["neighbor_type", "local_id", "remote_id", "attachments", "layer", "context_id", "state"],
       "properties": {
         "neighbor_type": {"enum": ["lldp", "cdp", "l3_neighbor"]},
+        "local_port": {"type": "string", "minLength": 1},
+        "remote_port": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "minLength": 1},
+        "speed_bps": {"type": ["integer", "null"], "minimum": 0},
+        "remote_identity": {
+          "type": "object", "additionalProperties": false, "minProperties": 1,
+          "properties": {
+            "hostname": {"type": "string", "minLength": 1},
+            "chassis_id": {"type": "string", "minLength": 1},
+            "management_ip": {"type": "string", "minLength": 1},
+            "interface": {"type": "string", "minLength": 1}
+          }
+        },
         "local_id": {"type": "string", "minLength": 1},
         "remote_id": {"type": "string", "minLength": 1},
         "attachments": {"$ref": "#/$defs/idSet"},
