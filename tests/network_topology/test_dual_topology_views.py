@@ -86,6 +86,36 @@ async def test_configured_direct_network_is_connected_without_claiming_runtime_o
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('scope_name,prefix', [('Trust', '10.1.0.0/24'), ('WAN', '2000::/96')])
+async def test_shared_device_does_not_pull_other_zone_direct_networks_into_scope(scope_name, prefix):
+    _, graph = _view_graph()
+    device = next(item for item in graph['entities'] if item['kind'] == 'device')
+    segments = [item for item in graph['entities'] if item['kind'] == 'network_segment']
+    for index, segment in enumerate(segments):
+        graph['relations'].append({
+            'id': f'gateway:{index}', 'relation_type': 'gateway_for', 'layer': 'service',
+            'direction': 'bidirectional', 'owner_scope_id': graph['root_scope_id'],
+            'endpoints': [{'ref_type': 'entity', 'ref_id': device['id']},
+                          {'ref_type': 'entity', 'ref_id': segment['id']}],
+            'attributes': {}, 'configured_state': 'present', 'operational_state': 'unknown',
+            'member_relation_ids': [], 'provenance': [],
+        })
+    scope_id = next(scope['id'] for scope in graph['scopes'] if scope['name'] == scope_name)
+    original = deepcopy(graph)
+    child = await scoped_view(_authority(), {**_request(scope_id), 'layers': []},
+        repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
+    assert {node['label'] for node in child['nodes'] if node.get('entity_kind') == 'network_segment'} == {prefix}
+    assert len(child['edges']) == 1
+    assert child['edges'][0]['attributes']['protocol'] == 'connected'
+
+    root = await scoped_view(_authority(), {**_request(graph['root_scope_id']), 'layers': []},
+        repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
+    assert len(root['edges']) == 2
+    assert {node['label'] for node in root['nodes'] if node['projection_type'] == 'scope_ref'} == {'Trust', 'WAN'}
+    assert graph == original
+
+
+@pytest.mark.asyncio
 async def test_view_type_is_part_of_cache_identity():
     _, graph = _view_graph()
     repository, cache = MemoryRepository(_document(graph=graph)), MemoryCache()

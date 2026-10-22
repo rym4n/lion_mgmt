@@ -162,6 +162,13 @@ class _ProjectionState:
             boundaries = [item for item in entities if item.get("role") == "configured_next_hop"]
             if boundaries and not any(self._touches_current_scope(item) for item in boundaries):
                 return None
+        if (relation.get("relation_type") == "l3_connectivity"
+                and relation.get("attributes", {}).get("protocol") == "connected"):
+            # A device can belong to several zones. Its membership alone must
+            # not pull every configured subnet into each zone's local view.
+            segments = [item for item in entities if item.get("kind") == "network_segment"]
+            if segments and not any(self._touches_current_scope(item) for item in segments):
+                return None
         if not any(self._touches_current_scope(item) for item in entities):
             return None
         return tuple(self._map_endpoint(item) for item in entities)
