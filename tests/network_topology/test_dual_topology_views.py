@@ -56,6 +56,36 @@ async def test_logical_default_preserves_configured_subnets_and_hides_physical_a
 
 
 @pytest.mark.asyncio
+async def test_configured_direct_network_is_connected_without_claiming_runtime_or_policy():
+    _, graph = _view_graph()
+    device = next(item for item in graph['entities'] if item['kind'] == 'device')
+    segment = next(item for item in graph['entities'] if item['kind'] == 'network_segment' and item['name'] == '10.1.0.0/24')
+    graph['relations'].append({
+        'id': 'gateway-evidence', 'relation_type': 'gateway_for', 'layer': 'service',
+        'direction': 'bidirectional', 'owner_scope_id': segment['scope_id'],
+        'endpoints': [{'ref_type': 'entity', 'ref_id': device['id']}, {'ref_type': 'entity', 'ref_id': segment['id']}],
+        'attributes': {}, 'member_relation_ids': ['gateway-evidence'], 'provenance': [],
+        'configured_state': 'present', 'operational_state': 'up',
+    })
+    original = deepcopy(graph)
+    child = await scoped_view(_authority(), {**_request(segment['scope_id']), 'layers': []},
+        repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
+    direct = [edge for edge in child['edges'] if edge.get('attributes', {}).get('protocol') == 'connected']
+    assert len(direct) == 1
+    assert direct[0]['relation_type'] == 'l3_connectivity'
+    assert direct[0]['layer'] == 'l3'
+    assert direct[0]['state_summary']['operational'] == {'unknown': 1}
+    assert graph == original
+    validate_contract({'code': 0, 'data': child}, 'aioe.network-topology.api/view-response/v1')
+
+    # A gateway assignment without a matching configured interface network is not connectivity.
+    device['attributes']['interfaces'][0]['addresses'] = ['10.2.0.1/24']
+    absent = await scoped_view(_authority(), {**_request(segment['scope_id']), 'layers': []},
+        repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
+    assert not any(edge.get('attributes', {}).get('protocol') == 'connected' for edge in absent['edges'])
+
+
+@pytest.mark.asyncio
 async def test_view_type_is_part_of_cache_identity():
     _, graph = _view_graph()
     repository, cache = MemoryRepository(_document(graph=graph)), MemoryCache()

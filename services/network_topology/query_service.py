@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import json
+import ipaddress
 from typing import Any, Protocol
 
 from tortoise.transactions import in_transaction
@@ -335,10 +336,49 @@ def _graph_inputs(graph, view_type=None):
     )
     relations = source.get("relations", ())
     if view_type == "logical":
-        relations = [item for item in relations if item.get("layer") != "physical"
-                     and item.get("relation_type") not in {"gateway_for", "security_boundary"}]
+        entities = {item["id"]: item for item in source.get("entities", ())}
+        logical = []
+        for item in relations:
+            if item.get("layer") == "physical" or item.get("relation_type") == "security_boundary":
+                continue
+            if item.get("relation_type") == "gateway_for":
+                item = _configured_network_relation(item, entities)
+                if item is None:
+                    continue
+            logical.append(item)
+        relations = logical
     relations = RelationshipResult(tuple(deepcopy(relations)), ())
     return tree, relations
+
+
+def _configured_network_relation(relation, entities):
+    """Project a configured local subnet, never gateway ownership alone or live reachability."""
+    if relation.get("configured_state") != "present":
+        return None
+    endpoints = [entities.get(endpoint.get("ref_id"), {}) for endpoint in relation.get("endpoints", ())]
+    device = next((item for item in endpoints if item.get("kind") == "device"), None)
+    segment = next((item for item in endpoints if item.get("kind") == "network_segment"), None)
+    if device is None or segment is None:
+        return None
+    prefixes = segment.get("attributes", {}).get("network_prefixes", ())
+    networks = set()
+    for prefix in prefixes:
+        try:
+            networks.add(ipaddress.ip_network(prefix, strict=False))
+        except (ValueError, TypeError):
+            continue
+    matched = False
+    for interface in device.get("attributes", {}).get("interfaces", ()):
+        for address in interface.get("addresses", ()):
+            try:
+                matched |= ipaddress.ip_interface(address).network in networks
+            except (ValueError, TypeError):
+                continue
+    if not matched:
+        return None
+    return {**deepcopy(relation), "relation_type": "l3_connectivity", "layer": "l3",
+            "direction": "bidirectional", "attributes": {"protocol": "connected"},
+            "operational_state": "unknown"}
 
 
 def _evidence_summary(graph, view_type):
