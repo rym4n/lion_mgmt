@@ -36,6 +36,7 @@ from services.network_topology.overflow import (
 from services.network_topology.projection import project_scope, search_canonical
 from services.network_topology.relationships import RelationshipResult
 from services.network_topology.scope_tree import ScopeTreeResult
+from services.network_topology.logical_view import logical_objects
 
 
 VIEW_REQUEST = "aioe.network-topology.api/view-request/v1"
@@ -269,6 +270,17 @@ def _project_document(document, payload, bucket):
         nodes, edges, continuation = _bucket_page(
             tree, relations, payload, bucket, projection.direct_item_total
         )
+    api_nodes = [_api_node(item) for item in nodes]
+    if payload['view_type'] == 'logical':
+        parents = {scope['id']: scope.get('parent_scope_id') for scope in tree.scopes}
+        for node in api_nodes:
+            if node['projection_type'] != 'scope_ref':
+                continue
+            scope_id = node['target_id']
+            node['can_drill'] = any(
+                entity['scope_id'] == scope_id or scope_id in entity.get('scope_memberships', ())
+                for entity in tree.entities
+            ) or any(parent == scope_id for parent in parents.values())
     data = {
         "view_type": payload["view_type"],
         **_evidence_summary(document.graph, payload["view_type"]),
@@ -276,7 +288,7 @@ def _project_document(document, payload, bucket):
         "breadcrumbs": [
             _api_breadcrumb(item) for item in projection.breadcrumbs[:-1]
         ],
-        "nodes": [_api_node(item) for item in nodes],
+        "nodes": api_nodes,
         "edges": [_api_edge(item) for item in edges],
         "scope_layout_revision": int(
             document.scope_layout_revisions.get(payload["scope_id"], 0)
@@ -346,7 +358,7 @@ def _graph_inputs(graph, view_type=None):
                 if item is None:
                     continue
             logical.append(item)
-        relations = logical
+        tree, relations = logical_objects(tree, logical)
     relations = RelationshipResult(tuple(deepcopy(relations)), ())
     return tree, relations
 
@@ -440,9 +452,16 @@ def _api_node(value):
             "next_hop_ip", "route_prefixes", "interface_names", "route_count",
             "location", "interfaces", "observed_identity",
             "vlan_id", "vni", "context_id", "vrf_id", "network_context_type",
+            "related_devices",
         ) if key in attributes
     }
     if safe_attributes:
+        if "related_devices" in safe_attributes:
+            safe_attributes["related_devices"] = [
+                {**{key: item[key] for key in ("name", "management_ip", "vendor", "model") if key in item},
+                 "interfaces": [_safe_interface(interface) for interface in item.get("interfaces", ())]}
+                for item in safe_attributes["related_devices"]
+            ]
         if "interfaces" in safe_attributes:
             safe_attributes["interfaces"] = [_safe_interface(item) for item in safe_attributes["interfaces"]]
         if "location" in safe_attributes:

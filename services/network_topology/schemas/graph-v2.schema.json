@@ -83,7 +83,8 @@
         "virtual_addresses": {"type": "array", "items": {"type": "string"}},
         "protocols": {"type": "array", "items": {"type": "string"}},
         "ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
-        "boundary_type": {"type": "string"}
+        "boundary_type": {"type": "string"},
+        "related_devices": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string"}, "management_ip": {"type": "string"}, "vendor": {"type": "string"}, "model": {"type": "string"}, "interfaces": {"type": "array", "items": {"$ref": "#/$defs/interfacePresentation"}}}}}
       }
     },
     "serviceBoundaryAttributes": {

@@ -208,7 +208,7 @@ async def test_orm_view_reads_current_and_historical_published_graph(
     monkeypatch, version_id, revision, count
 ):
     calls = _persisted_query(monkeypatch)
-    payload = {**_request(), "version_id": version_id}
+    payload = {**_request(), "version_id": version_id, "view_type": "physical"}
 
     data = await scoped_view(_authority(), payload, cache=MemoryCache())
 
@@ -246,7 +246,7 @@ async def test_orm_view_keeps_legacy_documents_out_of_v2_query(monkeypatch, vers
 async def test_view_matches_frozen_schema_and_uses_tenant_scoped_repository():
     repository = MemoryRepository()
 
-    data = await scoped_view(_authority(), _request(), repository=repository)
+    data = await scoped_view(_authority(), {**_request(), "view_type": "physical"}, repository=repository)
 
     response = {"code": 0, "data": data}
     validate_contract(response, VIEW_RESPONSE)
@@ -267,7 +267,7 @@ async def test_view_matches_frozen_schema_and_uses_tenant_scoped_repository():
         "continuation_token",
     }
     assert repository.calls == [(_authority(), None)]
-    assert data["scope_layout_revision"] == 3
+    assert data["scope_layout_revision"] == 0  # Physical views use the root layout.
     assert data["layout_set_revision"] == 4
     assert data["nodes"][0] == {
         "id": "entity:router-0",
@@ -288,7 +288,7 @@ async def test_view_preserves_entity_kind_without_exposing_canonical_attributes(
     graph['entities'][0]['kind'] = entity_kind
     graph['entities'][0]['attributes'] = {'password': 'must-not-leak'}
 
-    data = await scoped_view(_authority(), _request(),
+    data = await scoped_view(_authority(), {**_request(), 'view_type': 'physical' if entity_kind == 'device' else 'logical'},
                              repository=MemoryRepository(_document(graph=graph)),
                              cache=MemoryCache())
 
@@ -313,8 +313,11 @@ async def test_historical_view_uses_versions_published_layout_set():
 
 @pytest.mark.asyncio
 async def test_view_continuation_pages_a_stable_bucket():
+    graph = _graph(205)
+    for entity in graph['entities']:
+        entity.update(kind='network_segment', role='connected_network')
     repository = MemoryRepository(
-        _document(graph=_graph(205), version_id="version-205")
+        _document(graph=graph, version_id="version-205")
     )
     first = await scoped_view(_authority(), _request(), repository=repository)
     assert first["total_direct_items"] == 205

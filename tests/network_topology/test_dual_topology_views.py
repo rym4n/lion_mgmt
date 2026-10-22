@@ -46,7 +46,7 @@ async def test_logical_default_preserves_configured_subnets_and_hides_physical_a
     data = await scoped_view(_authority(), {**_request(graph['root_scope_id']), 'layers': []},
         repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
     assert data['view_type'] == 'logical'
-    assert any(node.get('entity_kind') == 'device' for node in data['nodes'])
+    assert not any(node.get('entity_kind') == 'device' for node in data['nodes'])
     # The Trust child keeps its configured network even with no reachability evidence.
     trust = next(scope['id'] for scope in graph['scopes'] if scope['name'] == 'Trust')
     child = await scoped_view(_authority(), {**_request(trust), 'layers': []},
@@ -71,10 +71,11 @@ async def test_configured_direct_network_is_connected_without_claiming_runtime_o
     child = await scoped_view(_authority(), {**_request(segment['scope_id']), 'layers': []},
         repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
     direct = [edge for edge in child['edges'] if edge.get('attributes', {}).get('protocol') == 'connected']
-    assert len(direct) == 1
-    assert direct[0]['relation_type'] == 'l3_connectivity'
-    assert direct[0]['layer'] == 'l3'
-    assert direct[0]['state_summary']['operational'] == {'unknown': 1}
+    assert not direct
+    network = next(node for node in child['nodes'] if node['entity_kind'] == 'network_segment')
+    owner = network['attributes']['related_devices'][0]
+    assert owner['interfaces'][0]['addresses'] == ['10.1.0.1/24']
+    assert owner['interfaces'][0]['operational_state'] == 'unknown'
     assert graph == original
     validate_contract({'code': 0, 'data': child}, 'aioe.network-topology.api/view-response/v1')
 
@@ -105,12 +106,12 @@ async def test_shared_device_does_not_pull_other_zone_direct_networks_into_scope
     child = await scoped_view(_authority(), {**_request(scope_id), 'layers': []},
         repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
     assert {node['label'] for node in child['nodes'] if node.get('entity_kind') == 'network_segment'} == {prefix}
-    assert len(child['edges']) == 1
-    assert child['edges'][0]['attributes']['protocol'] == 'connected'
+    assert not child['edges']
+    assert child['nodes'][0]['attributes']['related_devices']
 
     root = await scoped_view(_authority(), {**_request(graph['root_scope_id']), 'layers': []},
         repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
-    assert len(root['edges']) == 2
+    assert not root['edges']
     assert {node['label'] for node in root['nodes'] if node['projection_type'] == 'scope_ref'} == {'Trust', 'WAN'}
     assert graph == original
 

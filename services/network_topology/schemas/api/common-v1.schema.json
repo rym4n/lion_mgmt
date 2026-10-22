@@ -164,6 +164,7 @@
         "entity_kind": {"enum": ["device", "network_segment", "external", "service_boundary"]},
         "role": {"type": "string"}, "importance": {"enum": ["critical", "important", "normal"]},
         "scope_type": {"type": "string"},
+        "can_drill": {"type": "boolean"},
         "attributes": {"$ref": "https://schemas.aioe.local/aioe.network-topology.graph/v2#/$defs/entityAttributes"},
         "summary": {"$ref": "https://schemas.aioe.local/aioe.network-topology.graph/v2#/$defs/scope/properties/summary"}
       }

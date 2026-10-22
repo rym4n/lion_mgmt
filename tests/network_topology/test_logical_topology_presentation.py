@@ -134,11 +134,11 @@ async def test_empty_layers_is_logical_default_without_gateway_star_or_empty_sco
     request = {**_request(ROOT_SCOPE_ID), 'layers': []}
     data = await scoped_view(_authority(), request,
         repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
-    assert {node['target_id'] for node in data['nodes']} == {'device:fw', 'network:orphan', child}
+    assert {node['target_id'] for node in data['nodes']} == {'network:orphan', child}
     assert not data['edges']
     child_data = await scoped_view(_authority(), {**request, 'scope_id': child},
         repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
-    assert {node['target_id'] for node in child_data['nodes']} == {'device:fw', 'network:in-zone'}
+    assert {node['target_id'] for node in child_data['nodes']} == {'network:in-zone'}
     request['layers'] = ['service']
     data = await scoped_view(_authority(), request,
         repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
