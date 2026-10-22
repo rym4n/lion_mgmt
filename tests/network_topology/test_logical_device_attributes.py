@@ -43,6 +43,83 @@ async def test_logical_route_joins_egress_subnet_and_next_hop_with_device_as_att
 
 
 @pytest.mark.asyncio
+async def test_root_logical_view_connects_zones_when_a_configured_route_matches_one_target_segment():
+    facts = _zone_facts()
+    facts['interfaces'][1]['attributes']['canonical_name'] = 'eth1'
+    facts['segments'].append({
+        'id': 'network:trust-destination', 'fact_family': 'network',
+        'attributes': {
+            'canonical_cidr': '2001:db8::/64', 'network_domain_id': 'lab',
+            'device_id': 'device:fw', 'context_id': 'context:trust',
+        }, 'provenance_ids': [],
+    })
+    facts['routes'] = [{
+        'id': 'route:wan-to-trust', 'attributes': {
+            'route_type': 'static', 'prefix': '2001:db8::/64', 'vrf_id': 'business',
+            'next_hop_address': '2000::2', 'interface_id': 'interface:b', 'state': 'unknown',
+        }, 'provenance_ids': [],
+    }]
+    graph = build_graph(facts, _resolution('device:fw'), _profile(), profile_revision=1, collection={})
+    root = await scoped_view(_authority(), {**_request(graph['root_scope_id']), 'layers': []},
+        repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
+
+    assert not any(node.get('entity_kind') == 'device' for node in root['nodes'])
+    zones = {node['label']: node['id'] for node in root['nodes'] if node['projection_type'] == 'scope_ref'}
+    edge, = root['edges']
+    assert {edge['source'], edge['target']} == {zones['Trust'], zones['WAN']}
+    assert edge['relation_type'] == 'configured_route'
+    assert edge['direction'] == 'unidirectional'
+    assert edge['attributes']['route_prefixes'] == ['2001:db8::/64']
+    assert edge['attributes']['next_hop_ip'] == '2000::2'
+
+
+@pytest.mark.asyncio
+async def test_root_logical_view_keeps_default_route_as_zone_to_next_hop_path():
+    graph = _graph()
+    root = await scoped_view(_authority(), {**_request(graph['root_scope_id']), 'layers': []},
+        repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
+
+    assert not any(node.get('entity_kind') == 'device' for node in root['nodes'])
+    trust = next(node for node in root['nodes'] if node['projection_type'] == 'scope_ref'
+        and node['label'] == 'Trust')
+    edge, = root['edges']
+    next_hop = next(node for node in root['nodes'] if node['id'] == edge['target'])
+    assert edge['source'] == trust['id']
+    assert next_hop.get('entity_kind') == 'external'
+    assert next_hop['label'] == '10.1.0.254'
+    assert edge['attributes']['route_prefixes'] == ['0.0.0.0/0']
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_route_prefix_does_not_connect_multiple_security_zones():
+    facts = _zone_facts()
+    facts['interfaces'][1]['attributes']['canonical_name'] = 'eth1'
+    facts['segments'].extend([
+        {'id': 'network:trust-target', 'fact_family': 'network', 'attributes': {
+            'canonical_cidr': '2001:db8::/64', 'network_domain_id': 'lab',
+            'device_id': 'device:fw', 'context_id': 'context:trust'}, 'provenance_ids': []},
+        {'id': 'network:wan-target', 'fact_family': 'network', 'attributes': {
+            'canonical_cidr': '2001:db8::/64', 'network_domain_id': 'lab',
+            'device_id': 'device:fw', 'context_id': 'context:wan'}, 'provenance_ids': []},
+    ])
+    facts['routes'] = [{'id': 'route:ambiguous', 'attributes': {
+        'route_type': 'static', 'prefix': '2001:db8::/64', 'vrf_id': 'business',
+        'next_hop_address': '2000::2', 'interface_id': 'interface:b', 'state': 'unknown'},
+        'provenance_ids': []}]
+    graph = build_graph(facts, _resolution('device:fw'), _profile(), profile_revision=1, collection={})
+    root = await scoped_view(_authority(), {**_request(graph['root_scope_id']), 'layers': []},
+        repository=MemoryRepository(_document(graph=graph)), cache=MemoryCache())
+
+    zones = {node['label']: node['id'] for node in root['nodes'] if node['projection_type'] == 'scope_ref'}
+    edge, = root['edges']
+    assert edge['source'] == zones['WAN']
+    assert edge['target'] not in set(zones.values())
+    target = next(node for node in root['nodes'] if node['id'] == edge['target'])
+    assert target['label'] == '2001:db8::/64'
+    assert target['role'] == 'configured_route_destination'
+
+
+@pytest.mark.asyncio
 async def test_scope_carries_device_properties_and_only_real_logical_content_can_drill():
     graph = _graph()
     data = await scoped_view(_authority(), {**_request(graph['root_scope_id']), 'layers': []},

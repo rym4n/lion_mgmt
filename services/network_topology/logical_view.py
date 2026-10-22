@@ -1,6 +1,7 @@
 """Present logical objects and their ownership without physical device vertices."""
 from copy import deepcopy
 from ipaddress import ip_interface, ip_network
+from urllib.parse import quote
 
 from services.network_topology.scope_tree import ScopeTreeResult
 
@@ -82,10 +83,82 @@ def logical_objects(tree, relations):
         attach(boundary, device, [i for i in device.get('attributes', {}).get('interfaces', ()) if i.get('name') in names])
         if len(candidates) != 1:
             continue
-        segment, _ = candidates[0]
-        for endpoint in endpoints:
-            if endpoint.get('ref_id') == device['id']:
-                endpoint['ref_id'] = segment['id']
-        output.append(relation)
+        source, _ = candidates[0]
+        prefixes = []
+        for prefix in relation.get('attributes', {}).get('route_prefixes', ()):
+            try:
+                prefixes.append(ip_network(prefix, strict=False))
+            except ValueError:
+                continue
+        projected_routes = []
+        for route in prefixes:
+            if route.prefixlen == 0:
+                # A default route has no canonical destination subnet. Retain
+                # the configured next-hop as the explicit external boundary.
+                boundary['scope_id'] = tree.root_scope_id
+                projected_routes.append((boundary, str(route)))
+                continue
+
+            candidates = []
+            for segment in logical.values():
+                if segment['kind'] != 'network_segment' or segment['id'] == source['id']:
+                    continue
+                networks = []
+                for prefix in segment.get('attributes', {}).get('network_prefixes', ()):
+                    try:
+                        networks.append(ip_network(prefix, strict=False))
+                    except ValueError:
+                        continue
+                if any(route.version == network.version and route.overlaps(network)
+                       for network in networks):
+                    candidates.append(segment)
+
+            if len(candidates) == 1:
+                target = candidates[0]
+            else:
+                # If the destination prefix is missing or maps to overlapping
+                # networks in multiple scopes, show the configured prefix as a
+                # boundary instead of asserting connectivity to an arbitrary
+                # or multiple security domains.
+                target_id = f"route-target:{quote(relation['id'], safe='')}:{quote(str(route), safe='')}"
+                target = logical.get(target_id)
+                if target is None:
+                    target = {
+                        'id': target_id,
+                        'kind': 'external',
+                        'name': str(route),
+                        'role': 'configured_route_destination',
+                        'importance': 'normal',
+                        'scope_id': tree.root_scope_id,
+                        'scope_memberships': [],
+                        'attributes': {
+                            'network_prefixes': [str(route)],
+                            'route_prefixes': [str(route)],
+                        },
+                    }
+                    attach(target, device, [
+                        interface for interface in device.get('attributes', {}).get('interfaces', ())
+                        if interface.get('name') in names
+                    ])
+                    logical[target_id] = target
+            projected_routes.append((target, str(route)))
+
+        # Preserve older route records that have a real next hop but no
+        # parseable destination prefix.
+        if not projected_routes:
+            boundary['scope_id'] = tree.root_scope_id
+            projected_routes.append((boundary, None))
+
+        for target, prefix in projected_routes:
+            projected = deepcopy(relation)
+            projected['endpoints'] = [
+                {'ref_id': source['id'] if endpoint.get('ref_id') == device['id']
+                 else target['id'] if endpoint.get('ref_id') == boundary['id']
+                 else endpoint.get('ref_id')}
+                for endpoint in endpoints
+            ]
+            if prefix is not None:
+                projected['attributes']['route_prefixes'] = [prefix]
+            output.append(projected)
     return ScopeTreeResult(tree.root_scope_id, tuple(scopes), tuple(logical.values()),
                            tree.unresolved, tree.excluded_fact_ids, tree.collapsed_fact_ids), output
