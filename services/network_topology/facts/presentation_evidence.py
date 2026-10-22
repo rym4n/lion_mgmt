@@ -108,7 +108,7 @@ def _supports_field(value, key, expected):
     if key in aliases:
         if isinstance(value, dict):
             if key in {'interface_type', 'media_type', 'description'}:
-                return any((_key(child) in {_key(expected), _key(expected) + 'if'} if key == 'interface_type'
+                return any((_supports_interface_type(child, expected) if key == 'interface_type'
                             else _contains(child, expected)) for field, child in value.items()
                            if _key(field) in aliases[key] and not isinstance(child, (dict, list))) or any(
                                _supports_field(child, key, expected) for child in value.values()
@@ -122,7 +122,7 @@ def _supports_field(value, key, expected):
             return any(_supports_field(child, key, expected) for child in value)
         if isinstance(value, str):
             if key in {'interface_type', 'media_type', 'description'}:
-                return _contains(value, expected)
+                return _supports_interface_type(value, expected) if key == 'interface_type' else _contains(value, expected)
             expected_values = expected if isinstance(expected, list) else [expected]
             names = '|'.join(re.escape(alias) for alias in aliases[key])
             return all(re.search(r'\b(?:' + names + r')\s*[:= ]\s*' + re.escape(str(item)) + r'(?!\d)', value, re.I)
@@ -144,6 +144,21 @@ def _contains(value, expected):
     if isinstance(value, str):
         return bool(re.search(r'(?<![\w.-])' + re.escape(str(expected)) + r'(?![\w.-])', value, re.I))
     return value == expected
+
+
+def _supports_interface_type(value, expected):
+    source = str(value).strip().lower()
+    target = str(expected).strip().lower()
+    if source == target:
+        return True
+    aliases = {
+        'physicalif': {'physical'},
+        'channelif': {'aggregate', 'aggregation', 'lag'},
+        'aggrif': {'aggregate', 'aggregation', 'lag'},
+        'vlanif': {'vlan', 'logical'},
+        'vpntun': {'tunnel'},
+    }
+    return target in aliases.get(source, ())
 
 
 def _supports_speed(value, expected):

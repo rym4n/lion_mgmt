@@ -413,3 +413,16 @@ def test_interface_numeric_metadata_requires_its_own_field(field, value, record)
 def test_physical_brief_ports_cannot_reverse_the_observed_tuple():
     from services.network_topology.facts.physical_evidence import _text
     assert not _text('Ethernet1/1 switch-b GE0/0/1 120', 'GE0/0/1', 'Ethernet1/1', {'hostname': 'switch-b'})
+
+
+@pytest.mark.parametrize('source,target,accepted', [
+    ('PHYSICALIF', 'physical', True), ('CHANNELIF', 'aggregate', True),
+    ('CHANNELIF', 'lag', True), ('AGGRIF', 'aggregation', True),
+    ('VLANIF', 'vlan', True), ('VLANIF', 'logical', True),
+    ('VPNTUN', 'tunnel', True), ('CHANNELIF', 'physical', False),
+    ('VLANIF', 'aggregate', False), ('OTHERIF', 'logical', False),
+])
+def test_interface_type_uses_only_explicit_vendor_aliases(source, target, accepted):
+    from services.network_topology.facts.presentation_evidence import supports_metadata
+    assert supports_metadata('interfaces', {'raw_name': 'eth3', 'interface_type': target},
+                             [{'name': 'eth3', 'ifType': source}]) is accepted
